@@ -1,0 +1,37 @@
+{
+  "name": "@ky/admin-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ant-design/icons": "latest",
+    "@tanstack/react-query": "^5.0.0",
+    "@ky/admin-core": "workspace:*",
+    "@ky/plugin-access-management": "workspace:*",
+    "@ky/plugin-ai-configuration": "workspace:*",
+    "@ky/plugin-audit-management": "workspace:*",
+    "@ky/plugin-identity-management": "workspace:*",
+    "@ky/plugin-notification": "workspace:*",
+    "@ky/plugin-organization-management": "workspace:*",
+    "@ky/plugin-system-settings": "workspace:*",
+    "antd": "^6.0.0",
+    "dayjs": "latest",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0",
+    "zustand": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^7.0.0"
+  }
+}

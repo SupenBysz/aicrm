@@ -1,0 +1,32 @@
+{
+  "name": "@ky/plugin-system-settings",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ky/admin-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@ant-design/icons": "^6.0.0",
+    "@tanstack/react-query": "^5.0.0",
+    "antd": "^6.0.0",
+    "react": "^19.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "devDependencies": {
+    "@ant-design/icons": "^6.0.0",
+    "@tanstack/react-query": "^5.0.0",
+    "@types/react": "^19.0.0",
+    "antd": "^6.0.0",
+    "react": "^19.0.0",
+    "react-router-dom": "^7.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output (frontend dist + bundled service binaries)
+dist/
+.turbo/
+
+# Compiled Go binaries (named after the service dir; source lives in internal/server/)
+/server
+/services/*/server
+
+# Logs & temp
+*.log
+*.tmp
+tmp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local-only tooling config
+.claude/settings.local.json
