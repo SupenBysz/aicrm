@@ -25,6 +25,12 @@
   --admin-toolbar-fg: rgba(82, 61, 34, 0.8);
   --admin-toolbar-hover: rgba(212, 154, 61, 0.22);
   --admin-toolbar-border: rgba(221, 182, 113, 0.24);
+  --admin-segmented-bg: var(--admin-toolbar-bg);
+  --admin-segmented-border: var(--admin-toolbar-border);
+  --admin-segmented-text: var(--admin-toolbar-fg);
+  --admin-segmented-selected-bg: rgba(255, 252, 247, 0.98);
+  --admin-segmented-selected-text: #7a541b;
+  --admin-segmented-hover-bg: rgba(212, 154, 61, 0.14);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -52,6 +58,12 @@
     --admin-toolbar-fg: rgba(255, 255, 255, 0.72);
     --admin-toolbar-hover: rgba(255, 255, 255, 0.12);
     --admin-toolbar-border: rgba(255, 255, 255, 0.1);
+    --admin-segmented-bg: var(--admin-toolbar-bg);
+    --admin-segmented-border: var(--admin-toolbar-border);
+    --admin-segmented-text: var(--admin-toolbar-fg);
+    --admin-segmented-selected-bg: rgba(255, 255, 255, 0.14);
+    --admin-segmented-selected-text: #ffd47d;
+    --admin-segmented-hover-bg: rgba(255, 255, 255, 0.1);
   }
 }
 
@@ -80,6 +92,12 @@
   --admin-toolbar-fg: rgba(82, 61, 34, 0.8);
   --admin-toolbar-hover: rgba(212, 154, 61, 0.22);
   --admin-toolbar-border: rgba(221, 182, 113, 0.24);
+  --admin-segmented-bg: var(--admin-toolbar-bg);
+  --admin-segmented-border: var(--admin-toolbar-border);
+  --admin-segmented-text: var(--admin-toolbar-fg);
+  --admin-segmented-selected-bg: rgba(255, 252, 247, 0.98);
+  --admin-segmented-selected-text: #7a541b;
+  --admin-segmented-hover-bg: rgba(212, 154, 61, 0.14);
 }
 
 :root[data-admin-theme="dark"] {
@@ -107,6 +125,12 @@
   --admin-toolbar-fg: rgba(255, 255, 255, 0.72);
   --admin-toolbar-hover: rgba(255, 255, 255, 0.12);
   --admin-toolbar-border: rgba(255, 255, 255, 0.1);
+  --admin-segmented-bg: var(--admin-toolbar-bg);
+  --admin-segmented-border: var(--admin-toolbar-border);
+  --admin-segmented-text: var(--admin-toolbar-fg);
+  --admin-segmented-selected-bg: rgba(255, 255, 255, 0.14);
+  --admin-segmented-selected-text: #ffd47d;
+  --admin-segmented-hover-bg: rgba(255, 255, 255, 0.1);
 }
 
 * {
@@ -213,8 +237,8 @@ a {
 }
 
 .app-mode-segmented.ant-segmented {
-  background: var(--admin-toolbar-bg);
-  border: 1px solid var(--admin-toolbar-border);
+  background: var(--admin-segmented-bg) !important;
+  border: 1px solid var(--admin-segmented-border) !important;
   border-radius: 999px;
   height: 36px;
   padding: 0;
@@ -228,7 +252,7 @@ a {
 }
 
 .app-mode-segmented .ant-segmented-item-label {
-  color: var(--admin-toolbar-fg);
+  color: var(--admin-segmented-text) !important;
   font-size: 13px;
   font-weight: 600;
   line-height: 34px;
@@ -236,12 +260,21 @@ a {
   padding-inline: 16px;
 }
 
+.app-mode-segmented .ant-segmented-item:not(.ant-segmented-item-selected):hover {
+  background: var(--admin-segmented-hover-bg);
+}
+
+.app-mode-segmented .ant-segmented-item-selected {
+  background: var(--admin-segmented-selected-bg) !important;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--admin-accent) 14%, transparent) !important;
+}
+
 .app-mode-segmented .ant-segmented-item-selected .ant-segmented-item-label {
-  color: var(--admin-accent);
+  color: var(--admin-segmented-selected-text) !important;
 }
 
 .app-mode-segmented .ant-segmented-thumb {
-  background: var(--admin-surface-solid);
+  background: var(--admin-segmented-selected-bg) !important;
   box-shadow: 0 4px 12px color-mix(in srgb, var(--admin-accent) 14%, transparent);
   height: 34px;
   top: 0;
@@ -523,7 +556,7 @@ a {
   overflow: hidden;
   padding: 0;
   position: fixed;
-  top: calc(var(--admin-header-height) + 8px);
+  top: calc(var(--admin-header-height) + 13px);
   white-space: nowrap;
   width: fit-content;
   z-index: 901;
@@ -1591,27 +1624,77 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   margin: 14px 20px 0;
 }
 
-.invitation-status-segmented.ant-segmented,
-.list-status-segmented.ant-segmented {
-  background: #f3f6fb;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented).ant-segmented {
+  background: var(--admin-segmented-bg) !important;
+  border: 1px solid var(--admin-segmented-border) !important;
   border-radius: 999px;
-  padding: 4px;
+  height: 38px;
+  padding: 0;
+}
+
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented) .ant-segmented-item,
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented) .ant-segmented-thumb,
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented) .ant-segmented-item-selected {
+  border-radius: 999px !important;
+  min-height: 36px;
 }
 
 .invitation-status-segmented .ant-segmented-item,
+.invitation-status-segmented .ant-segmented-item::after,
+.invitation-status-segmented .ant-segmented-item-label,
 .invitation-status-segmented .ant-segmented-thumb,
 .invitation-status-segmented .ant-segmented-item-selected,
+.invitation-status-segmented .ant-segmented-item-selected::after,
 .list-status-segmented .ant-segmented-item,
+.list-status-segmented .ant-segmented-item::after,
+.list-status-segmented .ant-segmented-item-label,
 .list-status-segmented .ant-segmented-thumb,
-.list-status-segmented .ant-segmented-item-selected {
-  border-radius: 999px;
+.list-status-segmented .ant-segmented-item-selected,
+.list-status-segmented .ant-segmented-item-selected::after,
+.workspace-selection-segmented .ant-segmented-item,
+.workspace-selection-segmented .ant-segmented-item::after,
+.workspace-selection-segmented .ant-segmented-item-label,
+.workspace-selection-segmented .ant-segmented-thumb,
+.workspace-selection-segmented .ant-segmented-item-selected,
+.workspace-selection-segmented .ant-segmented-item-selected::after {
+  border-radius: 999px !important;
 }
 
 .invitation-status-segmented .ant-segmented-item-label,
-.list-status-segmented .ant-segmented-item-label {
-  min-height: 28px;
+.list-status-segmented .ant-segmented-item-label,
+.workspace-selection-segmented .ant-segmented-item-label {
+  line-height: 36px !important;
+  min-height: 36px !important;
+}
+
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented) .ant-segmented-item-label {
+  color: var(--admin-segmented-text) !important;
+  line-height: 36px;
+  min-height: 36px;
   padding-inline: 14px;
+}
+
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented)
+  .ant-segmented-item:not(.ant-segmented-item-selected):hover {
+  background: var(--admin-segmented-hover-bg);
+}
+
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented) .ant-segmented-item-selected {
+  background: var(--admin-segmented-selected-bg) !important;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--admin-accent) 12%, transparent) !important;
+}
+
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented)
+  .ant-segmented-item-selected
+  .ant-segmented-item-label {
+  color: var(--admin-segmented-selected-text) !important;
+}
+
+:where(.invitation-status-segmented, .list-status-segmented, .workspace-selection-segmented) .ant-segmented-thumb {
+  background: var(--admin-segmented-selected-bg) !important;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--admin-accent) 12%, transparent);
+  height: 36px;
+  top: 0;
 }
 
 .workspace-selection-body {
@@ -2267,7 +2350,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   .workspace-breadcrumb {
     left: 12px;
     max-width: calc(100vw - 24px);
-    top: calc(var(--admin-header-height) + 8px);
+    top: calc(var(--admin-header-height) + 13px);
   }
 
   .brand-subtitle {
