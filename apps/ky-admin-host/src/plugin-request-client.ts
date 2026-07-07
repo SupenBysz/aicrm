@@ -1,5 +1,6 @@
 import type { RequestClient, RequestOptions, WorkspaceIdentity } from "@ky/admin-core";
 import { ADMIN_SESSION_KEY } from "./app-store";
+import { desktopClientHeaders } from "./desktop-client";
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -36,6 +37,7 @@ export class HostRequestClient implements RequestClient {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "X-KY-Request-Id": requestId,
+      ...desktopClientHeaders(),
       ...(options.headers ?? {})
     };
 
@@ -54,7 +56,7 @@ export class HostRequestClient implements RequestClient {
     });
 
     const envelope = await readEnvelope<T>(response, requestId);
-    if (response.status === 401 || envelope.error?.code === "unauthorized") {
+    if (!options.skipAuthRedirect && (response.status === 401 || envelope.error?.code === "unauthorized")) {
       handleSessionExpired();
     }
     if (!response.ok || envelope.error) {

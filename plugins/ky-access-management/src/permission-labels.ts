@@ -23,14 +23,17 @@ export const RESOURCE_LABELS: Record<string, string> = {
   ai_models: "AI 模型",
   ai_providers: "AI 供应商",
   announcements: "公告",
+  app_version: "App 版本",
   audit: "审计日志",
-  data_scopes: "数据范围",
+  basic_info: "基础信息",
   departments: "部门",
   dictionaries: "数据字典",
+  email: "邮件服务",
   enterprises: "企业",
   invitations: "邀请",
   login_logs: "登录日志",
   members: "成员",
+  notification_templates: "通知模板",
   notifications: "通知",
   permissions: "权限",
   profile: "组织资料",
@@ -38,10 +41,12 @@ export const RESOURCE_LABELS: Record<string, string> = {
   qualifications: "资质审核",
   roles: "角色",
   settings: "设置",
+  sms: "短信服务",
+  storage: "对象存储",
   structure: "组织架构",
   teams: "团队",
   users: "用户",
-  workbench: "工作台"
+  workbench: "仪表盘"
 };
 
 export const ACTION_LABELS: Record<string, string> = {
@@ -59,6 +64,7 @@ export const ACTION_LABELS: Record<string, string> = {
   manage_members: "管理成员",
   publish: "发布",
   remove: "移除",
+  reset_password: "重置密码",
   review: "审核",
   rotate_key: "轮换密钥",
   submit: "提交",
@@ -97,16 +103,21 @@ export const RESOURCE_DOMAIN: Record<string, DomainKey> = {
   roles: "iam",
   permissions: "iam",
   access: "iam",
-  data_scopes: "iam",
   ai_configuration: "ai",
   ai_providers: "ai",
   ai_models: "ai",
   ai_model_settings: "ai",
+  storage: "platform",
+  sms: "content",
+  email: "content",
   notifications: "content",
+  notification_templates: "content",
   announcements: "content",
   audit: "platform",
   login_logs: "platform",
   settings: "platform",
+  basic_info: "platform",
+  app_version: "platform",
   dictionaries: "platform",
   workbench: "platform"
 };
@@ -117,4 +128,10 @@ export function label(map: Record<string, string>, value: string): string {
 
 export function resourceDomain(resource: string): DomainKey {
   return RESOURCE_DOMAIN[resource] ?? "platform";
+}
+
+const HIDDEN_PERMISSION_RESOURCES = new Set(["data_scopes"]);
+
+export function isPermissionResourceVisible(resource: string): boolean {
+  return !HIDDEN_PERMISSION_RESOURCES.has(resource);
 }

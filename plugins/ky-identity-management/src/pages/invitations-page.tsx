@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Drawer, Form, Input, Popconfirm, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -7,6 +7,7 @@ import {
   ListPageCard,
   drawerWidths,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   usePermissions,
   writeListQueryState,
@@ -28,6 +29,7 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 };
 
 const STATUS_OPTIONS = [
+  { value: "all", label: "全部" },
   { value: "pending", label: "待接受" },
   { value: "accepted", label: "已接受" },
   { value: "cancelled", label: "已取消" },
@@ -42,6 +44,7 @@ export function InvitationsPage() {
   const queryState = readListQueryState(searchParams);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form] = Form.useForm<CreateInvitationInput>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canInvite = permissions.canAny([
     "platform.members.invite",
@@ -57,9 +60,11 @@ export function InvitationsPage() {
   });
 
   function applyState(next: Partial<ListQueryState>) {
+    setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["invitations"] });
+  const selectedInvitations = (data?.items ?? []).filter((invitation) => selectedRowKeys.includes(invitation.id));
 
   const createMutation = useMutation({
     mutationFn: (values: CreateInvitationInput) =>
@@ -76,6 +81,17 @@ export function InvitationsPage() {
     mutationFn: (id: string) => cancelInvitation(client, id),
     onSuccess: () => {
       void message.success("邀请已取消。");
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+
+  const bulkCancelMutation = useMutation({
+    mutationFn: () =>
+      runBatchRequests(selectedInvitations, (invitation) => cancelInvitation(client, invitation.id), "批量取消邀请失败"),
+    onSuccess: () => {
+      void message.success("邀请已批量取消。");
+      setSelectedRowKeys([]);
       invalidate();
     },
     onError: (error: Error) => message.error(error.message)
@@ -117,7 +133,8 @@ export function InvitationsPage() {
     {
       title: "操作",
       key: "actions",
-      width: 90,
+      className: "table-action-column",
+      width: 180,
       render: (_, record) =>
         canInvite && record.status === "pending" ? (
           <Popconfirm
@@ -138,36 +155,68 @@ export function InvitationsPage() {
     <>
       <ListPageCard
         title="邀请管理"
-        subtitle="向邮箱或手机号发起加入邀请，并跟踪受理状态。"
+        subtitle={
+          selectedRowKeys.length > 0 ? (
+            <Space size={8}>
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+              <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+                清空选择
+              </Button>
+            </Space>
+          ) : (
+            "向邮箱或手机号发起加入邀请，并跟踪受理状态。"
+          )
+        }
+        toolbar={
+          <Segmented
+            className="invitation-status-segmented"
+            options={STATUS_OPTIONS}
+            value={queryState.status ?? "all"}
+            onChange={(value) => applyState({ status: value === "all" ? undefined : String(value), page: 1 })}
+          />
+        }
         extra={
-          canInvite ? (
-            <Button
-              type="primary"
-              onClick={() => {
-                form.resetFields();
-                setDrawerOpen(true);
-              }}
-            >
-              新建邀请
-            </Button>
-          ) : null
+          <Space wrap>
+            {selectedInvitations.length > 0 && canInvite ? (
+              <Popconfirm
+                title={`确认取消选中的 ${selectedInvitations.length} 个邀请？`}
+                okText="取消邀请"
+                cancelText="返回"
+                onConfirm={() => bulkCancelMutation.mutate()}
+              >
+                <Button danger loading={bulkCancelMutation.isPending}>
+                  批量取消
+                </Button>
+              </Popconfirm>
+            ) : null}
+            {canInvite ? (
+              <Button
+                type="primary"
+                onClick={() => {
+                  form.resetFields();
+                  setDrawerOpen(true);
+                }}
+              >
+                新建邀请
+              </Button>
+            ) : null}
+          </Space>
         }
       >
-        <Space style={{ padding: 16 }} wrap>
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 140 }}
-            options={STATUS_OPTIONS}
-            value={queryState.status}
-            onChange={(value) => applyState({ status: value || undefined, page: 1 })}
-          />
-        </Space>
         <Table<Invitation>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
           loading={isFetching}
+          rowSelection={
+            canInvite
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String)),
+                  getCheckboxProps: (record) => ({ disabled: record.status !== "pending" })
+                }
+              : undefined
+          }
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,

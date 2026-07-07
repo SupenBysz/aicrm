@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Alert, Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -7,6 +7,7 @@ import {
   ListPageCard,
   drawerWidths,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   usePermissions,
   writeListQueryState,
@@ -50,6 +51,7 @@ export function ModelsPage() {
   const [testPrompt, setTestPrompt] = useState(DEFAULT_TEST_PROMPT);
   const [testResult, setTestResult] = useState<ModelTestResult | null>(null);
   const [form] = Form.useForm<ModelInput>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canCreate = permissions.can("platform.ai_models.create");
   const canUpdate = permissions.can("platform.ai_models.update");
@@ -79,9 +81,16 @@ export function ModelsPage() {
   });
 
   function applyState(next: Partial<ListQueryState>) {
+    setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["ai-models"] });
+  const selectedModels = useMemo(
+    () => (data?.items ?? []).filter((model) => selectedRowKeys.includes(model.id)),
+    [data?.items, selectedRowKeys]
+  );
+  const selectedEnabledModels = selectedModels.filter((model) => model.status === "enabled");
+  const selectedDisabledModels = selectedModels.filter((model) => model.status === "disabled");
 
   const saveMutation = useMutation({
     mutationFn: (values: ModelInput) => (editing ? updateModel(client, editing.id, values) : createModel(client, values)),
@@ -97,6 +106,18 @@ export function ModelsPage() {
     mutationFn: ({ id, status }: { id: string; status: string }) => updateModelStatus(client, id, status),
     onSuccess: () => {
       void message.success("模型状态已更新。");
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+  const bulkStatusMutation = useMutation({
+    mutationFn: (status: string) => {
+      const targets = status === "disabled" ? selectedEnabledModels : selectedDisabledModels;
+      return runBatchRequests(targets, (model) => updateModelStatus(client, model.id, status), "批量更新模型状态失败");
+    },
+    onSuccess: () => {
+      void message.success("模型状态已批量更新。");
+      setSelectedRowKeys([]);
       invalidate();
     },
     onError: (error: Error) => message.error(error.message)
@@ -175,9 +196,10 @@ export function ModelsPage() {
     {
       title: "操作",
       key: "actions",
+      className: "table-action-column",
       width: 260,
       render: (_, record) => (
-        <Space size={4} wrap>
+        <Space className="table-action-grid" size={4} wrap>
           <Button size="small" type="link" onClick={() => setDetail(record)}>
             详情
           </Button>
@@ -218,44 +240,98 @@ export function ModelsPage() {
     <>
       <ListPageCard
         title="AI 模型"
-        subtitle="管理各供应商下的模型（第一阶段支持文本生成 / 向量嵌入）。"
+        subtitle={
+          selectedRowKeys.length > 0 ? (
+            <Space size={8}>
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+              <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+                清空选择
+              </Button>
+            </Space>
+          ) : (
+            "管理各供应商下的模型（第一阶段支持文本生成 / 向量嵌入）。"
+          )
+        }
+        toolbar={
+          <div
+            style={{
+              alignItems: "center",
+              columnGap: 12,
+              display: "grid",
+              gridTemplateColumns: "1fr auto 1fr",
+              minWidth: 520,
+              width: "100%"
+            }}
+          >
+            <Select
+              allowClear
+              placeholder="供应商"
+              style={{ width: 200 }}
+              options={providerOptions}
+              value={providerFilter}
+              onChange={(value) => {
+                setProviderFilter(value || undefined);
+                applyState({ page: 1 });
+              }}
+            />
+            <Segmented
+              className="list-status-segmented"
+              style={{ justifySelf: "center" }}
+              value={queryState.status ?? ""}
+              onChange={(value) => applyState({ status: String(value) || undefined, page: 1 })}
+              options={[
+                { value: "", label: "全部" },
+                { value: "enabled", label: "启用" },
+                { value: "disabled", label: "停用" }
+              ]}
+            />
+            <span />
+          </div>
+        }
         extra={
-          canCreate ? (
-            <Button type="primary" onClick={openCreate}>
-              新建模型
-            </Button>
-          ) : null
+          <Space wrap>
+            {selectedModels.length > 0 && canStatus ? (
+              <>
+                {selectedEnabledModels.length > 0 ? (
+                  <Popconfirm
+                    title={`确认停用选中的 ${selectedEnabledModels.length} 个模型？`}
+                    okText="停用"
+                    cancelText="取消"
+                    onConfirm={() => bulkStatusMutation.mutate("disabled")}
+                  >
+                    <Button danger loading={bulkStatusMutation.isPending}>
+                      批量停用
+                    </Button>
+                  </Popconfirm>
+                ) : null}
+                {selectedDisabledModels.length > 0 ? (
+                  <Button loading={bulkStatusMutation.isPending} onClick={() => bulkStatusMutation.mutate("enabled")}>
+                    批量启用
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+            {canCreate ? (
+              <Button type="primary" onClick={openCreate}>
+                新建模型
+              </Button>
+            ) : null}
+          </Space>
         }
       >
-        <Space style={{ padding: 16 }} wrap>
-          <Select
-            allowClear
-            placeholder="供应商"
-            style={{ width: 200 }}
-            options={providerOptions}
-            value={providerFilter}
-            onChange={(value) => {
-              setProviderFilter(value || undefined);
-              applyState({ page: 1 });
-            }}
-          />
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 140 }}
-            options={[
-              { value: "enabled", label: "启用" },
-              { value: "disabled", label: "停用" }
-            ]}
-            value={queryState.status}
-            onChange={(value) => applyState({ status: value || undefined, page: 1 })}
-          />
-        </Space>
         <Table<AiModel>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
           loading={isFetching}
+          rowSelection={
+            canStatus
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String))
+                }
+              : undefined
+          }
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,

@@ -1,4 +1,4 @@
-import { Space, Table, Tag, Typography } from "antd";
+import { Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -52,7 +52,6 @@ export function LoginLogsPage() {
 
   return (
     <ListPageCard title="登录日志" subtitle="平台账号登录与认证记录（仅平台后台可见）。">
-      <Space style={{ padding: 8 }} />
       <Table<LoginLog>
         rowKey="id"
         columns={columns}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Tree, Typography, message } from "antd";
+import { Button, Drawer, Form, Input, Popconfirm, Segmented, Space, Table, Tag, Tree, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -7,6 +7,7 @@ import {
   ListPageCard,
   drawerWidths,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   usePermissions,
   writeListQueryState,
@@ -22,12 +23,26 @@ import {
   type Role,
   type RoleInput
 } from "../api";
-import { DOMAIN_LABELS, DOMAIN_ORDER, RESOURCE_LABELS, label, resourceDomain, type DomainKey } from "../permission-labels";
+import {
+  DOMAIN_LABELS,
+  DOMAIN_ORDER,
+  RESOURCE_LABELS,
+  isPermissionResourceVisible,
+  label,
+  resourceDomain,
+  type DomainKey
+} from "../permission-labels";
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   normal: { label: "正常", color: "green" },
   disabled: { label: "已停用", color: "red" }
 };
+
+const STATUS_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "normal", label: "正常" },
+  { value: "disabled", label: "已停用" }
+];
 
 export function RolesPage() {
   const client = useRequestClient();
@@ -40,6 +55,7 @@ export function RolesPage() {
   const [form] = Form.useForm<RoleInput>();
   const [permRole, setPermRole] = useState<Role | null>(null);
   const [checkedPerms, setCheckedPerms] = useState<string[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canCreate = permissions.canAny(["platform.roles.create", "agency.roles.create", "enterprise.roles.create"]);
   const canUpdate = permissions.canAny(["platform.roles.update", "agency.roles.update", "enterprise.roles.update"]);
@@ -55,11 +71,23 @@ export function RolesPage() {
     queryFn: () => listRoles(client, { page: queryState.page, pageSize: queryState.pageSize, status: queryState.status })
   });
   const permissionsQuery = useQuery({ queryKey: ["permissions", "catalog"], queryFn: () => listPermissions(client) });
+  const visiblePermissions = useMemo(
+    () => (permissionsQuery.data ?? []).filter((perm) => isPermissionResourceVisible(perm.resource)),
+    [permissionsQuery.data]
+  );
+  const visiblePermissionIds = useMemo(() => new Set(visiblePermissions.map((perm) => perm.id)), [visiblePermissions]);
 
   function applyState(next: Partial<ListQueryState>) {
+    setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["roles"] });
+  const selectedRoles = useMemo(
+    () => (data?.items ?? []).filter((role) => selectedRowKeys.includes(role.id)),
+    [data?.items, selectedRowKeys]
+  );
+  const selectedNormalRoles = selectedRoles.filter((role) => role.status === "normal");
+  const selectedDisabledRoles = selectedRoles.filter((role) => role.status === "disabled");
 
   const saveMutation = useMutation({
     mutationFn: (values: RoleInput) => (editing ? updateRole(client, editing.id, values) : createRole(client, values)),
@@ -81,8 +109,24 @@ export function RolesPage() {
     onError: (error: Error) => message.error(error.message)
   });
 
+  const bulkStatusMutation = useMutation({
+    mutationFn: (status: string) => {
+      const targets = status === "disabled" ? selectedNormalRoles : selectedDisabledRoles;
+      return runBatchRequests(targets, (role) => updateRoleStatus(client, role.id, status), "批量更新角色状态失败");
+    },
+    onSuccess: () => {
+      void message.success("角色状态已批量更新。");
+      setSelectedRowKeys([]);
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+
   const permMutation = useMutation({
-    mutationFn: (ids: string[]) => setRolePermissions(client, permRole!.id, ids),
+    mutationFn: (ids: string[]) => {
+      const hiddenExistingIds = (permRole?.permissionIds ?? []).filter((id) => !visiblePermissionIds.has(id));
+      return setRolePermissions(client, permRole!.id, [...hiddenExistingIds, ...ids]);
+    },
     onSuccess: () => {
       void message.success("角色权限已更新。");
       setPermRole(null);
@@ -103,14 +147,14 @@ export function RolesPage() {
   }
   function openPermissions(role: Role) {
     setPermRole(role);
-    setCheckedPerms(role.permissionIds);
+    setCheckedPerms(role.permissionIds.filter((id) => visiblePermissionIds.has(id)));
   }
 
   // 3-level authorization tree: 领域(中文) → 资源(中文) → 具体权限. Checking a
   // domain or resource node selects all descendants for quick bulk assignment.
   const permTreeData = useMemo(() => {
     const domains = new Map<DomainKey, Map<string, { title: string; key: string }[]>>();
-    (permissionsQuery.data ?? []).forEach((perm) => {
+    visiblePermissions.forEach((perm) => {
       const dom = resourceDomain(perm.resource);
       if (!domains.has(dom)) domains.set(dom, new Map());
       const byResource = domains.get(dom)!;
@@ -139,7 +183,7 @@ export function RolesPage() {
         children: resourceNodes
       };
     });
-  }, [permissionsQuery.data]);
+  }, [visiblePermissions]);
 
   const columns: ColumnsType<Role> = useMemo(
     () => [
@@ -164,7 +208,12 @@ export function RolesPage() {
         key: "description",
         render: (value: string) => value || <Typography.Text type="secondary">—</Typography.Text>
       },
-      { title: "权限数", key: "permCount", width: 90, render: (_, record) => record.permissionIds.length },
+      {
+        title: "权限数",
+        key: "permCount",
+        width: 90,
+        render: (_, record) => record.permissionIds.filter((id) => visiblePermissionIds.has(id)).length
+      },
       {
         title: "状态",
         dataIndex: "status",
@@ -178,9 +227,10 @@ export function RolesPage() {
       {
         title: "操作",
         key: "actions",
-        width: 200,
+        className: "table-action-column",
+        width: 240,
         render: (_, record) => (
-          <Space size={4} wrap>
+          <Space className="table-action-grid" size={4} wrap>
             {canUpdate ? (
               <Button size="small" type="link" onClick={() => openEdit(record)}>
                 编辑
@@ -213,40 +263,78 @@ export function RolesPage() {
         )
       }
     ],
-    [canUpdate, canSetPerms, canStatus, statusMutation]
+    [canUpdate, canSetPerms, canStatus, statusMutation, visiblePermissionIds]
   );
 
   return (
     <>
       <ListPageCard
         title="角色管理"
-        subtitle="维护当前工作区的角色、权限授予与状态。"
+        subtitle={
+          selectedRowKeys.length > 0 ? (
+            <Space size={8}>
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+              <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+                清空选择
+              </Button>
+            </Space>
+          ) : (
+            "维护当前工作区的角色、权限授予与状态。"
+          )
+        }
+        toolbar={
+          <Segmented
+            className="list-status-segmented"
+            options={STATUS_OPTIONS}
+            value={queryState.status ?? "all"}
+            onChange={(value) => applyState({ status: value === "all" ? undefined : String(value), page: 1 })}
+          />
+        }
         extra={
-          canCreate ? (
-            <Button type="primary" onClick={openCreate}>
-              新建角色
-            </Button>
-          ) : null
+          <Space wrap>
+            {selectedRoles.length > 0 && canStatus ? (
+              <>
+                {selectedNormalRoles.length > 0 ? (
+                  <Popconfirm
+                    title={`确认停用选中的 ${selectedNormalRoles.length} 个角色？`}
+                    okText="停用"
+                    cancelText="取消"
+                    onConfirm={() => bulkStatusMutation.mutate("disabled")}
+                  >
+                    <Button danger loading={bulkStatusMutation.isPending}>
+                      批量停用
+                    </Button>
+                  </Popconfirm>
+                ) : null}
+                {selectedDisabledRoles.length > 0 ? (
+                  <Button loading={bulkStatusMutation.isPending} onClick={() => bulkStatusMutation.mutate("normal")}>
+                    批量启用
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+            {canCreate ? (
+              <Button type="primary" onClick={openCreate}>
+                新建角色
+              </Button>
+            ) : null}
+          </Space>
         }
       >
-        <Space style={{ padding: 16 }} wrap>
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 140 }}
-            options={[
-              { value: "normal", label: "正常" },
-              { value: "disabled", label: "已停用" }
-            ]}
-            value={queryState.status}
-            onChange={(value) => applyState({ status: value || undefined, page: 1 })}
-          />
-        </Space>
         <Table<Role>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
           loading={isFetching}
+          rowSelection={
+            canStatus
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String)),
+                  getCheckboxProps: (record) => ({ disabled: record.isSystem })
+                }
+              : undefined
+          }
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,

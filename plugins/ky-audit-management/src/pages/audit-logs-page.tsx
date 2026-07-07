@@ -52,10 +52,10 @@ export function AuditLogsPage() {
     },
     {
       title: "操作者",
-      dataIndex: "actorUserId",
       key: "actor",
       width: 180,
-      render: (value: string | null) => value || <Typography.Text type="secondary">系统</Typography.Text>
+      render: (_, record) =>
+        record.actorName || record.actorUserId || <Typography.Text type="secondary">系统</Typography.Text>
     },
     {
       title: "结果",
@@ -75,7 +75,8 @@ export function AuditLogsPage() {
     {
       title: "操作",
       key: "actions",
-      width: 80,
+      className: "table-action-column",
+      width: 180,
       render: (_, record) => (
         <Button size="small" type="link" onClick={() => setDetail(record)}>
           详情
@@ -86,8 +87,11 @@ export function AuditLogsPage() {
 
   return (
     <>
-      <ListPageCard title="审计日志" subtitle="记录当前工作区的关键写操作。">
-        <Space style={{ padding: 16 }} wrap>
+      <ListPageCard
+        title="审计日志"
+        subtitle="记录当前工作区的关键写操作。"
+        toolbar={
+          <Space wrap>
           <Input.Search
             allowClear
             placeholder="动作（如 role.created）"
@@ -105,6 +109,8 @@ export function AuditLogsPage() {
             onSearch={() => applyState({ page: 1 })}
           />
         </Space>
+        }
+      >
         <Table<AuditLog>
           rowKey="id"
           columns={columns}
@@ -128,7 +134,7 @@ export function AuditLogsPage() {
             <Descriptions.Item label="资源类型">{detail.resourceType}</Descriptions.Item>
             <Descriptions.Item label="资源 ID">{detail.resourceId}</Descriptions.Item>
             <Descriptions.Item label="结果">{detail.result}</Descriptions.Item>
-            <Descriptions.Item label="操作者 UserID">{detail.actorUserId || "—"}</Descriptions.Item>
+            <Descriptions.Item label="操作者">{detail.actorName || detail.actorUserId || "系统"}</Descriptions.Item>
             <Descriptions.Item label="操作者成员">{detail.actorMembershipId || "—"}</Descriptions.Item>
             <Descriptions.Item label="工作区">
               {detail.workspaceType} / {detail.workspaceId}

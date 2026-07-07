@@ -10,6 +10,7 @@ import {
   DOMAIN_ORDER,
   RESOURCE_LABELS,
   WORKSPACE_LABELS,
+  isPermissionResourceVisible,
   label,
   resourceDomain,
   type DomainKey
@@ -40,7 +41,7 @@ export function PermissionsPage() {
   const { data, isFetching } = useQuery({ queryKey: ["permissions", "catalog"], queryFn: () => listPermissions(client) });
   // Stabilize identity: `data ?? []` would otherwise create a new array every render,
   // cascading into filtered/parentKeys and retriggering the expand effect → React #185.
-  const permissions = useMemo(() => data ?? [], [data]);
+  const permissions = useMemo(() => (data ?? []).filter((perm) => isPermissionResourceVisible(perm.resource)), [data]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set(permissions.map((p) => p.category));
@@ -94,15 +95,21 @@ export function PermissionsPage() {
   }, [category, parentKeys]);
 
   return (
-    <ListPageCard title="权限目录" subtitle="平台内置权限清单（只读），按 领域 → 资源 → 权限 分组。">
-      <Space style={{ padding: 16 }} wrap>
-        <Segmented
-          options={[{ label: "全部", value: "" }, ...categoryOptions]}
-          value={category ?? ""}
-          onChange={(value) => setCategory(String(value) || undefined)}
-        />
-        <Typography.Text type="secondary">共 {filtered.length} 项</Typography.Text>
-      </Space>
+    <ListPageCard
+      title="权限目录"
+      subtitle="平台内置权限清单（只读），按 领域 → 资源 → 权限 分组。"
+      toolbar={
+        <Space wrap>
+          <Segmented
+            className="list-status-segmented"
+            options={[{ label: "全部", value: "" }, ...categoryOptions]}
+            value={category ?? ""}
+            onChange={(value) => setCategory(String(value) || undefined)}
+          />
+          <Typography.Text type="secondary">共 {filtered.length} 项</Typography.Text>
+        </Space>
+      }
+    >
       <div style={{ padding: "0 16px 16px" }}>
         {filtered.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isFetching ? "加载中…" : "暂无权限"} />

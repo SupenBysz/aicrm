@@ -1,0 +1,220 @@
+:root {
+  background: #f5f7fa;
+  color: #172033;
+  font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 960px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.desktop-boot {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.desktop-error {
+  background: #fff2f0;
+  border-bottom: 1px solid #ffccc7;
+  color: #a8071a;
+  padding: 8px 16px;
+}
+
+.desktop-shell {
+  background: #f5f7fa;
+  min-height: 100vh;
+}
+
+.desktop-title-bar {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid #e8edf5;
+  display: flex;
+  height: 72px;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.desktop-title-icon {
+  align-items: center;
+  background: #e6f4ff;
+  border-radius: 8px;
+  color: #1677ff;
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.desktop-title,
+.desktop-subtitle {
+  display: block;
+}
+
+.desktop-title {
+  color: #172033;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.desktop-subtitle {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.desktop-user {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #334155;
+  display: inline-block;
+  font-size: 13px;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 6px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-sider {
+  background: #ffffff !important;
+  border-right: 1px solid #e8edf5;
+  min-height: calc(100vh - 72px);
+  padding: 12px 0;
+  position: relative;
+}
+
+.desktop-sider .ant-menu {
+  border-inline-end: 0 !important;
+}
+
+.desktop-sider-footer {
+  bottom: 16px;
+  left: 16px;
+  position: absolute;
+  right: 16px;
+}
+
+.desktop-content {
+  min-height: calc(100vh - 72px);
+  padding: 24px;
+}
+
+.desktop-page-header {
+  align-items: end;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.desktop-page-header .ant-typography {
+  margin: 0;
+}
+
+.desktop-detail-card {
+  margin-top: 16px;
+}
+
+.desktop-login {
+  align-items: center;
+  background:
+    linear-gradient(180deg, rgba(246, 250, 255, 0.96), rgba(232, 239, 248, 0.96)),
+    url("data:image/svg+xml,%3Csvg width='1200' height='800' viewBox='0 0 1200 800' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%23c5d7ef' stroke-width='1'%3E%3Cpath d='M0 120h1200M0 240h1200M0 360h1200M0 480h1200M0 600h1200M0 720h1200'/%3E%3Cpath d='M120 0v800M240 0v800M360 0v800M480 0v800M600 0v800M720 0v800M840 0v800M960 0v800M1080 0v800'/%3E%3C/g%3E%3C/svg%3E");
+  display: flex;
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.desktop-login-panel {
+  background: #ffffff;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(31, 45, 61, 0.14);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  margin: 0 auto;
+  max-width: 920px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.desktop-login-copy {
+  background: #edf4fb;
+  padding: 42px;
+}
+
+.desktop-login-copy h1.ant-typography {
+  font-size: 38px;
+  line-height: 1.15;
+  margin: 18px 0;
+}
+
+.desktop-login-copy .ant-typography {
+  max-width: 360px;
+}
+
+.login-eyebrow {
+  color: #1677ff;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.desktop-login-form {
+  padding: 42px 36px;
+}
+
+.workspace-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-card {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e8edf5;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 14px;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  padding: 16px;
+  text-align: left;
+}
+
+.workspace-card:hover {
+  background: #f7fbff;
+  border-color: #bad9ff;
+}
+
+.workspace-card-icon {
+  align-items: center;
+  background: #eef6ff;
+  border-radius: 8px;
+  color: #1677ff;
+  display: inline-flex;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.workspace-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}

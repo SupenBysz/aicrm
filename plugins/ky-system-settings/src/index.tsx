@@ -7,20 +7,23 @@ export const systemSettingsPlugin: AdminPlugin = {
   navOrder: 60,
   menus: [
     {
-      key: "ky-system-settings.settings",
-      label: "系统设置",
-      path: "/settings",
+      key: "ky-system-settings.hub",
+      label: "系统配置",
+      path: "/system",
       icon: "SettingOutlined",
       menuKey: "system.settings.view",
-      requiredAnyPermissions: ["platform.settings.view", "agency.settings.view", "enterprise.settings.view"]
-    },
-    {
-      key: "ky-system-settings.dictionaries",
-      label: "数据字典",
-      path: "/dictionaries",
-      icon: "BookOutlined",
-      menuKey: "system.dictionaries.view",
-      requiredPermission: "platform.dictionaries.view"
+      requiredAnyPermissions: [
+        "platform.settings.view",
+        "agency.settings.view",
+        "enterprise.settings.view",
+        "platform.dictionaries.view",
+        "platform.basic_info.view",
+        "platform.notification_templates.view",
+        "platform.storage.view",
+        "platform.sms.view",
+        "platform.email.view",
+        "platform.app_version.view"
+      ]
     }
   ],
   routes

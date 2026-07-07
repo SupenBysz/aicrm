@@ -101,7 +101,6 @@ workspace_id = enterprise_id
 platform_owner       平台超级管理员
 platform_admin       平台管理员
 platform_operator    平台运营
-platform_readonly    平台只读
 ```
 
 ### 4.2 机构角色
@@ -139,17 +138,17 @@ team_leader          团队负责人
 
 ### 5.1 平台后台菜单
 
-| 菜单 | platform_owner | platform_admin | platform_operator | platform_readonly |
-|---|---:|---:|---:|---:|
-| 平台工作台 | yes | yes | yes | yes |
-| 用户中心 | yes | yes | yes | read |
-| 机构中心 | yes | yes | yes | read |
-| 企业中心 | yes | yes | yes | read |
-| 权限中心 | yes | yes | limited | read |
-| AI 配置 | yes | yes | limited | read |
-| 通知中心 | yes | yes | yes | read |
-| 审计中心 | yes | yes | read | read |
-| 系统设置 | yes | yes | no | read |
+| 菜单 | platform_owner | platform_admin | platform_operator |
+|---|---:|---:|---:|
+| 平台工作台 | yes | yes | yes |
+| 用户中心 | yes | yes | yes |
+| 机构中心 | yes | yes | yes |
+| 企业中心 | yes | yes | yes |
+| 权限中心 | yes | yes | limited |
+| AI 配置 | yes | yes | limited |
+| 通知中心 | yes | yes | yes |
+| 审计中心 | yes | yes | read |
+| 系统设置 | yes | yes | no |
 
 说明：
 
@@ -347,7 +346,6 @@ team_leader          团队负责人
 | platform_owner | 全部平台数据、全部机构、全部企业 |
 | platform_admin | 全部平台数据、全部机构、全部企业，危险操作受限于操作权限 |
 | platform_operator | 授权范围内机构和企业，默认不含系统设置和权限变更 |
-| platform_readonly | 只读查看全局数据 |
 
 ---
 
@@ -476,6 +474,9 @@ enterprise.settings.view
 ```text
 platform.users.enable
 platform.users.disable
+platform.members.create
+platform.members.update
+platform.members.reset_password
 platform.members.invite
 platform.members.disable
 platform.members.remove
@@ -504,6 +505,9 @@ platform.ai_models.update_status
 platform.ai_model_settings.update
 
 agency.profile.update
+agency.members.create
+agency.members.update
+agency.members.reset_password
 agency.members.invite
 agency.members.disable
 agency.members.remove
@@ -525,6 +529,9 @@ agency.roles.update_permissions
 agency.settings.update
 
 enterprise.profile.update
+enterprise.members.create
+enterprise.members.update
+enterprise.members.reset_password
 enterprise.members.invite
 enterprise.members.disable
 enterprise.members.remove

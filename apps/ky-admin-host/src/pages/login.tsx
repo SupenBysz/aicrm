@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { bootstrap, login, pickRecommendedWorkspace } from "../remote-api";
 import { saveSession, setBootstrap, selectWorkspace, workspaceWorkbenchPath } from "../app-store";
+import { usePlatformProfile } from "../platform-profile";
 
 const PASSWORD_MIN_LENGTH = 6;
-const COMPANY_NAME = "KyaiCRM";
-const ICP_RECORD = "";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { icpRecord, logoTextLong, name: companyName } = usePlatformProfile();
   const [submitting, setSubmitting] = useState(false);
   const currentYear = new Date().getFullYear();
 
@@ -51,13 +51,13 @@ export function LoginPage() {
               <div className="login-hero">
                 <div>
                   <Typography.Text className="login-eyebrow" type="secondary">
-                    KyaiCRM Console
+                    {logoTextLong} Console
                   </Typography.Text>
                   <Typography.Title className="login-title" level={1}>
                     后台登录
                   </Typography.Title>
                   <Typography.Paragraph className="login-description" type="secondary">
-                    平台管理员入口，处理机构管理、模型接入与基础治理。
+                    AI 智能 CRM，自动化搞定直播电商全域运营
                   </Typography.Paragraph>
                 </div>
 
@@ -152,9 +152,9 @@ export function LoginPage() {
 
         <Space className="login-footer" direction="vertical" size={2}>
           <Typography.Text type="secondary">
-            © {currentYear} {COMPANY_NAME}
+            © {currentYear} {companyName}
           </Typography.Text>
-          {ICP_RECORD ? <Typography.Text type="secondary">{ICP_RECORD}</Typography.Text> : null}
+          {icpRecord ? <Typography.Text type="secondary">{icpRecord}</Typography.Text> : null}
         </Space>
       </div>
     </div>

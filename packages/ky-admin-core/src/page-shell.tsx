@@ -13,29 +13,68 @@ interface ListPageCardProps {
   title: string;
   extra?: ReactNode;
   subtitle?: ReactNode;
+  toolbar?: ReactNode;
+  /** @deprecated use toolbar for list-level filters/actions. */
+  titleCenter?: ReactNode;
   children: ReactNode;
 }
 
-export function ListPageCard({ title, extra, subtitle, children }: ListPageCardProps) {
+function ListTitleBlock({ subtitle, title }: { title: string; subtitle?: ReactNode }) {
   return (
-    <Card
-      extra={extra}
-      styles={{ body: { padding: 0 } }}
-      title={
-        <Space direction="vertical" size={0}>
-          <Typography.Text strong>{title}</Typography.Text>
-          {subtitle ? (
-            typeof subtitle === "string" ? (
-              <Typography.Text type="secondary">{subtitle}</Typography.Text>
-            ) : (
-              subtitle
-            )
-          ) : null}
-        </Space>
-      }
-    >
-      {children}
-    </Card>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <Typography.Title level={3} style={{ margin: 0 }}>
+        {title}
+      </Typography.Title>
+      {subtitle ? (
+        typeof subtitle === "string" ? (
+          <Typography.Text type="secondary">{subtitle}</Typography.Text>
+        ) : (
+          subtitle
+        )
+      ) : null}
+    </div>
+  );
+}
+
+export function ListPageCard({ title, extra, subtitle, toolbar, titleCenter, children }: ListPageCardProps) {
+  const listToolbar = toolbar ?? titleCenter;
+  return (
+    <Space direction="vertical" size={12} style={{ width: "100%" }}>
+      <div
+        style={{
+          alignItems: "flex-end",
+          columnGap: 16,
+          display: "flex",
+          justifyContent: "space-between",
+          width: "100%"
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <ListTitleBlock title={title} subtitle={subtitle} />
+        </div>
+        {extra ? <div style={{ flex: "0 0 auto", marginLeft: "auto" }}>{extra}</div> : null}
+      </div>
+      <Card
+        styles={{ body: { padding: 0 }, header: { paddingInline: 16 } }}
+        title={
+          listToolbar ? (
+            <div
+              style={{
+                alignItems: "center",
+                display: "flex",
+                justifyContent: "flex-start",
+                overflowX: "auto",
+                width: "100%"
+              }}
+            >
+              {listToolbar}
+            </div>
+          ) : undefined
+        }
+      >
+        {children}
+      </Card>
+    </Space>
   );
 }
 

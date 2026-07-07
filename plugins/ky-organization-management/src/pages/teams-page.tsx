@@ -126,9 +126,10 @@ export function TeamsPage() {
       {
         title: "操作",
         key: "actions",
-        width: 160,
+        className: "table-action-column",
+        width: 180,
         render: (_, record) => (
-          <Space size={4}>
+          <Space className="table-action-grid" size={4} wrap>
             {canUpdate ? (
               <Button size="small" type="link" onClick={() => openEdit(record)}>
                 编辑

@@ -8,15 +8,18 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-org-service/internal/config"
 	"github.com/Kysion/KyaiCRM/services/ky-org-service/internal/store"
 	"github.com/Kysion/KyaiCRM/shared/auth"
+	"github.com/Kysion/KyaiCRM/shared/crypto"
 )
 
 type Server struct {
-	cfg   config.Config
-	store *store.Store
+	cfg    config.Config
+	store  *store.Store
+	cipher *crypto.Cipher
 }
 
 func New(cfg config.Config) *Server {
-	return &Server{cfg: cfg}
+	c, _ := crypto.New(cfg.SecretKey)
+	return &Server{cfg: cfg, cipher: c}
 }
 
 // wsContext carries the validated workspace identity for a request.
@@ -86,6 +89,60 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("PATCH /api/v1/settings", s.ws(orgWs, perms("agency.settings.update", "enterprise.settings.update"), s.updateSettings))
 	mux.HandleFunc("GET /api/v1/platform/system-settings", s.ws("platform", perms("platform.settings.view"), s.getPlatformSettings))
 	mux.HandleFunc("PATCH /api/v1/platform/system-settings", s.ws("platform", perms("platform.settings.update"), s.updatePlatformSettings))
+
+	// 基础信息 (platform identity) — public read + platform manage.
+	mux.HandleFunc("GET /api/v1/public/platform-profile", s.getPublicPlatformProfile)
+	mux.HandleFunc("GET /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.view"), s.getPlatformProfile))
+	mux.HandleFunc("PATCH /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.update"), s.updatePlatformProfile))
+
+	// 通知模板 (notification templates)
+	mux.HandleFunc("GET /api/v1/platform/notification-templates", s.ws("platform", perms("platform.notification_templates.view"), s.listNotificationTemplates))
+	mux.HandleFunc("PATCH /api/v1/platform/notification-templates/{key}", s.ws("platform", perms("platform.notification_templates.update"), s.updateNotificationTemplate))
+	mux.HandleFunc("PATCH /api/v1/platform/notification-templates/{key}/status", s.ws("platform", perms("platform.notification_templates.update"), s.updateNotificationTemplateStatus))
+	mux.HandleFunc("POST /api/v1/platform/notification-templates/{key}/reset", s.ws("platform", perms("platform.notification_templates.update"), s.resetNotificationTemplate))
+
+	// App 版本设置 (app version rules) — platform CRUD + public check.
+	mux.HandleFunc("GET /api/v1/public/app-version-check", s.publicAppVersionCheck)
+	mux.HandleFunc("GET /api/v1/platform/app-version-rules", s.ws("platform", perms("platform.app_version.view"), s.listAppVersionRules))
+	mux.HandleFunc("POST /api/v1/platform/app-version-rules", s.ws("platform", perms("platform.app_version.create"), s.createAppVersionRule))
+	mux.HandleFunc("PATCH /api/v1/platform/app-version-rules/{id}", s.ws("platform", perms("platform.app_version.update"), s.updateAppVersionRule))
+	mux.HandleFunc("DELETE /api/v1/platform/app-version-rules/{id}", s.ws("platform", perms("platform.app_version.delete"), s.deleteAppVersionRule))
+
+	// 对象存储设置 (object storage)
+	mux.HandleFunc("GET /api/v1/platform/storage-setting", s.ws("platform", perms("platform.storage.view"), s.getStorageSetting))
+	mux.HandleFunc("PATCH /api/v1/platform/storage-setting", s.ws("platform", perms("platform.storage.update"), s.updateStorageSetting))
+	mux.HandleFunc("POST /api/v1/platform/storage-setting/rotate-secret", s.ws("platform", perms("platform.storage.update"), s.rotateStorageSecret))
+	mux.HandleFunc("POST /api/v1/platform/storage-setting/test", s.ws("platform", perms("platform.storage.test"), s.testStorageSetting))
+
+	// 短信服务 (sms)
+	mux.HandleFunc("GET /api/v1/platform/sms/accounts", s.ws("platform", perms("platform.sms.view"), s.listSMSAccounts))
+	mux.HandleFunc("POST /api/v1/platform/sms/accounts", s.ws("platform", perms("platform.sms.update"), s.createSMSAccount))
+	mux.HandleFunc("PATCH /api/v1/platform/sms/accounts/{id}", s.ws("platform", perms("platform.sms.update"), s.updateSMSAccount))
+	mux.HandleFunc("DELETE /api/v1/platform/sms/accounts/{id}", s.ws("platform", perms("platform.sms.update"), s.deleteSMSAccount))
+	mux.HandleFunc("GET /api/v1/platform/sms/signatures", s.ws("platform", perms("platform.sms.view"), s.listSMSSignatures))
+	mux.HandleFunc("POST /api/v1/platform/sms/signatures", s.ws("platform", perms("platform.sms.update"), s.createSMSSignature))
+	mux.HandleFunc("PATCH /api/v1/platform/sms/signatures/{id}", s.ws("platform", perms("platform.sms.update"), s.updateSMSSignature))
+	mux.HandleFunc("DELETE /api/v1/platform/sms/signatures/{id}", s.ws("platform", perms("platform.sms.update"), s.deleteSMSSignature))
+	mux.HandleFunc("GET /api/v1/platform/sms/templates", s.ws("platform", perms("platform.sms.view"), s.listSMSTemplates))
+	mux.HandleFunc("POST /api/v1/platform/sms/templates", s.ws("platform", perms("platform.sms.update"), s.createSMSTemplate))
+	mux.HandleFunc("PATCH /api/v1/platform/sms/templates/{id}", s.ws("platform", perms("platform.sms.update"), s.updateSMSTemplate))
+	mux.HandleFunc("DELETE /api/v1/platform/sms/templates/{id}", s.ws("platform", perms("platform.sms.update"), s.deleteSMSTemplate))
+	mux.HandleFunc("POST /api/v1/platform/sms/templates/{id}/test", s.ws("platform", perms("platform.sms.test"), s.testSMSTemplate))
+
+	// 邮件服务 (email)
+	mux.HandleFunc("GET /api/v1/platform/email/accounts", s.ws("platform", perms("platform.email.view"), s.listEmailAccounts))
+	mux.HandleFunc("POST /api/v1/platform/email/accounts", s.ws("platform", perms("platform.email.update"), s.createEmailAccount))
+	mux.HandleFunc("PATCH /api/v1/platform/email/accounts/{id}", s.ws("platform", perms("platform.email.update"), s.updateEmailAccount))
+	mux.HandleFunc("DELETE /api/v1/platform/email/accounts/{id}", s.ws("platform", perms("platform.email.update"), s.deleteEmailAccount))
+	mux.HandleFunc("GET /api/v1/platform/email/identities", s.ws("platform", perms("platform.email.view"), s.listEmailIdentities))
+	mux.HandleFunc("POST /api/v1/platform/email/identities", s.ws("platform", perms("platform.email.update"), s.createEmailIdentity))
+	mux.HandleFunc("PATCH /api/v1/platform/email/identities/{id}", s.ws("platform", perms("platform.email.update"), s.updateEmailIdentity))
+	mux.HandleFunc("DELETE /api/v1/platform/email/identities/{id}", s.ws("platform", perms("platform.email.update"), s.deleteEmailIdentity))
+	mux.HandleFunc("GET /api/v1/platform/email/templates", s.ws("platform", perms("platform.email.view"), s.listEmailTemplates))
+	mux.HandleFunc("POST /api/v1/platform/email/templates", s.ws("platform", perms("platform.email.update"), s.createEmailTemplate))
+	mux.HandleFunc("PATCH /api/v1/platform/email/templates/{id}", s.ws("platform", perms("platform.email.update"), s.updateEmailTemplate))
+	mux.HandleFunc("DELETE /api/v1/platform/email/templates/{id}", s.ws("platform", perms("platform.email.update"), s.deleteEmailTemplate))
+	mux.HandleFunc("POST /api/v1/platform/email/templates/{id}/test", s.ws("platform", perms("platform.email.test"), s.testEmailTemplate))
 	mux.HandleFunc("GET /api/v1/dictionaries", s.ws("platform", perms("platform.dictionaries.view"), s.listDictionaries))
 
 	// Workbench summaries

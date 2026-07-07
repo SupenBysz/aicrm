@@ -1,6 +1,23 @@
 package server
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+
+	"github.com/Kysion/KyaiCRM/services/ky-auth-service/internal/store"
+)
+
+// splitCSV splits a comma-separated list, trimming spaces and dropping empties.
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // searchPlatformUsers serves GET /api/v1/platform/users?keyword=&limit=.
 // Platform-only, requires platform.members.view. Returns lightweight user options
@@ -41,7 +58,13 @@ func (s *Server) searchPlatformUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	users, err := s.store.SearchUsers(r.Context(), q.Get("keyword"), atoiDefaultLog(q.Get("limit"), 20))
+	var users []store.User
+	if idsParam := strings.TrimSpace(q.Get("ids")); idsParam != "" {
+		// Resolve a specific set of ids → names (used to render already-selected targets).
+		users, err = s.store.UsersByIDs(r.Context(), splitCSV(idsParam))
+	} else {
+		users, err = s.store.SearchUsers(r.Context(), q.Get("keyword"), atoiDefaultLog(q.Get("limit"), 20))
+	}
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "用户检索失败")
 		return

@@ -79,6 +79,14 @@ export function publishAnnouncement(client: RequestClient, id: string): Promise<
   return client.request(`/api/v1/announcements/${id}/publish`, { method: "PATCH" });
 }
 
+export function updateAnnouncement(client: RequestClient, id: string, input: AnnouncementInput): Promise<Announcement> {
+  return client.request<Announcement>(`/api/v1/announcements/${id}`, { method: "PATCH", body: input });
+}
+
+export function deleteAnnouncement(client: RequestClient, id: string): Promise<{ id: string; deleted: boolean }> {
+  return client.request<{ id: string; deleted: boolean }>(`/api/v1/announcements/${id}`, { method: "DELETE" });
+}
+
 // --- targeting option sources (for "指定组织/用户") ---
 
 export interface TargetOption {
@@ -107,4 +115,27 @@ export async function searchUserOptions(client: RequestClient, keyword: string):
     `/api/v1/platform/users?${q.toString()}`
   );
   return r.items.map((u) => ({ value: u.id, label: u.email ? `${u.displayName}（${u.email}）` : u.displayName }));
+}
+
+export async function resolveUserOptions(client: RequestClient, ids: string[]): Promise<TargetOption[]> {
+  if (ids.length === 0) return [];
+  const r = await client.request<{ items: { id: string; displayName: string; email: string }[] }>(
+    `/api/v1/platform/users?ids=${encodeURIComponent(ids.join(","))}`
+  );
+  return r.items.map((u) => ({ value: u.id, label: u.email ? `${u.displayName}（${u.email}）` : u.displayName }));
+}
+
+/** Resolves an announcement's target ids to human-readable names for the detail view. */
+export async function resolveTargetNames(
+  client: RequestClient,
+  scope: string,
+  ids: string[]
+): Promise<string[]> {
+  if (scope === "all" || ids.length === 0) return [];
+  const pick = (opts: TargetOption[]) =>
+    ids.map((id) => opts.find((o) => o.value === id)?.label ?? id);
+  if (scope === "agency") return pick(await listAgencyOptions(client));
+  if (scope === "enterprise") return pick(await listEnterpriseOptions(client));
+  if (scope === "user") return (await resolveUserOptions(client, ids)).map((o) => o.label);
+  return ids;
 }

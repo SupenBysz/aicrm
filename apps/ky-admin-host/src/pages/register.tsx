@@ -2,9 +2,11 @@ import { Button, Card, Form, Input, Space, Typography, message } from "antd";
 import { Link, useNavigate } from "react-router-dom";
 import { bootstrap, pickRecommendedWorkspace, register } from "../remote-api";
 import { saveSession, setBootstrap, selectWorkspace, workspaceWorkbenchPath } from "../app-store";
+import { usePlatformProfile } from "../platform-profile";
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const { logoTextLong } = usePlatformProfile();
 
   async function handleFinish(values: { displayName: string; email?: string; phone?: string; password: string }) {
     try {
@@ -33,7 +35,7 @@ export function RegisterPage() {
   return (
     <Card style={{ maxWidth: 420, margin: "96px auto" }}>
       <Space direction="vertical" size="large" style={{ width: "100%" }}>
-        <Typography.Title level={3}>注册 KyaiCRM</Typography.Title>
+        <Typography.Title level={3}>注册 {logoTextLong}</Typography.Title>
         <Form layout="vertical" onFinish={handleFinish}>
           <Form.Item name="displayName" label="显示名称" rules={[{ required: true }]}>
             <Input />

@@ -1,9 +1,16 @@
-import { UserOutlined } from "@ant-design/icons";
-import { App as AntdApp, Button, Card, Empty, Input, Space, Tag, Typography } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { AppstoreOutlined, ArrowRightOutlined, BankOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
+import { App as AntdApp, Empty, Input, Tag, Typography } from "antd";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import type { WorkspaceIdentity } from "@ky/admin-core";
-import { loadBootstrap, selectWorkspace, setBootstrap, workspaceWorkbenchPath } from "../app-store";
+import type { WorkspaceIdentity, WorkspaceType } from "@ky/admin-core";
+import {
+  loadBootstrap,
+  selectWorkspace,
+  setBootstrap,
+  workspaceWorkbenchPath,
+  type BootstrapState
+} from "../app-store";
+import { usePlatformProfile } from "../platform-profile";
 import { bootstrap, pickRecommendedWorkspace } from "../remote-api";
 import {
   filterWorkspaces,
@@ -14,38 +21,66 @@ import {
   workspaceTypeLabel
 } from "../workspace-ui";
 
+const WORKSPACE_TYPE_ICONS: Record<WorkspaceType, ReactNode> = {
+  agency: <BankOutlined />,
+  enterprise: <ShopOutlined />,
+  platform: <AppstoreOutlined />
+};
+
 export function WorkspaceSelectPage() {
   const navigate = useNavigate();
   const { message } = AntdApp.useApp();
+  const { logoTextLong } = usePlatformProfile();
   const [state, setState] = useState(() => loadBootstrap());
   const [search, setSearch] = useState("");
   const workspaces = state?.workspaces ?? [];
 
   useEffect(() => {
+    let active = true;
+    const leaveSelectionWhenNotNeeded = (next: BootstrapState) => {
+      if (!active) return;
+      if (next.workspaces.length === 0) {
+        navigate("/no-workspace", { replace: true });
+        return;
+      }
+      if (next.workspaces.length === 1) {
+        const recommended = pickRecommendedWorkspace(next);
+        if (recommended) {
+          selectWorkspace(recommended);
+          navigate(workspaceWorkbenchPath(recommended), { replace: true });
+        }
+      }
+    };
+
     if (state) {
-      return;
+      leaveSelectionWhenNotNeeded(state);
+      return () => {
+        active = false;
+      };
     }
+
     bootstrap()
       .then((next) => {
+        if (!active) return;
         setBootstrap(next);
         setState(next);
-        if (next.workspaces.length === 0) {
-          navigate("/no-workspace", { replace: true });
-          return;
-        }
-        if (next.workspaces.length === 1) {
-          const recommended = pickRecommendedWorkspace(next);
-          if (recommended) {
-            selectWorkspace(recommended);
-            navigate(workspaceWorkbenchPath(recommended), { replace: true });
-          }
-        }
+        leaveSelectionWhenNotNeeded(next);
       })
-      .catch((error) => message.error(error instanceof Error ? error.message : "身份加载失败"));
+      .catch((error) => {
+        if (active) {
+          message.error(error instanceof Error ? error.message : "身份加载失败");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, [message, navigate, state]);
 
-  const grouped = useMemo(() => groupWorkspaces(filterWorkspaces(workspaces, search)), [workspaces, search]);
+  const filteredWorkspaces = useMemo(() => filterWorkspaces(workspaces, search), [search, workspaces]);
+  const grouped = useMemo(() => groupWorkspaces(filteredWorkspaces), [filteredWorkspaces]);
   const matched = grouped.reduce((total, group) => total + group.workspaces.length, 0);
+  const userContact = state?.user.email || state?.user.phone || "已登录账号";
 
   function enter(workspace: WorkspaceIdentity) {
     selectWorkspace(workspace);
@@ -53,39 +88,31 @@ export function WorkspaceSelectPage() {
     navigate(workspaceWorkbenchPath(workspace));
   }
 
+  if (!state || workspaces.length <= 1) {
+    return null;
+  }
+
   return (
     <div className="workspace-selection-shell">
       <div className="workspace-selection-container">
-        <header className="workspace-selection-compact-header">
+        <header className="workspace-selection-header">
           <div>
-            <Typography.Text className="workspace-selection-eyebrow">KyaiCRM Console</Typography.Text>
+            <Typography.Text className="workspace-selection-eyebrow">{logoTextLong} Console</Typography.Text>
             <Typography.Title level={2}>选择工作区</Typography.Title>
-            <Typography.Paragraph>
-              请选择本次进入的平台、机构或企业。进入后，菜单、权限与数据范围会同步切换。
-            </Typography.Paragraph>
+            <Typography.Paragraph>进入不同后台时，菜单、权限与数据范围会按当前身份切换。</Typography.Paragraph>
           </div>
-
-          <div className="workspace-selection-account-inline">
-            <Space align="center" size={12}>
-              <div className="workspace-selection-avatar">
-                <UserOutlined />
-              </div>
-              <div>
-                <Typography.Text strong>{state?.user.displayName}</Typography.Text>
-                <br />
-                <Typography.Text type="secondary">{state?.user.email ?? ""}</Typography.Text>
-              </div>
-            </Space>
-            <div className="workspace-selection-stats workspace-selection-stats--inline">
-              <span>
-                <strong>{workspaces.length}</strong>
-                <Typography.Text type="secondary">工作区</Typography.Text>
-              </span>
+          <div className="workspace-selection-user-chip">
+            <div className="workspace-selection-avatar">
+              <UserOutlined />
+            </div>
+            <div className="workspace-selection-user">
+              <Typography.Text strong>{state?.user.displayName}</Typography.Text>
+              <Typography.Text type="secondary">{userContact}</Typography.Text>
             </div>
           </div>
         </header>
 
-        <Card className="workspace-selection-main" styles={{ body: { padding: 0 } }}>
+        <main className="workspace-selection-panel">
           <div className="workspace-selection-toolbar">
             <div>
               <Typography.Title level={4}>后台身份</Typography.Title>
@@ -93,60 +120,72 @@ export function WorkspaceSelectPage() {
                 共 {workspaces.length} 个工作区，当前匹配 {matched} 个
               </Typography.Text>
             </div>
-            <Space wrap className="workspace-selection-actions">
-              <Input.Search
-                allowClear
-                className="workspace-selection-search"
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="搜索工作区名称、类型或角色"
-                size="large"
-                value={search}
-              />
-            </Space>
+            <Input.Search
+              allowClear
+              className="workspace-selection-search"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="搜索工作区、后台类型或角色"
+              size="large"
+              value={search}
+            />
           </div>
 
           <div className="workspace-selection-body">
             {matched === 0 ? (
-              <Empty description="没有匹配的工作区。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <div className="workspace-selection-empty">
+                <Empty description="没有匹配的工作区。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
             ) : (
-              <Space direction="vertical" size={20} style={{ width: "100%" }}>
+              <div className="workspace-tree-list workspace-tree-list--selection">
                 {grouped.map((group) => (
-                  <section className="workspace-group-section" key={group.type}>
-                    <Typography.Title level={5} className="workspace-group-heading">
-                      {workspaceTypeLabel(group.type)}后台
-                    </Typography.Title>
-                    <Typography.Paragraph type="secondary" className="workspace-group-description">
-                      {workspaceGroupDescription(group.type)}
-                    </Typography.Paragraph>
-                    <div className="workspace-grid">
+                  <section className="workspace-tree-group" key={group.type}>
+                    <div className={`workspace-tree-group-row workspace-tree-group-row--${group.type}`}>
+                      <span className={`workspace-selection-type-icon workspace-selection-type-icon--${group.type}`}>
+                        {WORKSPACE_TYPE_ICONS[group.type]}
+                      </span>
+                      <div className="workspace-tree-group-main">
+                        <div>
+                          <Typography.Title level={5}>{workspaceTypeLabel(group.type)}后台</Typography.Title>
+                          <Typography.Text type="secondary">{workspaceGroupDescription(group.type)}</Typography.Text>
+                        </div>
+                        <Tag color={workspaceTypeColor(group.type)}>{group.workspaces.length} 个</Tag>
+                      </div>
+                    </div>
+
+                    <div className="workspace-tree-children">
                       {group.workspaces.map((workspace) => (
-                        <Card
+                        <button
+                          aria-label={`进入${workspace.name}`}
+                          className="workspace-tree-row"
                           key={workspace.id}
-                          className={`workspace-card workspace-card--selection workspace-card--${workspace.type}`}
+                          onClick={() => enter(workspace)}
+                          type="button"
                         >
-                          <div className="workspace-card-content">
-                            <Space size={8} wrap>
+                          <span className="workspace-tree-branch" />
+                          <span className="workspace-tree-row-main">
+                            <span className="workspace-tree-row-title">
                               <Typography.Text strong>{workspace.name}</Typography.Text>
                               <Tag color={workspaceTypeColor(workspace.type)}>
                                 {workspaceTypeLabel(workspace.type)}
                               </Tag>
-                            </Space>
-                            <Typography.Text type="secondary" className="workspace-card-description">
+                            </span>
+                            <Typography.Text type="secondary" className="workspace-tree-row-meta">
                               角色：{rolesLabel(workspace)}
                             </Typography.Text>
-                            <Button type="primary" block onClick={() => enter(workspace)}>
-                              进入工作区
-                            </Button>
-                          </div>
-                        </Card>
+                          </span>
+                          <span className="workspace-tree-row-action">
+                            进入
+                            <ArrowRightOutlined />
+                          </span>
+                        </button>
                       ))}
                     </div>
                   </section>
                 ))}
-              </Space>
+              </div>
             )}
           </div>
-        </Card>
+        </main>
       </div>
     </div>
   );

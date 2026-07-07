@@ -1,10 +1,12 @@
-import { Button, Select, Space, Table, Tag, Typography, message } from "antd";
+import { useMemo, useState } from "react";
+import { Button, Segmented, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import {
   ListPageCard,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   writeListQueryState,
   type ListQueryState
@@ -18,6 +20,7 @@ import {
 } from "../api";
 
 const READ_OPTIONS = [
+  { value: "all", label: "全部" },
   { value: "false", label: "未读" },
   { value: "true", label: "已读" }
 ];
@@ -28,6 +31,7 @@ export function NotificationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
   const readFilter = searchParams.get("read") ?? undefined;
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const { data, isFetching } = useQuery({
     queryKey: ["notifications", queryState.page, queryState.pageSize, readFilter],
@@ -37,6 +41,7 @@ export function NotificationsPage() {
   const unread = unreadQuery.data?.count ?? unreadQuery.data?.unreadCount ?? 0;
 
   function applyState(next: Partial<ListQueryState> & { read?: string }) {
+    setSelectedRowKeys([]);
     const params = new URLSearchParams(writeListQueryState({ ...queryState, ...next }));
     if (next.read !== undefined) {
       if (next.read) params.set("read", next.read);
@@ -47,10 +52,28 @@ export function NotificationsPage() {
     setSearchParams(params);
   }
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  const selectedNotifications = useMemo(
+    () => (data?.items ?? []).filter((notification) => selectedRowKeys.includes(notification.id)),
+    [data?.items, selectedRowKeys]
+  );
 
   const readMutation = useMutation({
     mutationFn: (id: string) => markNotificationRead(client, id),
     onSuccess: invalidate,
+    onError: (error: Error) => message.error(error.message)
+  });
+  const bulkReadMutation = useMutation({
+    mutationFn: () =>
+      runBatchRequests(
+        selectedNotifications,
+        (notification) => markNotificationRead(client, notification.id),
+        "批量标记已读失败"
+      ),
+    onSuccess: () => {
+      void message.success("通知已批量标记为已读。");
+      setSelectedRowKeys([]);
+      invalidate();
+    },
     onError: (error: Error) => message.error(error.message)
   });
   const readAllMutation = useMutation({
@@ -89,7 +112,8 @@ export function NotificationsPage() {
     {
       title: "操作",
       key: "actions",
-      width: 100,
+      className: "table-action-column",
+      width: 180,
       render: (_, record) =>
         record.read ? null : (
           <Button size="small" type="link" onClick={() => readMutation.mutate(record.id)}>
@@ -102,28 +126,49 @@ export function NotificationsPage() {
   return (
     <ListPageCard
       title="通知"
-      subtitle={`未读 ${unread} 条`}
+      subtitle={
+        selectedRowKeys.length > 0 ? (
+          <Space size={8}>
+            <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+            <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+              清空选择
+            </Button>
+          </Space>
+        ) : (
+          `未读 ${unread} 条`
+        )
+      }
+      toolbar={
+        <Segmented
+          className="list-status-segmented"
+          options={READ_OPTIONS}
+          value={readFilter ?? "all"}
+          onChange={(value) => applyState({ read: value === "all" ? "" : String(value), page: 1 })}
+        />
+      }
       extra={
-        <Button onClick={() => readAllMutation.mutate()} loading={readAllMutation.isPending}>
-          全部已读
-        </Button>
+        <Space wrap>
+          {selectedNotifications.length > 0 ? (
+            <Button loading={bulkReadMutation.isPending} onClick={() => bulkReadMutation.mutate()}>
+              标记已读
+            </Button>
+          ) : null}
+          <Button onClick={() => readAllMutation.mutate()} loading={readAllMutation.isPending}>
+            全部已读
+          </Button>
+        </Space>
       }
     >
-      <Space style={{ padding: 16 }} wrap>
-        <Select
-          allowClear
-          placeholder="阅读状态"
-          style={{ width: 140 }}
-          options={READ_OPTIONS}
-          value={readFilter}
-          onChange={(value) => applyState({ read: value || "", page: 1 })}
-        />
-      </Space>
       <Table<Notification>
         rowKey="id"
         columns={columns}
         dataSource={data?.items ?? []}
         loading={isFetching}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => setSelectedRowKeys(keys.map(String)),
+          getCheckboxProps: (record) => ({ disabled: record.read })
+        }}
         pagination={{
           current: data?.pagination.page ?? queryState.page,
           pageSize: data?.pagination.pageSize ?? queryState.pageSize,

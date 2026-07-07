@@ -21,14 +21,6 @@ export const accessManagementPlugin: AdminPlugin = {
       icon: "KeyOutlined",
       menuKey: "access.permissions.view",
       requiredAnyPermissions: ["platform.permissions.view", "agency.permissions.view", "enterprise.permissions.view"]
-    },
-    {
-      key: "ky-access-management.data-scopes",
-      label: "数据范围",
-      path: "/data-scopes",
-      icon: "PartitionOutlined",
-      menuKey: "access.data_scopes.view",
-      requiredAnyPermissions: ["platform.data_scopes.view", "agency.data_scopes.view", "enterprise.data_scopes.view"]
     }
   ],
   routes

@@ -18,6 +18,7 @@ import (
 )
 
 const sessionTTL = 24 * time.Hour
+const desktopClientMode = "desktop"
 
 type Server struct {
 	cfg   config.Config
@@ -43,10 +44,13 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("POST /api/v1/auth/register", s.register)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
+	mux.HandleFunc("POST /api/v1/auth/change-password", s.changePassword)
 	mux.HandleFunc("GET /api/v1/auth/me", s.me)
 	mux.HandleFunc("GET /api/v1/auth/bootstrap", s.bootstrap)
 	mux.HandleFunc("GET /api/v1/login-logs", s.loginLogs)
 	mux.HandleFunc("GET /api/v1/platform/users", s.searchPlatformUsers)
+	mux.HandleFunc("PATCH /api/v1/platform/users/{id}", s.updateUser)
+	mux.HandleFunc("POST /api/v1/platform/users/{id}/reset-password", s.resetUserPassword)
 
 	server := &http.Server{
 		Addr:    s.cfg.HTTPAddr,
@@ -103,8 +107,10 @@ type registerRequest struct {
 }
 
 type loginRequest struct {
-	Account  string `json:"account"`
-	Password string `json:"password"`
+	Account    string `json:"account"`
+	Password   string `json:"password"`
+	ClientMode string `json:"clientMode"`
+	ClientName string `json:"clientName"`
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -172,9 +178,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "account 和 password 不能为空")
 		return
 	}
+	userAgent := clientUserAgent(r, req.ClientMode, req.ClientName)
 	credential, err := s.store.FindPasswordCredential(r.Context(), req.Account)
 	if err != nil || credential.Status != "normal" || credential.User.Status != "normal" || !auth.VerifyPassword(credential.PasswordHash, req.Password) {
-		_ = s.store.WriteLoginLog(r.Context(), newID("login"), nil, req.Account, "failed", "invalid credential", clientIP(r), r.UserAgent())
+		_ = s.store.WriteLoginLog(r.Context(), newID("login"), nil, req.Account, "failed", "invalid credential", clientIP(r), userAgent)
 		writeError(w, r, http.StatusUnauthorized, "unauthorized", "账号或密码错误")
 		return
 	}
@@ -182,17 +189,18 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "登录状态更新失败")
 		return
 	}
-	token, expiresAt, err := s.createSessionToken(r.Context(), credential.UserID, clientIP(r), r.UserAgent())
+	token, expiresAt, err := s.createSessionToken(r.Context(), credential.UserID, clientIP(r), userAgent)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "会话创建失败")
 		return
 	}
-	_ = s.store.WriteLoginLog(r.Context(), newID("login"), &credential.UserID, req.Account, "success", "", clientIP(r), r.UserAgent())
+	_ = s.store.WriteLoginLog(r.Context(), newID("login"), &credential.UserID, req.Account, "success", "", clientIP(r), userAgent)
 	writeData(w, r, map[string]any{
 		"token":     token,
 		"expiresAt": expiresAt.Format(time.RFC3339),
 		"user": map[string]any{
 			"id":          credential.User.ID,
+			"username":    credential.User.Username,
 			"displayName": credential.User.DisplayName,
 			"avatarUrl":   credential.User.AvatarURL,
 		},
@@ -223,6 +231,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	}
 	writeData(w, r, map[string]any{
 		"id":          user.ID,
+		"username":    user.Username,
 		"displayName": user.DisplayName,
 		"avatarUrl":   user.AvatarURL,
 		"phone":       user.Phone,
@@ -283,6 +292,7 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	writeData(w, r, map[string]any{
 		"user": map[string]any{
 			"id":          user.ID,
+			"username":    user.Username,
 			"displayName": user.DisplayName,
 			"avatarUrl":   user.AvatarURL,
 			"phone":       user.Phone,
@@ -383,4 +393,63 @@ func clientIP(r *http.Request) string {
 		return strings.TrimSpace(strings.Split(ip, ",")[0])
 	}
 	return r.RemoteAddr
+}
+
+func clientUserAgent(r *http.Request, bodyMode string, bodyName string) string {
+	userAgent := r.UserAgent()
+	mode := normalizeClientMode(firstNonEmpty(bodyMode, r.Header.Get("X-AiCRM-Client-Mode")))
+	if mode == "" {
+		return userAgent
+	}
+	name := sanitizeClientMarker(firstNonEmpty(bodyName, r.Header.Get("X-AiCRM-Client-Name")))
+	marker := "[client:" + mode
+	if name != "" {
+		marker += ";name:" + name
+	}
+	marker += "]"
+	if strings.HasPrefix(userAgent, marker) {
+		return userAgent
+	}
+	if strings.TrimSpace(userAgent) == "" {
+		return marker
+	}
+	return marker + " " + userAgent
+}
+
+func normalizeClientMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case desktopClientMode, "electron", "aicrm-desktop":
+		return desktopClientMode
+	default:
+		return ""
+	}
+}
+
+func sanitizeClientMarker(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' {
+			return r
+		}
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		if r == '-' || r == '_' || r == '.' {
+			return r
+		}
+		return -1
+	}, value)
+	if len(value) > 40 {
+		return value[:40]
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

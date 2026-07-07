@@ -7,7 +7,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "baseUrl": ".",
+    "types": ["vite/client"],
     "paths": {
       "@ky/admin-core": ["../../packages/ky-admin-core/src/index.ts"],
       "@ky/plugin-access-management": ["../../plugins/ky-access-management/src/index.tsx"],

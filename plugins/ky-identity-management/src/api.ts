@@ -5,9 +5,23 @@ export interface ListResult<T> {
   pagination: { page: number; pageSize: number; total: number };
 }
 
+export interface MemberRole {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface RoleOption extends MemberRole {
+  workspaceType: string;
+  workspaceId: string | null;
+  isSystem: boolean;
+  status: string;
+}
+
 export interface Member {
   id: string;
   userId: string;
+  username: string;
   workspaceType: string;
   workspaceId: string;
   displayName: string;
@@ -20,6 +34,7 @@ export interface Member {
   departmentIds: string[];
   teamIds: string[];
   roleIds: string[];
+  roles?: MemberRole[];
 }
 
 export interface MemberListParams {
@@ -42,12 +57,47 @@ export function listMembers(client: RequestClient, params: MemberListParams): Pr
   return client.request<ListResult<Member>>(`/api/v1/workspace/members?${q.toString()}`);
 }
 
+export function listRoles(client: RequestClient): Promise<ListResult<RoleOption>> {
+  return client.request<ListResult<RoleOption>>("/api/v1/roles?page=1&pageSize=100&status=normal");
+}
+
+export interface CreateMemberInput {
+  username: string;
+  displayName: string;
+  password: string;
+  email?: string;
+  phone?: string;
+  employeeNo?: string;
+  title?: string;
+  roleIds: string[];
+  departmentIds?: string[];
+  teamIds?: string[];
+}
+
+export function createMember(client: RequestClient, input: CreateMemberInput): Promise<Member> {
+  return client.request<Member>("/api/v1/workspace/members", { method: "POST", body: input });
+}
+
 export function updateMemberStatus(client: RequestClient, id: string, status: string, reason?: string): Promise<unknown> {
   return client.request(`/api/v1/workspace/members/${id}/status`, { method: "PATCH", body: { status, reason } });
 }
 
 export function removeMember(client: RequestClient, id: string): Promise<unknown> {
   return client.request(`/api/v1/workspace/members/${id}`, { method: "DELETE" });
+}
+
+export interface UpdateUserInput {
+  displayName: string;
+  email?: string;
+  phone?: string;
+}
+
+export function updateUser(client: RequestClient, userId: string, input: UpdateUserInput): Promise<unknown> {
+  return client.request(`/api/v1/platform/users/${userId}`, { method: "PATCH", body: input });
+}
+
+export function resetUserPassword(client: RequestClient, userId: string, newPassword: string): Promise<unknown> {
+  return client.request(`/api/v1/platform/users/${userId}/reset-password`, { method: "POST", body: { newPassword } });
 }
 
 export interface DepartmentAssignment {

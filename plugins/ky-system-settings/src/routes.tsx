@@ -1,16 +1,21 @@
 import type { PluginRoute } from "@ky/admin-core";
-import { SettingsPage } from "./pages/settings-page";
-import { DictionariesPage } from "./pages/dictionaries-page";
+import { SettingsHubPage } from "./pages/settings-hub-page";
 
 export const routes: PluginRoute[] = [
   {
-    path: "/settings",
-    requiredAnyPermissions: ["platform.settings.view", "agency.settings.view", "enterprise.settings.view"],
-    element: <SettingsPage />
-  },
-  {
-    path: "/dictionaries",
-    requiredPermission: "platform.dictionaries.view",
-    element: <DictionariesPage />
+    path: "/system",
+    requiredAnyPermissions: [
+      "platform.settings.view",
+      "agency.settings.view",
+      "enterprise.settings.view",
+      "platform.dictionaries.view",
+      "platform.basic_info.view",
+      "platform.notification_templates.view",
+      "platform.storage.view",
+      "platform.sms.view",
+      "platform.email.view",
+      "platform.app_version.view"
+    ],
+    element: <SettingsHubPage />
   }
 ];

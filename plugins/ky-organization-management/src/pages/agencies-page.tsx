@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Descriptions,
@@ -20,6 +20,7 @@ import {
   ListPageCard,
   drawerWidths,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   usePermissions,
   writeListQueryState,
@@ -48,23 +49,36 @@ const STATUS_OPTIONS = [
   { value: "frozen", label: "已冻结" }
 ];
 
+interface AgencyFilterValues {
+  keyword: string;
+  status?: string;
+}
+
 export function AgenciesPage() {
   const client = useRequestClient();
   const permissions = usePermissions();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
-  const [keywordInput, setKeywordInput] = useState(queryState.keyword ?? "");
+  const [filterValues, setFilterValues] = useState<AgencyFilterValues>({
+    keyword: queryState.keyword ?? "",
+    status: queryState.status
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Agency | null>(null);
   const [detail, setDetail] = useState<Agency | null>(null);
   const [creator, setCreator] = useState<UserBrief | null>(null);
   const [membersOrg, setMembersOrg] = useState<OrgRef | null>(null);
   const [form] = Form.useForm<AgencyInput>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canCreate = permissions.can("platform.agencies.create");
   const canUpdate = permissions.can("platform.agencies.update");
   const canDisable = permissions.can("platform.agencies.disable");
+
+  useEffect(() => {
+    setFilterValues({ keyword: queryState.keyword ?? "", status: queryState.status });
+  }, [queryState.keyword, queryState.status]);
 
   const listQueryKey = ["org", "agencies", queryState.page, queryState.pageSize, queryState.keyword, queryState.status];
   const { data, isFetching } = useQuery({
@@ -79,10 +93,27 @@ export function AgenciesPage() {
   });
 
   function applyState(next: Partial<ListQueryState>) {
+    setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
 
+  function submitFilters() {
+    const keyword = filterValues.keyword.trim();
+    applyState({ keyword: keyword || undefined, status: filterValues.status, page: 1 });
+  }
+
+  function resetFilters() {
+    setFilterValues({ keyword: "", status: undefined });
+    applyState({ keyword: undefined, status: undefined, page: 1 });
+  }
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["org", "agencies"] });
+  const selectedAgencies = useMemo(
+    () => (data?.items ?? []).filter((agency) => selectedRowKeys.includes(agency.id)),
+    [data?.items, selectedRowKeys]
+  );
+  const selectedNormalAgencies = selectedAgencies.filter((agency) => agency.status === "normal");
+  const selectedInactiveAgencies = selectedAgencies.filter((agency) => agency.status !== "normal");
 
   const saveMutation = useMutation({
     mutationFn: (values: AgencyInput) =>
@@ -100,6 +131,23 @@ export function AgenciesPage() {
     mutationFn: ({ id, status }: { id: string; status: string }) => updateAgencyStatus(client, id, status),
     onSuccess: () => {
       void message.success("机构状态已更新。");
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+
+  const bulkStatusMutation = useMutation({
+    mutationFn: (status: string) => {
+      const targets = status === "disabled" ? selectedNormalAgencies : selectedInactiveAgencies;
+      return runBatchRequests(
+        targets,
+        (agency) => updateAgencyStatus(client, agency.id, status),
+        "批量更新机构状态失败"
+      );
+    },
+    onSuccess: () => {
+      void message.success("机构状态已批量更新。");
+      setSelectedRowKeys([]);
       invalidate();
     },
     onError: (error: Error) => message.error(error.message)
@@ -197,9 +245,10 @@ export function AgenciesPage() {
       {
         title: "操作",
         key: "actions",
-        width: 220,
+        className: "table-action-column",
+        width: 240,
         render: (_, record) => (
-          <Space size={4}>
+          <Space className="table-action-grid" size={4} wrap>
             <Button size="small" type="link" onClick={() => setDetail(record)}>
               详情
             </Button>
@@ -241,40 +290,85 @@ export function AgenciesPage() {
     <>
       <ListPageCard
         title="机构管理"
-        subtitle="管理平台下的机构主体，包含基础信息与启停状态。"
-        extra={
-          canCreate ? (
-            <Button type="primary" onClick={openCreate}>
-              新建机构
-            </Button>
-          ) : null
+        subtitle={
+          selectedRowKeys.length > 0 ? (
+            <Space size={8}>
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+              <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+                清空选择
+              </Button>
+            </Space>
+          ) : (
+            "管理平台下的机构主体，包含基础信息与启停状态。"
+          )
         }
-      >
-        <Space style={{ padding: 16, width: "100%", justifyContent: "space-between" }} wrap>
+        toolbar={
           <Space wrap>
-            <Input.Search
+            <Input
               allowClear
               placeholder="搜索机构名称或编码"
               style={{ width: 260 }}
-              value={keywordInput}
-              onChange={(event) => setKeywordInput(event.target.value)}
-              onSearch={(value) => applyState({ keyword: value || undefined, page: 1 })}
+              value={filterValues.keyword}
+              onChange={(event) => setFilterValues((values) => ({ ...values, keyword: event.target.value }))}
             />
             <Select
               allowClear
               placeholder="状态"
               style={{ width: 140 }}
               options={STATUS_OPTIONS}
-              value={queryState.status}
-              onChange={(value) => applyState({ status: value || undefined, page: 1 })}
+              value={filterValues.status}
+              onChange={(value) => setFilterValues((values) => ({ ...values, status: value || undefined }))}
             />
+            <Button type="primary" onClick={submitFilters}>
+              查询
+            </Button>
+            <Button onClick={resetFilters}>重置</Button>
           </Space>
-        </Space>
+        }
+        extra={
+          <Space wrap>
+            {selectedAgencies.length > 0 && canDisable ? (
+              <>
+                {selectedNormalAgencies.length > 0 ? (
+                  <Popconfirm
+                    title={`确认停用选中的 ${selectedNormalAgencies.length} 个机构？`}
+                    okText="停用"
+                    cancelText="取消"
+                    onConfirm={() => bulkStatusMutation.mutate("disabled")}
+                  >
+                    <Button danger loading={bulkStatusMutation.isPending}>
+                      批量停用
+                    </Button>
+                  </Popconfirm>
+                ) : null}
+                {selectedInactiveAgencies.length > 0 ? (
+                  <Button loading={bulkStatusMutation.isPending} onClick={() => bulkStatusMutation.mutate("normal")}>
+                    批量启用
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+            {canCreate ? (
+              <Button type="primary" onClick={openCreate}>
+                新建机构
+              </Button>
+            ) : null}
+          </Space>
+        }
+      >
         <Table<Agency>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
           loading={isFetching}
+          rowSelection={
+            canDisable
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String))
+                }
+              : undefined
+          }
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,

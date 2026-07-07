@@ -8,6 +8,7 @@ export interface ListResult<T> {
 export interface AuditLog {
   id: string;
   actorUserId: string | null;
+  actorName: string;
   actorMembershipId: string | null;
   workspaceType: string;
   workspaceId: string;

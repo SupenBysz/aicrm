@@ -23,10 +23,8 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request, wc wsCon
 	if !decodeJSON(w, r, &in) {
 		return
 	}
-	if len(in.Settings) == 0 {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "settings 不能为空")
-		return
-	}
+	// Empty is allowed — the editor sends the full desired set, so an empty map
+	// clears all settings for the scope (full-replace semantics in UpsertSettings).
 	if err := s.store.UpsertSettings(r.Context(), wc.WorkspaceType, wc.WorkspaceID, in.Settings, wc.UserID); err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -53,10 +51,6 @@ func (s *Server) getPlatformSettings(w http.ResponseWriter, r *http.Request, wc 
 func (s *Server) updatePlatformSettings(w http.ResponseWriter, r *http.Request, wc wsContext) {
 	var in settingsBody
 	if !decodeJSON(w, r, &in) {
-		return
-	}
-	if len(in.Settings) == 0 {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "settings 不能为空")
 		return
 	}
 	if err := s.store.UpsertSettings(r.Context(), "platform", "platform_root", in.Settings, wc.UserID); err != nil {

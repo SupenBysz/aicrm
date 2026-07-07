@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,16 +30,25 @@ const STATUS_OPTIONS = [
   { value: "rejected", label: "已驳回" }
 ];
 
+interface QualificationFilterValues {
+  status?: string;
+}
+
 export function QualificationReviewPage() {
   const client = useRequestClient();
   const permissions = usePermissions();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
+  const [filterValues, setFilterValues] = useState<QualificationFilterValues>({ status: queryState.status });
   const [reject, setReject] = useState<Qualification | null>(null);
   const [rejectRemark, setRejectRemark] = useState("");
 
   const canReview = permissions.can("platform.qualifications.review");
+
+  useEffect(() => {
+    setFilterValues({ status: queryState.status });
+  }, [queryState.status]);
 
   const { data, isFetching } = useQuery({
     queryKey: ["qualifications", "review", queryState.page, queryState.pageSize, queryState.status],
@@ -49,6 +58,16 @@ export function QualificationReviewPage() {
   function applyState(next: Partial<ListQueryState>) {
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
+
+  function submitFilters() {
+    applyState({ status: filterValues.status, page: 1 });
+  }
+
+  function resetFilters() {
+    setFilterValues({ status: undefined });
+    applyState({ status: undefined, page: 1 });
+  }
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["qualifications"] });
 
   const approveMutation = useMutation({
@@ -105,10 +124,11 @@ export function QualificationReviewPage() {
     {
       title: "操作",
       key: "actions",
-      width: 130,
+      className: "table-action-column",
+      width: 180,
       render: (_, record) =>
         canReview && record.status === "submitted" ? (
-          <Space size={4}>
+          <Space className="table-action-grid" size={4} wrap>
             <Button size="small" type="link" loading={approveMutation.isPending} onClick={() => approveMutation.mutate(record.id)}>
               通过
             </Button>
@@ -122,17 +142,26 @@ export function QualificationReviewPage() {
 
   return (
     <>
-      <ListPageCard title="资质审核" subtitle="审核机构 / 企业提交的资质材料。">
-        <Space style={{ padding: 16 }} wrap>
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 140 }}
-            options={STATUS_OPTIONS}
-            value={queryState.status}
-            onChange={(value) => applyState({ status: value || undefined, page: 1 })}
-          />
-        </Space>
+      <ListPageCard
+        title="资质审核"
+        subtitle="审核机构 / 企业提交的资质材料。"
+        toolbar={
+          <Space wrap>
+            <Select
+              allowClear
+              placeholder="状态"
+              style={{ width: 140 }}
+              options={STATUS_OPTIONS}
+              value={filterValues.status}
+              onChange={(value) => setFilterValues({ status: value || undefined })}
+            />
+            <Button type="primary" onClick={submitFilters}>
+              查询
+            </Button>
+            <Button onClick={resetFilters}>重置</Button>
+          </Space>
+        }
+      >
         <Table<Qualification>
           rowKey="id"
           columns={columns}

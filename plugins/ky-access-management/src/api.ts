@@ -82,14 +82,3 @@ export function listPermissions(
   const suffix = q.toString();
   return client.request<Permission[]>(`/api/v1/permissions${suffix ? `?${suffix}` : ""}`);
 }
-
-export interface DataScopeDefinition {
-  scopeType: string;
-  label: string;
-}
-
-export function listDataScopes(
-  client: RequestClient
-): Promise<{ definitions: DataScopeDefinition[]; current: DataScope[] }> {
-  return client.request<{ definitions: DataScopeDefinition[]; current: DataScope[] }>("/api/v1/data-scopes");
-}

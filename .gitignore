@@ -3,6 +3,7 @@ node_modules/
 
 # Build output (frontend dist + bundled service binaries)
 dist/
+out/
 .turbo/
 
 # Compiled Go binaries (named after the service dir; source lives in internal/server/)

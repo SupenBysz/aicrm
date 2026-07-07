@@ -2,21 +2,47 @@ package store
 
 import "time"
 
+type MemberRole struct {
+	ID   string `json:"id"`
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
 type Member struct {
-	ID            string     `json:"id"`
-	UserID        string     `json:"userId"`
-	WorkspaceType string     `json:"workspaceType"`
-	WorkspaceID   string     `json:"workspaceId"`
-	DisplayName   string     `json:"displayName"`
-	EmployeeNo    string     `json:"employeeNo"`
-	Title         string     `json:"title"`
-	Status        string     `json:"status"`
-	Email         string     `json:"email"`
-	Phone         string     `json:"phone"`
-	JoinedAt      *time.Time `json:"joinedAt"`
-	DepartmentIDs []string   `json:"departmentIds"`
-	TeamIDs       []string   `json:"teamIds"`
-	RoleIDs       []string   `json:"roleIds"`
+	ID            string       `json:"id"`
+	UserID        string       `json:"userId"`
+	Username      string       `json:"username"`
+	WorkspaceType string       `json:"workspaceType"`
+	WorkspaceID   string       `json:"workspaceId"`
+	DisplayName   string       `json:"displayName"`
+	EmployeeNo    string       `json:"employeeNo"`
+	Title         string       `json:"title"`
+	Status        string       `json:"status"`
+	Email         string       `json:"email"`
+	Phone         string       `json:"phone"`
+	JoinedAt      *time.Time   `json:"joinedAt"`
+	DepartmentIDs []string     `json:"departmentIds"`
+	TeamIDs       []string     `json:"teamIds"`
+	RoleIDs       []string     `json:"roleIds"`
+	Roles         []MemberRole `json:"roles"`
+}
+
+type CreateMemberInput struct {
+	ID            string
+	UserID        string
+	Username      string
+	DisplayName   string
+	Email         string
+	Phone         string
+	PasswordHash  string
+	EmployeeNo    string
+	Title         string
+	WorkspaceType string
+	WorkspaceID   string
+	CreatedBy     string
+	RoleIDs       []string
+	DepartmentIDs []string
+	TeamIDs       []string
 }
 
 type Invitation struct {
@@ -58,15 +84,15 @@ type DataScope struct {
 }
 
 type Role struct {
-	ID            string     `json:"id"`
-	WorkspaceType string     `json:"workspaceType"`
-	WorkspaceID   *string    `json:"workspaceId"`
-	Name          string     `json:"name"`
-	Code          string     `json:"code"`
-	Description   string     `json:"description"`
-	IsSystem      bool       `json:"isSystem"`
-	Status        string     `json:"status"`
-	PermissionIDs []string   `json:"permissionIds"`
+	ID            string      `json:"id"`
+	WorkspaceType string      `json:"workspaceType"`
+	WorkspaceID   *string     `json:"workspaceId"`
+	Name          string      `json:"name"`
+	Code          string      `json:"code"`
+	Description   string      `json:"description"`
+	IsSystem      bool        `json:"isSystem"`
+	Status        string      `json:"status"`
+	PermissionIDs []string    `json:"permissionIds"`
 	DataScopes    []DataScope `json:"dataScopes"`
 }
 

@@ -14,6 +14,7 @@ type Config struct {
 	RedisURL        string
 	NATSURL         string
 	AuthTokenSecret string
+	SecretKey       string
 }
 
 func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
@@ -35,7 +36,19 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 		RedisURL:        os.Getenv("KY_REDIS_URL"),
 		NATSURL:         os.Getenv("KY_NATS_URL"),
 		AuthTokenSecret: os.Getenv("KY_AUTH_TOKEN_SECRET"),
+		// Platform-wide secret for encrypting settings credentials (storage/SMS/email).
+		// Falls back to KY_AI_SECRET_KEY so a single master key can serve both.
+		SecretKey: firstNonEmpty(os.Getenv("KY_SECRET_KEY"), os.Getenv("KY_AI_SECRET_KEY")),
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func loadEnvFile(path string) error {

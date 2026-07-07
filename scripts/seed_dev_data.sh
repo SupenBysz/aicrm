@@ -3,8 +3,8 @@ set -euo pipefail
 
 : "${KY_TENANT_DATABASE_URL:?KY_TENANT_DATABASE_URL is required}"
 
-KY_DEV_ADMIN_ACCOUNT="${KY_DEV_ADMIN_ACCOUNT:-platform_owner}"
-KY_DEV_ADMIN_PASSWORD="${KY_DEV_ADMIN_PASSWORD:-admin123456}"
+KY_DEV_ADMIN_ACCOUNT="${KY_DEV_ADMIN_ACCOUNT:-Super.Admin}"
+KY_DEV_ADMIN_PASSWORD="${KY_DEV_ADMIN_PASSWORD:-Ky@123123}"
 KY_DEV_ADMIN_USER_ID="${KY_DEV_ADMIN_USER_ID:-user_platform_owner}"
 
 if ! command -v htpasswd >/dev/null 2>&1; then
@@ -19,10 +19,21 @@ fi
 HASH="$(htpasswd -bnBC 10 "" "$KY_DEV_ADMIN_PASSWORD" | tr -d ':' | sed 's/^\$2y\$/\$2a\$/')"
 
 psql "$KY_TENANT_DATABASE_URL" <<SQL
+UPDATE ky_user
+SET username = '$KY_DEV_ADMIN_ACCOUNT',
+    updated_at = now()
+WHERE id = '$KY_DEV_ADMIN_USER_ID';
+
+DELETE FROM ky_user_credential
+WHERE user_id = '$KY_DEV_ADMIN_USER_ID'
+  AND credential_type = 'password'
+  AND id <> 'cred_platform_owner_password';
+
 INSERT INTO ky_user_credential (id, user_id, credential_type, identifier, password_hash, status, verified_at)
 VALUES ('cred_platform_owner_password', '$KY_DEV_ADMIN_USER_ID', 'password', '$KY_DEV_ADMIN_ACCOUNT', '$HASH', 'normal', now())
-ON CONFLICT (credential_type, identifier) DO UPDATE
-SET password_hash = EXCLUDED.password_hash,
+ON CONFLICT (id) DO UPDATE
+SET identifier = EXCLUDED.identifier,
+    password_hash = EXCLUDED.password_hash,
     verified_at = COALESCE(ky_user_credential.verified_at, now()),
     status = 'normal',
     updated_at = now();

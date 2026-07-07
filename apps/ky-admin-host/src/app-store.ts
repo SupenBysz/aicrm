@@ -11,6 +11,7 @@ export interface AdminSession {
 
 export interface CurrentUser {
   id: string;
+  username?: string;
   displayName: string;
   avatarUrl: string;
   phone?: string;

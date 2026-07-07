@@ -41,6 +41,34 @@ func (s *Store) FindPasswordCredential(ctx context.Context, account string) (Cre
 	return credential, err
 }
 
+func (s *Store) FindPasswordCredentialByUserID(ctx context.Context, userID string) (Credential, error) {
+	var credential Credential
+	err := s.db.QueryRowContext(ctx, `
+		SELECT c.id, c.user_id, COALESCE(c.password_hash, ''), c.status,
+		       u.id, COALESCE(u.username, ''), u.display_name, u.avatar_url, COALESCE(u.phone, ''), COALESCE(u.email, ''), u.status
+		FROM ky_user_credential c
+		JOIN ky_user u ON u.id = c.user_id
+		WHERE c.credential_type = 'password'
+		  AND c.user_id = $1
+		  AND u.deleted_at IS NULL
+		ORDER BY c.verified_at DESC NULLS LAST, c.created_at DESC
+		LIMIT 1
+	`, userID).Scan(
+		&credential.ID,
+		&credential.UserID,
+		&credential.PasswordHash,
+		&credential.Status,
+		&credential.User.ID,
+		&credential.User.Username,
+		&credential.User.DisplayName,
+		&credential.User.AvatarURL,
+		&credential.User.Phone,
+		&credential.User.Email,
+		&credential.User.Status,
+	)
+	return credential, err
+}
+
 func (s *Store) CreateSession(ctx context.Context, session Session) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO ky_user_session (id, user_id, token_id, user_agent, ip_address, status, expires_at)

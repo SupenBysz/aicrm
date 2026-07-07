@@ -1,6 +1,7 @@
-import type { WorkspaceIdentity } from "@ky/admin-core";
+import type { RequestOptions, WorkspaceIdentity } from "@ky/admin-core";
 import { HostRequestClient } from "./plugin-request-client";
 import { loadCurrentWorkspace, type AdminSession, type BootstrapState, type CurrentUser } from "./app-store";
+import { withDesktopClientLoginPayload } from "./desktop-client";
 
 const client = new HostRequestClient(loadCurrentWorkspace);
 
@@ -10,10 +11,12 @@ export const requestClient = client;
 export interface LoginInput {
   account: string;
   password: string;
+  clientMode?: string;
+  clientName?: string;
 }
 
 export interface LoginResult extends AdminSession {
-  user: Pick<CurrentUser, "id" | "displayName" | "avatarUrl">;
+  user: Pick<CurrentUser, "id" | "username" | "displayName" | "avatarUrl">;
 }
 
 export interface RegisterInput {
@@ -27,10 +30,16 @@ export interface RegisterResult extends AdminSession {
   userId: string;
 }
 
-export async function login(input: LoginInput) {
+export interface ChangeLoginPasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export async function login(input: LoginInput, options: Pick<RequestOptions, "skipAuthRedirect"> = {}) {
   return client.request<LoginResult>("/api/v1/auth/login", {
     method: "POST",
-    body: input
+    body: withDesktopClientLoginPayload(input),
+    skipAuthRedirect: options.skipAuthRedirect
   });
 }
 
@@ -47,6 +56,13 @@ export async function bootstrap() {
 
 export async function logout() {
   return client.request<{ success: boolean }>("/api/v1/auth/logout", { method: "POST" });
+}
+
+export async function changeLoginPassword(input: ChangeLoginPasswordInput) {
+  return client.request<{ changed: boolean }>("/api/v1/auth/change-password", {
+    method: "POST",
+    body: input
+  });
 }
 
 export function pickWorkspace(workspaces: WorkspaceIdentity[], workspaceType?: string, workspaceId?: string) {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Button, Descriptions, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { useMemo, useState } from "react";
+import { Button, Descriptions, Drawer, Form, Input, Modal, Popconfirm, Segmented, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -7,6 +7,7 @@ import {
   ListPageCard,
   drawerWidths,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   usePermissions,
   writeListQueryState,
@@ -39,6 +40,7 @@ export function ProvidersPage() {
   const [form] = Form.useForm<ProviderInput>();
   const [rotateProvider, setRotateProvider] = useState<Provider | null>(null);
   const [rotateKey, setRotateKey] = useState("");
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canCreate = permissions.can("platform.ai_providers.create");
   const canUpdate = permissions.can("platform.ai_providers.update");
@@ -51,9 +53,16 @@ export function ProvidersPage() {
   });
 
   function applyState(next: Partial<ListQueryState>) {
+    setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["ai-providers"] });
+  const selectedProviders = useMemo(
+    () => (data?.items ?? []).filter((provider) => selectedRowKeys.includes(provider.id)),
+    [data?.items, selectedRowKeys]
+  );
+  const selectedEnabledProviders = selectedProviders.filter((provider) => provider.status === "enabled");
+  const selectedDisabledProviders = selectedProviders.filter((provider) => provider.status === "disabled");
 
   const saveMutation = useMutation({
     mutationFn: (values: ProviderInput) => (editing ? updateProvider(client, editing.id, values) : createProvider(client, values)),
@@ -69,6 +78,23 @@ export function ProvidersPage() {
     mutationFn: ({ id, status }: { id: string; status: string }) => updateProviderStatus(client, id, status),
     onSuccess: () => {
       void message.success("供应商状态已更新（停用会级联停用其模型）。");
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["ai-models"] });
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+  const bulkStatusMutation = useMutation({
+    mutationFn: (status: string) => {
+      const targets = status === "disabled" ? selectedEnabledProviders : selectedDisabledProviders;
+      return runBatchRequests(
+        targets,
+        (provider) => updateProviderStatus(client, provider.id, status),
+        "批量更新供应商状态失败"
+      );
+    },
+    onSuccess: () => {
+      void message.success("供应商状态已批量更新。");
+      setSelectedRowKeys([]);
       invalidate();
       queryClient.invalidateQueries({ queryKey: ["ai-models"] });
     },
@@ -141,9 +167,10 @@ export function ProvidersPage() {
     {
       title: "操作",
       key: "actions",
-      width: 220,
+      className: "table-action-column",
+      width: 240,
       render: (_, record) => (
-        <Space size={4} wrap>
+        <Space className="table-action-grid" size={4} wrap>
           <Button size="small" type="link" onClick={() => setDetail(record)}>
             详情
           </Button>
@@ -184,33 +211,74 @@ export function ProvidersPage() {
     <>
       <ListPageCard
         title="AI 供应商"
-        subtitle="管理 AI 模型供应商及其 API 密钥（密钥加密存储，永不回显明文）。"
-        extra={
-          canCreate ? (
-            <Button type="primary" onClick={openCreate}>
-              新建供应商
-            </Button>
-          ) : null
+        subtitle={
+          selectedRowKeys.length > 0 ? (
+            <Space size={8}>
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+              <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+                清空选择
+              </Button>
+            </Space>
+          ) : (
+            "管理 AI 模型供应商及其 API 密钥（密钥加密存储，永不回显明文）。"
+          )
         }
-      >
-        <Space style={{ padding: 16 }} wrap>
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 140 }}
+        toolbar={
+          <Segmented
+            className="list-status-segmented"
+            value={queryState.status ?? ""}
+            onChange={(value) => applyState({ status: String(value) || undefined, page: 1 })}
             options={[
+              { value: "", label: "全部" },
               { value: "enabled", label: "启用" },
               { value: "disabled", label: "停用" }
             ]}
-            value={queryState.status}
-            onChange={(value) => applyState({ status: value || undefined, page: 1 })}
           />
-        </Space>
+        }
+        extra={
+          <Space wrap>
+            {selectedProviders.length > 0 && canStatus ? (
+              <>
+                {selectedEnabledProviders.length > 0 ? (
+                  <Popconfirm
+                    title={`停用会级联停用模型，确认停用选中的 ${selectedEnabledProviders.length} 个供应商？`}
+                    okText="停用"
+                    cancelText="取消"
+                    onConfirm={() => bulkStatusMutation.mutate("disabled")}
+                  >
+                    <Button danger loading={bulkStatusMutation.isPending}>
+                      批量停用
+                    </Button>
+                  </Popconfirm>
+                ) : null}
+                {selectedDisabledProviders.length > 0 ? (
+                  <Button loading={bulkStatusMutation.isPending} onClick={() => bulkStatusMutation.mutate("enabled")}>
+                    批量启用
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+            {canCreate ? (
+              <Button type="primary" onClick={openCreate}>
+                新建供应商
+              </Button>
+            ) : null}
+          </Space>
+        }
+      >
         <Table<Provider>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
           loading={isFetching}
+          rowSelection={
+            canStatus
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String))
+                }
+              : undefined
+          }
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,

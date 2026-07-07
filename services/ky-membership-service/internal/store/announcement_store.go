@@ -56,9 +56,15 @@ func (s *Store) ListAnnouncementsPlatform(ctx context.Context, status string, pa
 
 // ListAnnouncementsForWorkspace returns published announcements visible to the workspace.
 func (s *Store) ListAnnouncementsForWorkspace(ctx context.Context, wsType, wsID string, page, pageSize int) ([]Announcement, int64, error) {
-	// visible: target_scope='all' OR (target_scope=wsType AND target_ids contains wsID)
+	// Visible when: broadcast to everyone (all/user_all), OR this workspace is in the
+	// targeted set (指定), OR a whole-type broadcast matching this workspace type.
 	args := []any{wsType, `"` + wsID + `"`}
-	clause := `status='published' AND (target_scope='all' OR (target_scope=$1 AND target_ids @> $2::jsonb))`
+	clause := `status='published' AND (
+		target_scope IN ('all','user_all')
+		OR (target_scope=$1 AND target_ids @> $2::jsonb)
+		OR (target_scope='agency_all' AND $1='agency')
+		OR (target_scope='enterprise_all' AND $1='enterprise')
+	)`
 	var total int64
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM ky_system_announcement WHERE `+clause, args...).Scan(&total); err != nil {
 		return nil, 0, err
@@ -70,6 +76,25 @@ func (s *Store) ListAnnouncementsForWorkspace(ctx context.Context, wsType, wsID 
 	}
 	defer rows.Close()
 	return collectAnnouncements(rows, total)
+}
+
+// allOrgIDsTx returns every non-deleted org id from the given table. `table` is a
+// fixed internal literal ("ky_agency" / "ky_enterprise"), never user input.
+func allOrgIDsTx(ctx context.Context, tx *sql.Tx, table string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM `+table+` WHERE deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func collectAnnouncements(rows *sql.Rows, total int64) ([]Announcement, int64, error) {
@@ -104,6 +129,39 @@ func (s *Store) GetAnnouncement(ctx context.Context, id string) (Announcement, e
 	return a, err
 }
 
+// UpdateAnnouncement edits a draft announcement. Published announcements are
+// immutable (they have already been bridged to notifications), so the update only
+// applies while status='draft'; otherwise ErrConflict.
+func (s *Store) UpdateAnnouncement(ctx context.Context, a Announcement) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE ky_system_announcement
+		SET title=$2, content=$3, target_scope=$4, target_ids=$5::jsonb, updated_at=now()
+		WHERE id=$1 AND status='draft'
+	`, a.ID, a.Title, a.Content, a.TargetScope, stringsToJSON(a.TargetIDs))
+	if err != nil {
+		return classifyWriteErr(err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrConflict // not found or already published
+	}
+	return nil
+}
+
+// DeleteAnnouncement removes a draft announcement. Published ones cannot be
+// deleted (recipients already notified); returns ErrConflict in that case.
+func (s *Store) DeleteAnnouncement(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM ky_system_announcement WHERE id=$1 AND status='draft'`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
 // PublishAnnouncement publishes a draft and bridges notifications. Returns the
 // number of notifications generated.
 func (s *Store) PublishAnnouncement(ctx context.Context, id string) (int, error) {
@@ -129,7 +187,8 @@ func (s *Store) PublishAnnouncement(ctx context.Context, id string) (int, error)
 
 	generated := 0
 	switch a.TargetScope {
-	case "all":
+	case "all", "user_all":
+		// Platform-scoped notification — visible to every user in every workspace.
 		if err := createNotificationTx(ctx, tx, "platform", "platform_root", "", a.Title, a.Content, "system"); err != nil {
 			return 0, err
 		}
@@ -144,6 +203,23 @@ func (s *Store) PublishAnnouncement(ctx context.Context, id string) (int, error)
 	case "user":
 		for _, uid := range a.TargetIDs {
 			if err := createNotificationTx(ctx, tx, "user", uid, uid, a.Title, a.Content, "system"); err != nil {
+				return 0, err
+			}
+			generated++
+		}
+	case "agency_all", "enterprise_all":
+		// Broadcast to every org of the type — fan out one notification per org so
+		// existing per-workspace visibility applies (covers orgs created so far).
+		table, scope := "ky_agency", "agency"
+		if a.TargetScope == "enterprise_all" {
+			table, scope = "ky_enterprise", "enterprise"
+		}
+		ids, err := allOrgIDsTx(ctx, tx, table)
+		if err != nil {
+			return 0, err
+		}
+		for _, id := range ids {
+			if err := createNotificationTx(ctx, tx, scope, id, "", a.Title, a.Content, "system"); err != nil {
 				return 0, err
 			}
 			generated++

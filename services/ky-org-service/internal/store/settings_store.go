@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 )
 
 // GetSettings returns all settings for a scope as setting_key -> raw jsonb value.
@@ -33,13 +35,34 @@ func (s *Store) GetSettings(ctx context.Context, scopeType, scopeID, section str
 	return out, rows.Err()
 }
 
-// UpsertSettings writes each provided setting_key -> jsonb value for the scope.
+// UpsertSettings replaces the scope's settings with the provided set: keys absent
+// from `settings` are deleted (so removals — including deleting all — persist), and
+// the provided keys are inserted/updated.
 func (s *Store) UpsertSettings(ctx context.Context, scopeType, scopeID string, settings map[string]json.RawMessage, updatedBy string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if len(settings) == 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM ky_system_setting WHERE scope_type=$1 AND scope_id=$2`, scopeType, scopeID); err != nil {
+			return err
+		}
+	} else {
+		args := []any{scopeType, scopeID}
+		placeholders := make([]string, 0, len(settings))
+		for key := range settings {
+			args = append(args, key)
+			placeholders = append(placeholders, "$"+strconv.Itoa(len(args)))
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM ky_system_setting WHERE scope_type=$1 AND scope_id=$2 AND setting_key NOT IN (`+strings.Join(placeholders, ",")+`)`,
+			args...); err != nil {
+			return err
+		}
+	}
+
 	for key, value := range settings {
 		if len(value) == 0 {
 			value = json.RawMessage("null")

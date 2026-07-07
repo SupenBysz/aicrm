@@ -45,6 +45,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Workspace members
 	mux.HandleFunc("GET /api/v1/workspace/members", s.ws(allWs, perms("platform.members.view", "agency.members.view", "enterprise.members.view"), s.listMembers))
+	mux.HandleFunc("POST /api/v1/workspace/members", s.ws(allWs, perms("platform.members.create", "agency.members.create", "enterprise.members.create"), s.createMember))
 	mux.HandleFunc("GET /api/v1/workspace/members/{id}", s.ws(allWs, perms("platform.members.view", "agency.members.view", "enterprise.members.view"), s.getMember))
 	mux.HandleFunc("PATCH /api/v1/workspace/members/{id}/status", s.ws(allWs, perms("platform.members.disable", "agency.members.disable", "enterprise.members.disable"), s.updateMemberStatus))
 	mux.HandleFunc("DELETE /api/v1/workspace/members/{id}", s.ws(allWs, perms("platform.members.remove", "agency.members.remove", "enterprise.members.remove"), s.removeMember))
@@ -84,6 +85,8 @@ func (s *Server) Run(ctx context.Context) error {
 	// Announcements
 	mux.HandleFunc("GET /api/v1/announcements", s.ws(allWs, perms("platform.announcements.view", "agency.announcements.view", "enterprise.announcements.view"), s.listAnnouncements))
 	mux.HandleFunc("POST /api/v1/announcements", s.ws("platform", perms("platform.announcements.create"), s.createAnnouncement))
+	mux.HandleFunc("PATCH /api/v1/announcements/{id}", s.ws("platform", perms("platform.announcements.update"), s.updateAnnouncement))
+	mux.HandleFunc("DELETE /api/v1/announcements/{id}", s.ws("platform", perms("platform.announcements.delete"), s.deleteAnnouncement))
 	mux.HandleFunc("PATCH /api/v1/announcements/{id}/publish", s.ws("platform", perms("platform.announcements.publish"), s.publishAnnouncement))
 
 	// Audit logs

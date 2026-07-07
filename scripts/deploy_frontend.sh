@@ -19,6 +19,8 @@ if [[ "${KY_EXECUTE_FRONTEND_DEPLOY:-}" == "1" ]]; then
   rm -rf "$TARGET_DIR"
   install -d "$TARGET_DIR"
   cp -R "$SRC_DIR"/. "$TARGET_DIR"/
+  find "$TARGET_DIR" -type d -exec chmod 0755 {} +
+  find "$TARGET_DIR" -type f -exec chmod 0644 {} +
   nginx -t
   systemctl reload nginx
   curl -fsS "$HEALTHZ_URL" >/dev/null

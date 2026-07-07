@@ -6,6 +6,7 @@ export type MenuPermissionKey = string;
 
 export interface CurrentUser {
   id: string;
+  username?: string;
   displayName: string;
   avatarUrl: string;
   phone?: string;
@@ -59,6 +60,7 @@ export interface RequestOptions {
   method?: string;
   headers?: Record<string, string>;
   body?: unknown;
+  skipAuthRedirect?: boolean;
 }
 
 export interface RequestClient {
@@ -112,6 +114,7 @@ export interface AdminPlugin {
 // Shared admin framework (page shells, list-query state, permission + identity
 // contexts) ported from the reference admin-core to accelerate module pages.
 export * from "./page-shell";
+export * from "./batch-actions";
 export * from "./url-state";
 export * from "./permissions";
 export * from "./user-context";

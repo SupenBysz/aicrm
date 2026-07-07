@@ -48,3 +48,8 @@ docs/       Locked Phase 1 requirements and architecture documents.
 ## Locked Documents
 
 The Phase 1 baseline is defined by the documents under `docs/`.
+
+## Governance Documents
+
+- Git repository governance: `docs/kyai_crm_git_repository_governance.md`
+- Contribution rules: `CONTRIBUTING.md`

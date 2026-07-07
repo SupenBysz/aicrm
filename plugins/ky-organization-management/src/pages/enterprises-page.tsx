@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Descriptions,
@@ -20,6 +20,7 @@ import {
   ListPageCard,
   drawerWidths,
   readListQueryState,
+  runBatchRequests,
   useRequestClient,
   usePermissions,
   writeListQueryState,
@@ -54,25 +55,43 @@ interface EnterpriseFormValues extends EnterpriseInput {
   agencyId?: string;
 }
 
+interface EnterpriseFilterValues {
+  keyword: string;
+  status?: string;
+  agencyId?: string;
+}
+
 export function EnterprisesPage() {
   const client = useRequestClient();
   const permissions = usePermissions();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
-  const [keywordInput, setKeywordInput] = useState(queryState.keyword ?? "");
-  const [agencyFilter, setAgencyFilter] = useState<string | undefined>(undefined);
+  const [filterValues, setFilterValues] = useState<EnterpriseFilterValues>({
+    keyword: queryState.keyword ?? "",
+    status: queryState.status,
+    agencyId: queryState.type
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Enterprise | null>(null);
   const [detail, setDetail] = useState<Enterprise | null>(null);
   const [creator, setCreator] = useState<UserBrief | null>(null);
   const [membersOrg, setMembersOrg] = useState<OrgRef | null>(null);
   const [form] = Form.useForm<EnterpriseFormValues>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canCreate = permissions.can("platform.enterprises.create");
   const canUpdate = permissions.can("platform.enterprises.update");
   const canDisable = permissions.can("platform.enterprises.disable");
   const canAssignAgency = permissions.can("platform.enterprises.assign_agency");
+
+  useEffect(() => {
+    setFilterValues({
+      keyword: queryState.keyword ?? "",
+      status: queryState.status,
+      agencyId: queryState.type
+    });
+  }, [queryState.keyword, queryState.status, queryState.type]);
 
   const agenciesQuery = useQuery({
     queryKey: ["org", "agencies", "options"],
@@ -86,22 +105,44 @@ export function EnterprisesPage() {
   }, [agenciesQuery.data]);
 
   const { data, isFetching } = useQuery({
-    queryKey: ["org", "enterprises", queryState.page, queryState.pageSize, queryState.keyword, queryState.status, agencyFilter],
+    queryKey: ["org", "enterprises", queryState.page, queryState.pageSize, queryState.keyword, queryState.status, queryState.type],
     queryFn: () =>
       listEnterprises(client, {
         page: queryState.page,
         pageSize: queryState.pageSize,
         keyword: queryState.keyword,
         status: queryState.status,
-        agencyId: agencyFilter
+        agencyId: queryState.type
       })
   });
 
   function applyState(next: Partial<ListQueryState>) {
+    setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
   }
 
+  function submitFilters() {
+    const keyword = filterValues.keyword.trim();
+    applyState({
+      keyword: keyword || undefined,
+      status: filterValues.status,
+      type: filterValues.agencyId,
+      page: 1
+    });
+  }
+
+  function resetFilters() {
+    setFilterValues({ keyword: "", status: undefined, agencyId: undefined });
+    applyState({ keyword: undefined, status: undefined, type: undefined, page: 1 });
+  }
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["org", "enterprises"] });
+  const selectedEnterprises = useMemo(
+    () => (data?.items ?? []).filter((enterprise) => selectedRowKeys.includes(enterprise.id)),
+    [data?.items, selectedRowKeys]
+  );
+  const selectedNormalEnterprises = selectedEnterprises.filter((enterprise) => enterprise.status === "normal");
+  const selectedInactiveEnterprises = selectedEnterprises.filter((enterprise) => enterprise.status !== "normal");
 
   const saveMutation = useMutation({
     mutationFn: async (values: EnterpriseFormValues) => {
@@ -127,6 +168,23 @@ export function EnterprisesPage() {
     mutationFn: ({ id, status }: { id: string; status: string }) => updateEnterpriseStatus(client, id, status),
     onSuccess: () => {
       void message.success("企业状态已更新。");
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+
+  const bulkStatusMutation = useMutation({
+    mutationFn: (status: string) => {
+      const targets = status === "disabled" ? selectedNormalEnterprises : selectedInactiveEnterprises;
+      return runBatchRequests(
+        targets,
+        (enterprise) => updateEnterpriseStatus(client, enterprise.id, status),
+        "批量更新企业状态失败"
+      );
+    },
+    onSuccess: () => {
+      void message.success("企业状态已批量更新。");
+      setSelectedRowKeys([]);
       invalidate();
     },
     onError: (error: Error) => message.error(error.message)
@@ -235,9 +293,10 @@ export function EnterprisesPage() {
       {
         title: "操作",
         key: "actions",
-        width: 220,
+        className: "table-action-column",
+        width: 240,
         render: (_, record) => (
-          <Space size={4}>
+          <Space className="table-action-grid" size={4} wrap>
             <Button size="small" type="link" onClick={() => setDetail(record)}>
               详情
             </Button>
@@ -279,49 +338,93 @@ export function EnterprisesPage() {
     <>
       <ListPageCard
         title="企业管理"
-        subtitle="管理平台下的企业主体及其归属机构。"
-        extra={
-          canCreate ? (
-            <Button type="primary" onClick={openCreate}>
-              新建企业
+        subtitle={
+          selectedRowKeys.length > 0 ? (
+            <Space size={8}>
+              <Typography.Text type="secondary">已选择 {selectedRowKeys.length} 项</Typography.Text>
+              <Button size="small" type="link" onClick={() => setSelectedRowKeys([])}>
+                清空选择
+              </Button>
+            </Space>
+          ) : (
+            "管理平台下的企业主体及其归属机构。"
+          )
+        }
+        toolbar={
+          <Space wrap>
+            <Input
+              allowClear
+              placeholder="搜索企业名称或编码"
+              style={{ width: 240 }}
+              value={filterValues.keyword}
+              onChange={(event) => setFilterValues((values) => ({ ...values, keyword: event.target.value }))}
+            />
+            <Select
+              allowClear
+              placeholder="归属机构"
+              style={{ width: 200 }}
+              options={agencyOptions}
+              value={filterValues.agencyId}
+              onChange={(value) => setFilterValues((values) => ({ ...values, agencyId: value || undefined }))}
+            />
+            <Select
+              allowClear
+              placeholder="状态"
+              style={{ width: 140 }}
+              options={STATUS_OPTIONS}
+              value={filterValues.status}
+              onChange={(value) => setFilterValues((values) => ({ ...values, status: value || undefined }))}
+            />
+            <Button type="primary" onClick={submitFilters}>
+              查询
             </Button>
-          ) : null
+            <Button onClick={resetFilters}>重置</Button>
+          </Space>
+        }
+        extra={
+          <Space wrap>
+            {selectedEnterprises.length > 0 && canDisable ? (
+              <>
+                {selectedNormalEnterprises.length > 0 ? (
+                  <Popconfirm
+                    title={`确认停用选中的 ${selectedNormalEnterprises.length} 个企业？`}
+                    okText="停用"
+                    cancelText="取消"
+                    onConfirm={() => bulkStatusMutation.mutate("disabled")}
+                  >
+                    <Button danger loading={bulkStatusMutation.isPending}>
+                      批量停用
+                    </Button>
+                  </Popconfirm>
+                ) : null}
+                {selectedInactiveEnterprises.length > 0 ? (
+                  <Button loading={bulkStatusMutation.isPending} onClick={() => bulkStatusMutation.mutate("normal")}>
+                    批量启用
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+            {canCreate ? (
+              <Button type="primary" onClick={openCreate}>
+                新建企业
+              </Button>
+            ) : null}
+          </Space>
         }
       >
-        <Space style={{ padding: 16, width: "100%" }} wrap>
-          <Input.Search
-            allowClear
-            placeholder="搜索企业名称或编码"
-            style={{ width: 240 }}
-            value={keywordInput}
-            onChange={(event) => setKeywordInput(event.target.value)}
-            onSearch={(value) => applyState({ keyword: value || undefined, page: 1 })}
-          />
-          <Select
-            allowClear
-            placeholder="归属机构"
-            style={{ width: 200 }}
-            options={agencyOptions}
-            value={agencyFilter}
-            onChange={(value) => {
-              setAgencyFilter(value || undefined);
-              applyState({ page: 1 });
-            }}
-          />
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 140 }}
-            options={STATUS_OPTIONS}
-            value={queryState.status}
-            onChange={(value) => applyState({ status: value || undefined, page: 1 })}
-          />
-        </Space>
         <Table<Enterprise>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
           loading={isFetching}
+          rowSelection={
+            canDisable
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String))
+                }
+              : undefined
+          }
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,

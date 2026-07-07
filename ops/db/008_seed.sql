@@ -3,11 +3,11 @@
 -- Real deployments must replace CHANGE_ME_HASH before enabling the default platform owner account.
 
 INSERT INTO ky_user (id, username, display_name, email, status) VALUES
-  ('user_platform_owner', 'platform_owner', '平台超级管理员', 'platform-owner@kyai-crm.local', 'normal')
+  ('user_platform_owner', 'Super.Admin', '平台超级管理员', 'platform-owner@kyai-crm.local', 'normal')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO ky_user_credential (id, user_id, credential_type, identifier, password_hash, status, verified_at) VALUES
-  ('cred_platform_owner_password', 'user_platform_owner', 'password', 'platform_owner', 'CHANGE_ME_HASH', 'normal', now())
+  ('cred_platform_owner_password', 'user_platform_owner', 'password', 'Super.Admin', 'CHANGE_ME_HASH', 'normal', now())
 ON CONFLICT (credential_type, identifier) DO NOTHING;
 
 INSERT INTO ky_membership (id, user_id, workspace_type, workspace_id, display_name, status, joined_at) VALUES
@@ -18,7 +18,6 @@ INSERT INTO ky_role (id, workspace_type, workspace_id, name, code, description, 
   ('role_platform_owner', 'platform', 'platform_root', '平台超级管理员', 'platform_owner', 'Phase 1 built-in platform owner role', true, 'normal'),
   ('role_platform_admin', 'platform', 'platform_root', '平台管理员', 'platform_admin', 'Phase 1 built-in platform admin role', true, 'normal'),
   ('role_platform_operator', 'platform', 'platform_root', '平台运营', 'platform_operator', 'Phase 1 built-in platform operator role', true, 'normal'),
-  ('role_platform_readonly', 'platform', 'platform_root', '平台只读', 'platform_readonly', 'Phase 1 built-in platform readonly role', true, 'normal'),
   ('role_agency_owner_template', 'agency', NULL, '机构所有者', 'agency_owner', 'Phase 1 agency owner role template', true, 'normal'),
   ('role_agency_admin_template', 'agency', NULL, '机构管理员', 'agency_admin', 'Phase 1 agency admin role template', true, 'normal'),
   ('role_agency_operator_template', 'agency', NULL, '机构运营', 'agency_operator', 'Phase 1 agency operator role template', true, 'normal'),
@@ -228,7 +227,6 @@ INSERT INTO ky_role_data_scope (id, role_id, scope_type) VALUES
   ('rds_platform_owner_all', 'role_platform_owner', 'all'),
   ('rds_platform_admin_all', 'role_platform_admin', 'all'),
   ('rds_platform_operator_all', 'role_platform_operator', 'all'),
-  ('rds_platform_readonly_all', 'role_platform_readonly', 'all'),
   ('rds_agency_owner_current', 'role_agency_owner_template', 'current_agency'),
   ('rds_agency_admin_current', 'role_agency_admin_template', 'current_agency'),
   ('rds_agency_member_self', 'role_agency_member_template', 'self'),
@@ -271,12 +269,6 @@ ON CONFLICT (id) DO NOTHING;
 -- Baseline permission bindings for non-owner/admin built-in roles.
 INSERT INTO ky_role_permission (id, role_id, permission_id)
 SELECT 'rp_platform_operator_' || replace(p.code, '.', '_'), 'role_platform_operator', p.id
-FROM ky_permission p
-WHERE p.category IN ('menu', 'page') AND (p.code LIKE 'platform.%' OR p.code LIKE 'menu.platform.%')
-ON CONFLICT (role_id, permission_id) DO NOTHING;
-
-INSERT INTO ky_role_permission (id, role_id, permission_id)
-SELECT 'rp_platform_readonly_' || replace(p.code, '.', '_'), 'role_platform_readonly', p.id
 FROM ky_permission p
 WHERE p.category IN ('menu', 'page') AND (p.code LIKE 'platform.%' OR p.code LIKE 'menu.platform.%')
 ON CONFLICT (role_id, permission_id) DO NOTHING;

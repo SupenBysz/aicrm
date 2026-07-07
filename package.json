@@ -5,12 +5,21 @@
   "packageManager": "pnpm@10.8.1",
   "scripts": {
     "dev": "pnpm --filter @ky/admin-host dev",
+    "dev:desktop": "pnpm --filter @ky/aicrm-desktop dev",
     "build": "turbo run build",
+    "build:desktop": "pnpm --filter @ky/aicrm-desktop build",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "typecheck:desktop": "pnpm --filter @ky/aicrm-desktop typecheck"
   },
   "devDependencies": {
-    "turbo": "latest",
-    "typescript": "^5.0.0"
+    "turbo": "^2.10.4",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   }
 }
