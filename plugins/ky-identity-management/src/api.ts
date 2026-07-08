@@ -100,6 +100,10 @@ export function resetUserPassword(client: RequestClient, userId: string, newPass
   return client.request(`/api/v1/platform/users/${userId}/reset-password`, { method: "POST", body: { newPassword } });
 }
 
+export function assignMemberRoles(client: RequestClient, id: string, roleIds: string[]): Promise<unknown> {
+  return client.request(`/api/v1/memberships/${id}/roles`, { method: "POST", body: { roleIds } });
+}
+
 export interface DepartmentAssignment {
   departmentId: string;
   isPrimary: boolean;
@@ -111,6 +115,35 @@ export function assignMemberDepartments(client: RequestClient, id: string, depar
 
 export function assignMemberTeams(client: RequestClient, id: string, teamIds: string[]): Promise<unknown> {
   return client.request(`/api/v1/workspace/members/${id}/teams`, { method: "POST", body: { teamIds } });
+}
+
+export interface DepartmentOption {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+}
+
+export interface TeamOption {
+  id: string;
+  name: string;
+  code: string;
+  departmentId: string | null;
+  status: string;
+}
+
+export function listDepartments(client: RequestClient, status = "normal"): Promise<DepartmentOption[]> {
+  const q = new URLSearchParams();
+  if (status) q.set("status", status);
+  const suffix = q.toString();
+  return client.request<DepartmentOption[]>(`/api/v1/departments${suffix ? `?${suffix}` : ""}`);
+}
+
+export function listTeams(client: RequestClient, status = "normal"): Promise<TeamOption[]> {
+  const q = new URLSearchParams();
+  if (status) q.set("status", status);
+  const suffix = q.toString();
+  return client.request<TeamOption[]>(`/api/v1/teams${suffix ? `?${suffix}` : ""}`);
 }
 
 // --- invitations ---

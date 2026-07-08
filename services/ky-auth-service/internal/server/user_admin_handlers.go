@@ -9,40 +9,51 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-auth-service/internal/auth"
 )
 
+type workspaceAdminContext struct {
+	userID        string
+	membershipID  string
+	workspaceType string
+	workspaceID   string
+}
+
 // gateWorkspacePerms validates the caller's session + current workspace membership,
-// then checks it holds any of the wanted permissions. Returns false (and writes the
-// error) if not allowed. Used by user admin endpoints that the 用户管理 page calls
-// across platform / agency / enterprise workspaces.
-func (s *Server) gateWorkspacePerms(w http.ResponseWriter, r *http.Request, wanted []string) bool {
+// then checks it holds any of the wanted permissions. Returns the resolved
+// workspace context for audit if allowed.
+func (s *Server) gateWorkspacePerms(w http.ResponseWriter, r *http.Request, wanted []string) (workspaceAdminContext, bool) {
 	payload, ok := s.requireAuth(w, r)
 	if !ok {
-		return false
+		return workspaceAdminContext{}, false
 	}
 	wsType := r.Header.Get("X-KY-Workspace-Type")
 	wsID := r.Header.Get("X-KY-Workspace-Id")
 	if wsType == "" || wsID == "" {
 		writeError(w, r, http.StatusBadRequest, "workspace_required", "缺少工作区 Header")
-		return false
+		return workspaceAdminContext{}, false
 	}
 	membershipID, err := s.store.ActiveMembershipID(r.Context(), payload.UserID, wsType, wsID)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "工作区身份校验失败")
-		return false
+		return workspaceAdminContext{}, false
 	}
 	if membershipID == "" {
 		writeError(w, r, http.StatusForbidden, "workspace_forbidden", "用户无当前工作区身份")
-		return false
+		return workspaceAdminContext{}, false
 	}
 	allowed, err := s.store.HasAny(r.Context(), membershipID, wanted)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "权限校验失败")
-		return false
+		return workspaceAdminContext{}, false
 	}
 	if !allowed {
 		writeError(w, r, http.StatusForbidden, "permission_denied", "当前后台身份无权执行该操作")
-		return false
+		return workspaceAdminContext{}, false
 	}
-	return true
+	return workspaceAdminContext{
+		userID:        payload.UserID,
+		membershipID:  membershipID,
+		workspaceType: wsType,
+		workspaceID:   wsID,
+	}, true
 }
 
 type updateUserRequest struct {
@@ -53,7 +64,8 @@ type updateUserRequest struct {
 
 // updateUser serves PATCH /api/v1/platform/users/{id}.
 func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
-	if !s.gateWorkspacePerms(w, r, []string{"platform.members.update", "agency.members.update", "enterprise.members.update"}) {
+	wc, ok := s.gateWorkspacePerms(w, r, []string{"platform.members.update", "agency.members.update", "enterprise.members.update"})
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -80,6 +92,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "查询失败")
 		return
 	}
+	s.audit(r.Context(), r, wc, "user.updated", "user", id, map[string]any{"fields": []string{"displayName", "email", "phone"}})
 	writeJSON(w, map[string]any{
 		"data": map[string]any{
 			"id": user.ID, "displayName": user.DisplayName, "email": user.Email, "phone": user.Phone,
@@ -94,7 +107,8 @@ type resetPasswordRequest struct {
 
 // resetUserPassword serves POST /api/v1/platform/users/{id}/reset-password.
 func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
-	if !s.gateWorkspacePerms(w, r, []string{"platform.members.reset_password", "agency.members.reset_password", "enterprise.members.reset_password"}) {
+	wc, ok := s.gateWorkspacePerms(w, r, []string{"platform.members.reset_password", "agency.members.reset_password", "enterprise.members.reset_password"})
+	if !ok {
 		return
 	}
 	id := r.PathValue("id")
@@ -120,5 +134,6 @@ func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "重置失败")
 		return
 	}
+	s.audit(r.Context(), r, wc, "user.password_reset", "user", id, map[string]any{"credentialType": "password"})
 	writeJSON(w, map[string]any{"data": map[string]any{"id": id, "reset": true}, "requestId": requestID(r)})
 }

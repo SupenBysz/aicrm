@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { UserAddOutlined } from "@ant-design/icons";
-import { Button, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Drawer, Form, Input, Modal, Popconfirm, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -16,11 +16,14 @@ import {
   type ListQueryState
 } from "@ky/admin-core";
 import {
+  assignMemberRoles,
   assignMemberDepartments,
   assignMemberTeams,
   createMember,
+  listDepartments,
   listRoles,
   listMembers,
+  listTeams,
   removeMember,
   resetUserPassword,
   updateMemberStatus,
@@ -38,6 +41,11 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 const STATUS_OPTIONS = [
   { value: "active", label: "正常" },
   { value: "disabled", label: "已禁用" }
+];
+
+const STATUS_SEGMENT_OPTIONS = [
+  { value: "all", label: "全部" },
+  ...STATUS_OPTIONS
 ];
 
 function getRoleLabels(member: Member) {
@@ -64,6 +72,8 @@ export function MembersPage() {
   const [assignKind, setAssignKind] = useState<null | "department" | "team">(null);
   const [assignMember, setAssignMember] = useState<Member | null>(null);
   const [assignIds, setAssignIds] = useState<string[]>([]);
+  const [roleMember, setRoleMember] = useState<Member | null>(null);
+  const [roleIds, setRoleIds] = useState<string[]>([]);
   const [editMember, setEditMember] = useState<Member | null>(null);
   const [editForm] = Form.useForm<UpdateUserInput>();
   const [resetMember, setResetMember] = useState<Member | null>(null);
@@ -77,7 +87,12 @@ export function MembersPage() {
   const canResetPwd = permissions.canAny(["platform.members.reset_password", "agency.members.reset_password", "enterprise.members.reset_password"]);
   const canAssignDept = permissions.canAny(["agency.members.assign_department", "enterprise.members.assign_department"]);
   const canAssignTeam = permissions.canAny(["agency.members.assign_team", "enterprise.members.assign_team"]);
+  const canAssignRoles = permissions.canAny(["platform.roles.assign", "agency.roles.assign", "enterprise.roles.assign"]);
+  const canViewRoles = permissions.canAny(["platform.roles.view", "agency.roles.view", "enterprise.roles.view"]);
+  const canViewDepartments = permissions.canAny(["agency.departments.view", "enterprise.departments.view"]);
+  const canViewTeams = permissions.canAny(["agency.teams.view", "enterprise.teams.view"]);
   const isOrgWorkspace = workspace?.type === "agency" || workspace?.type === "enterprise";
+  const currentMembershipId = workspace?.membershipId;
 
   const { data, isFetching } = useQuery({
     queryKey: ["members", workspace?.type, workspace?.id, queryState.page, queryState.pageSize, queryState.keyword, queryState.status],
@@ -93,7 +108,19 @@ export function MembersPage() {
   const { data: rolesData, isFetching: rolesFetching } = useQuery({
     queryKey: ["member-create-roles", workspace?.type, workspace?.id],
     queryFn: () => listRoles(client),
-    enabled: canCreate
+    enabled: Boolean(canViewRoles && (canCreate || canAssignRoles))
+  });
+
+  const { data: departmentsData, isFetching: departmentsFetching } = useQuery({
+    queryKey: ["member-departments", workspace?.type, workspace?.id],
+    queryFn: () => listDepartments(client),
+    enabled: Boolean(isOrgWorkspace && canViewDepartments && (canCreate || canAssignDept))
+  });
+
+  const { data: teamsData, isFetching: teamsFetching } = useQuery({
+    queryKey: ["member-teams", workspace?.type, workspace?.id],
+    queryFn: () => listTeams(client),
+    enabled: Boolean(isOrgWorkspace && canViewTeams && (canCreate || canAssignTeam))
   });
 
   const roleOptions = useMemo(
@@ -103,6 +130,34 @@ export function MembersPage() {
         label: `${role.name || role.code} (${role.code})`
       })),
     [rolesData]
+  );
+
+  const departmentOptions = useMemo(
+    () =>
+      (departmentsData ?? []).map((department) => ({
+        value: department.id,
+        label: department.code ? `${department.name} (${department.code})` : department.name
+      })),
+    [departmentsData]
+  );
+
+  const teamOptions = useMemo(
+    () =>
+      (teamsData ?? []).map((team) => ({
+        value: team.id,
+        label: team.code ? `${team.name} (${team.code})` : team.name
+      })),
+    [teamsData]
+  );
+
+  const departmentNameById = useMemo(
+    () => new Map((departmentsData ?? []).map((department) => [department.id, department.name || department.code || department.id])),
+    [departmentsData]
+  );
+
+  const teamNameById = useMemo(
+    () => new Map((teamsData ?? []).map((team) => [team.id, team.name || team.code || team.id])),
+    [teamsData]
   );
 
   function applyState(next: Partial<ListQueryState>) {
@@ -115,8 +170,10 @@ export function MembersPage() {
     () => (data?.items ?? []).filter((member) => selectedRowKeys.includes(member.id)),
     [data?.items, selectedRowKeys]
   );
-  const selectedActiveMembers = selectedMembers.filter((member) => member.status === "active");
-  const selectedDisabledMembers = selectedMembers.filter((member) => member.status === "disabled");
+  const isCurrentMember = (member: Member) => Boolean(currentMembershipId && member.id === currentMembershipId);
+  const selectedActionableMembers = selectedMembers.filter((member) => !isCurrentMember(member));
+  const selectedActiveMembers = selectedActionableMembers.filter((member) => member.status === "active");
+  const selectedDisabledMembers = selectedActionableMembers.filter((member) => member.status === "disabled");
 
   const createMutation = useMutation({
     mutationFn: (values: CreateMemberInput) => createMember(client, values),
@@ -166,7 +223,7 @@ export function MembersPage() {
 
   const bulkRemoveMutation = useMutation({
     mutationFn: () =>
-      runBatchRequests(selectedMembers, (member) => removeMember(client, member.id), "批量移除成员失败"),
+      runBatchRequests(selectedActionableMembers, (member) => removeMember(client, member.id), "批量移除成员失败"),
     onSuccess: () => {
       void message.success("成员已批量移除。");
       setSelectedRowKeys([]);
@@ -200,10 +257,21 @@ export function MembersPage() {
     editForm.setFieldsValue({ displayName: member.displayName, email: member.email, phone: member.phone });
   }
 
+  const roleMutation = useMutation({
+    mutationFn: (ids: string[]) => assignMemberRoles(client, roleMember!.id, ids),
+    onSuccess: () => {
+      void message.success("成员角色已更新。");
+      setRoleMember(null);
+      setRoleIds([]);
+      invalidate();
+    },
+    onError: (error: Error) => message.error(error.message)
+  });
+
   const assignMutation = useMutation({
     mutationFn: (ids: string[]) =>
       assignKind === "department"
-        ? assignMemberDepartments(client, assignMember!.id, ids.map((id) => ({ departmentId: id, isPrimary: false })))
+        ? assignMemberDepartments(client, assignMember!.id, ids.map((id, index) => ({ departmentId: id, isPrimary: index === 0 })))
         : assignMemberTeams(client, assignMember!.id, ids),
     onSuccess: () => {
       void message.success("归属已更新。");
@@ -218,6 +286,11 @@ export function MembersPage() {
     setAssignKind(kind);
     setAssignMember(member);
     setAssignIds(kind === "department" ? member.departmentIds : member.teamIds);
+  }
+
+  function openAssignRoles(member: Member) {
+    setRoleMember(member);
+    setRoleIds(member.roleIds ?? []);
   }
 
   const columns: ColumnsType<Member> = useMemo(
@@ -277,6 +350,34 @@ export function MembersPage() {
           );
         }
       },
+      ...(isOrgWorkspace
+        ? [
+            {
+              title: "组织归属",
+              key: "org",
+              width: 240,
+              render: (_: unknown, record: Member) => {
+                const departments = (record.departmentIds ?? []).map((id) => departmentNameById.get(id) ?? id);
+                const teams = (record.teamIds ?? []).map((id) => teamNameById.get(id) ?? id);
+                if (departments.length === 0 && teams.length === 0) {
+                  return <Typography.Text type="secondary">—</Typography.Text>;
+                }
+                return (
+                  <Space direction="vertical" size={2}>
+                    {departments.length > 0 ? (
+                      <Typography.Text style={{ fontSize: 12 }}>部门：{departments.join("、")}</Typography.Text>
+                    ) : null}
+                    {teams.length > 0 ? (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        团队：{teams.join("、")}
+                      </Typography.Text>
+                    ) : null}
+                  </Space>
+                );
+              }
+            }
+          ]
+        : []),
       {
         title: "状态",
         dataIndex: "status",
@@ -298,64 +399,103 @@ export function MembersPage() {
         title: "操作",
         key: "actions",
         className: "table-action-column",
-        width: 260,
-        render: (_, record) => (
-          <Space className="table-action-grid" size={4} wrap>
-            {canUpdate ? (
-              <Button size="small" type="link" onClick={() => openEdit(record)}>
-                编辑
-              </Button>
-            ) : null}
-            {canResetPwd ? (
-              <Button size="small" type="link" onClick={() => { setResetMember(record); setNewPassword(""); }}>
-                重置密码
-              </Button>
-            ) : null}
-            {canDisable ? (
-              record.status === "active" ? (
-                <Popconfirm
-                  title="确认禁用该成员？"
-                  okText="禁用"
-                  cancelText="取消"
-                  onConfirm={() => statusMutation.mutate({ id: record.id, status: "disabled" })}
-                >
-                  <Button size="small" type="link" danger>
-                    禁用
+        width: 300,
+        render: (_, record) => {
+          const current = isCurrentMember(record);
+          return (
+            <Space className="table-action-grid" size={4} wrap>
+              {canUpdate ? (
+                <Button size="small" type="link" onClick={() => openEdit(record)}>
+                  编辑
+                </Button>
+              ) : null}
+              {canResetPwd ? (
+                <Button size="small" type="link" onClick={() => { setResetMember(record); setNewPassword(""); }}>
+                  重置密码
+                </Button>
+              ) : null}
+              {canAssignRoles && canViewRoles ? (
+                <Button size="small" type="link" onClick={() => openAssignRoles(record)}>
+                  调角色
+                </Button>
+              ) : null}
+              {canDisable ? (
+                record.status === "active" ? (
+                  current ? (
+                    <Tooltip title="不能禁用当前登录身份">
+                      <Button size="small" type="link" danger disabled>
+                        禁用
+                      </Button>
+                    </Tooltip>
+                  ) : (
+                    <Popconfirm
+                      title="确认禁用该成员？"
+                      okText="禁用"
+                      cancelText="取消"
+                      onConfirm={() => statusMutation.mutate({ id: record.id, status: "disabled" })}
+                    >
+                      <Button size="small" type="link" danger>
+                        禁用
+                      </Button>
+                    </Popconfirm>
+                  )
+                ) : (
+                  <Button size="small" type="link" onClick={() => statusMutation.mutate({ id: record.id, status: "active" })}>
+                    启用
                   </Button>
-                </Popconfirm>
-              ) : (
-                <Button size="small" type="link" onClick={() => statusMutation.mutate({ id: record.id, status: "active" })}>
-                  启用
+                )
+              ) : null}
+              {canAssignDept ? (
+                <Button size="small" type="link" onClick={() => openAssign("department", record)}>
+                  调部门
                 </Button>
-              )
-            ) : null}
-            {canAssignDept ? (
-              <Button size="small" type="link" onClick={() => openAssign("department", record)}>
-                调部门
-              </Button>
-            ) : null}
-            {canAssignTeam ? (
-              <Button size="small" type="link" onClick={() => openAssign("team", record)}>
-                调团队
-              </Button>
-            ) : null}
-            {canRemove ? (
-              <Popconfirm
-                title="确认移除该成员？"
-                okText="移除"
-                cancelText="取消"
-                onConfirm={() => removeMutation.mutate(record.id)}
-              >
-                <Button size="small" type="link" danger>
-                  移除
+              ) : null}
+              {canAssignTeam ? (
+                <Button size="small" type="link" onClick={() => openAssign("team", record)}>
+                  调团队
                 </Button>
-              </Popconfirm>
-            ) : null}
-          </Space>
-        )
+              ) : null}
+              {canRemove ? (
+                current ? (
+                  <Tooltip title="不能移除当前登录身份">
+                    <Button size="small" type="link" danger disabled>
+                      移除
+                    </Button>
+                  </Tooltip>
+                ) : (
+                  <Popconfirm
+                    title="确认移除该成员？"
+                    okText="移除"
+                    cancelText="取消"
+                    onConfirm={() => removeMutation.mutate(record.id)}
+                  >
+                    <Button size="small" type="link" danger>
+                      移除
+                    </Button>
+                  </Popconfirm>
+                )
+              ) : null}
+            </Space>
+          );
+        }
       }
     ],
-    [canDisable, canRemove, canUpdate, canResetPwd, canAssignDept, canAssignTeam, statusMutation, removeMutation]
+    [
+      canAssignDept,
+      canAssignRoles,
+      canAssignTeam,
+      canDisable,
+      canRemove,
+      canResetPwd,
+      canUpdate,
+      canViewRoles,
+      currentMembershipId,
+      departmentNameById,
+      isOrgWorkspace,
+      removeMutation,
+      statusMutation,
+      teamNameById
+    ]
   );
 
   function submitCreate(values: CreateMemberInput) {
@@ -393,13 +533,11 @@ export function MembersPage() {
               onChange={(event) => setKeywordInput(event.target.value)}
               onSearch={(value) => applyState({ keyword: value || undefined, page: 1 })}
             />
-            <Select
-              allowClear
-              placeholder="状态"
-              style={{ width: 140 }}
-              options={STATUS_OPTIONS}
-              value={queryState.status}
-              onChange={(value) => applyState({ status: value || undefined, page: 1 })}
+            <Segmented
+              className="list-status-segmented"
+              options={STATUS_SEGMENT_OPTIONS}
+              value={queryState.status ?? "all"}
+              onChange={(value) => applyState({ status: value === "all" ? undefined : String(value), page: 1 })}
             />
           </Space>
         }
@@ -426,9 +564,9 @@ export function MembersPage() {
                 ) : null}
               </>
             ) : null}
-            {selectedMembers.length > 0 && canRemove ? (
+            {selectedActionableMembers.length > 0 && canRemove ? (
               <Popconfirm
-                title={`确认移除选中的 ${selectedMembers.length} 个成员？`}
+                title={`确认移除选中的 ${selectedActionableMembers.length} 个成员？`}
                 okText="移除"
                 cancelText="取消"
                 onConfirm={() => bulkRemoveMutation.mutate()}
@@ -462,11 +600,15 @@ export function MembersPage() {
             canDisable || canRemove
               ? {
                   selectedRowKeys,
-                  onChange: (keys) => setSelectedRowKeys(keys.map(String))
+                  onChange: (keys) => setSelectedRowKeys(keys.map(String)),
+                  getCheckboxProps: (record) => ({
+                    disabled: isCurrentMember(record),
+                    title: isCurrentMember(record) ? "不能批量操作当前登录身份" : undefined
+                  })
                 }
               : undefined
           }
-          scroll={{ x: 1120 }}
+          scroll={{ x: isOrgWorkspace ? 1360 : 1180 }}
           pagination={{
             current: data?.pagination.page ?? queryState.page,
             pageSize: data?.pagination.pageSize ?? queryState.pageSize,
@@ -526,9 +668,10 @@ export function MembersPage() {
           <Form.Item label="角色" name="roleIds" rules={[{ required: true, message: "请选择角色" }]}>
             <Select
               mode="multiple"
+              disabled={!canViewRoles}
               loading={rolesFetching}
               options={roleOptions}
-              placeholder="选择当前工作区角色"
+              placeholder={canViewRoles ? "选择当前工作区角色" : "无角色查看权限"}
               optionFilterProp="label"
               showSearch
             />
@@ -536,10 +679,28 @@ export function MembersPage() {
           {isOrgWorkspace ? (
             <>
               <Form.Item label="部门归属" name="departmentIds">
-                <Select mode="tags" placeholder="输入部门 ID 后回车" tokenSeparators={[",", " "]} />
+                <Select
+                  mode="multiple"
+                  disabled={!canViewDepartments}
+                  loading={departmentsFetching}
+                  options={departmentOptions}
+                  placeholder={canViewDepartments ? "选择部门，第一项作为主部门" : "无部门查看权限"}
+                  optionFilterProp="label"
+                  showSearch
+                  maxTagCount="responsive"
+                />
               </Form.Item>
               <Form.Item label="团队归属" name="teamIds">
-                <Select mode="tags" placeholder="输入团队 ID 后回车" tokenSeparators={[",", " "]} />
+                <Select
+                  mode="multiple"
+                  disabled={!canViewTeams}
+                  loading={teamsFetching}
+                  options={teamOptions}
+                  placeholder={canViewTeams ? "选择团队" : "无团队查看权限"}
+                  optionFilterProp="label"
+                  showSearch
+                  maxTagCount="responsive"
+                />
               </Form.Item>
             </>
           ) : null}
@@ -559,15 +720,48 @@ export function MembersPage() {
         cancelText="取消"
       >
         <Typography.Paragraph type="secondary">
-          输入{assignKind === "department" ? "部门" : "团队"} ID（回车分隔），保存将覆盖该成员的归属集合。
+          选择{assignKind === "department" ? "部门" : "团队"}，保存将覆盖该成员当前归属。
         </Typography.Paragraph>
         <Select
-          mode="tags"
+          mode="multiple"
           style={{ width: "100%" }}
-          placeholder="输入 ID 后回车"
+          loading={assignKind === "department" ? departmentsFetching : teamsFetching}
+          options={assignKind === "department" ? departmentOptions : teamOptions}
+          placeholder={assignKind === "department" ? "选择部门，第一项作为主部门" : "选择团队"}
           value={assignIds}
           onChange={setAssignIds}
-          tokenSeparators={[",", " "]}
+          optionFilterProp="label"
+          showSearch
+          maxTagCount="responsive"
+        />
+      </Modal>
+
+      <Modal
+        title={`调整角色${roleMember ? `：${roleMember.displayName || roleMember.username || roleMember.userId}` : ""}`}
+        open={Boolean(roleMember)}
+        onCancel={() => {
+          setRoleMember(null);
+          setRoleIds([]);
+        }}
+        onOk={() => roleMutation.mutate(roleIds)}
+        confirmLoading={roleMutation.isPending}
+        okButtonProps={{ disabled: roleIds.length === 0 }}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Typography.Paragraph type="secondary">保存将覆盖该成员当前角色集合，至少保留一个角色。</Typography.Paragraph>
+        <Select
+          mode="multiple"
+          style={{ width: "100%" }}
+          loading={rolesFetching}
+          disabled={!canViewRoles}
+          options={roleOptions}
+          placeholder={canViewRoles ? "选择当前工作区角色" : "无角色查看权限"}
+          value={roleIds}
+          onChange={setRoleIds}
+          optionFilterProp="label"
+          showSearch
+          maxTagCount="responsive"
         />
       </Modal>
 

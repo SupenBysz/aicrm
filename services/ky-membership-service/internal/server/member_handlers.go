@@ -101,6 +101,10 @@ func (s *Server) createMember(w http.ResponseWriter, r *http.Request, wc wsConte
 			writeError(w, r, http.StatusBadRequest, "validation_error", "角色、部门或团队引用无效")
 			return
 		}
+		if err == store.ErrConflict {
+			writeError(w, r, http.StatusConflict, "conflict", "用户名、邮箱或手机号已被占用")
+			return
+		}
 		writeStoreError(w, r, err)
 		return
 	}
@@ -165,6 +169,10 @@ func (s *Server) updateMemberStatus(w http.ResponseWriter, r *http.Request, wc w
 	}
 	if !validStatus(in.Status, "active", "disabled", "left") {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "status 非法")
+		return
+	}
+	if r.PathValue("id") == wc.MembershipID && in.Status != "active" {
+		writeError(w, r, http.StatusConflict, "conflict", "不能禁用或移除当前登录身份")
 		return
 	}
 	if err := s.store.UpdateMemberStatus(r.Context(), r.PathValue("id"), wc.WorkspaceType, wc.WorkspaceID, in.Status, wc.UserID); err != nil {

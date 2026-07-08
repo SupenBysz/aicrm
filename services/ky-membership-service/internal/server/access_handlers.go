@@ -250,6 +250,11 @@ func (s *Server) assignMembershipRoles(w http.ResponseWriter, r *http.Request, w
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	in.RoleIDs = cleanIDs(in.RoleIDs)
+	if len(in.RoleIDs) == 0 {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "至少保留一个角色")
+		return
+	}
 	if err := s.store.AssignMembershipRoles(r.Context(), r.PathValue("id"), wc.WorkspaceType, wc.WorkspaceID, in.RoleIDs, wc.UserID); err != nil {
 		writeStoreError(w, r, err)
 		return
