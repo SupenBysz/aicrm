@@ -1,8 +1,8 @@
-# KyaiCRM
+# AiCRM
 
-KyaiCRM 是一个可复用的多租户后台管理基础框架，定位为“以用户为中心的多组织、多身份、多工作区管理底座”。
+AiCRM 是面向直播电商全域运营的 AI 智能 CRM 解决方案，目标是用后台管理、桌面客户端、多租户组织能力和 AI 配置能力支撑后续业务模块快速落地。
 
-当前阶段优先沉淀后台基础能力，而不是直接建设 CRM 业务模块。框架内置平台、机构、企业三类工作区，支持部门和团队范围、多身份切换、角色权限、数据范围、审计、通知、系统设置，以及 AI 供应商和模型配置。
+当前工程以 `https://github.com/SupenBysz/aicrm.git` 作为业务专用解决方案仓库。仓库 fork 自 KyCRM 基础框架，上游同步通过 GitHub fork 关系或本地 `upstream` remote 管理，不在工程文件中固定上游仓库地址。
 
 ## 阶段范围
 
@@ -17,6 +17,7 @@ KyaiCRM 是一个可复用的多租户后台管理基础框架，定位为“以
 - AI 供应商和 AI 模型配置。
 - 基于 Nginx 与 systemd 的原生 VM 部署方案。
 - Electron 桌面客户端与 Web 后台混合方案。
+- 用户创建、角色绑定、组织归属、密码重置和审计闭环。
 
 当前阶段不包含：
 
@@ -36,7 +37,7 @@ shared/     Go 共享模块。
 ops/        数据库、原生部署和 seed 资产。
 scripts/    构建、部署、初始化和验收脚本。
 docs/       需求、架构、API、权限、部署和治理文档。
-template/   基础框架模板配置与解决方案级 skill。
+template/   从本工程梳理出的衍生模板资产和解决方案级 skill。
 ```
 
 ## 命名约定
@@ -60,23 +61,31 @@ template/   基础框架模板配置与解决方案级 skill。
 - 桌面端事件通信规范：`docs/aicrm_desktop_event_communication_standard.md`
 - 更新日志：`CHANGELOG.md`
 
-## 基础模板
+## Fork 与上游同步
 
-本仓库可生成后续独立项目的基础框架模板：
+AiCRM 主仓库只绑定业务仓库：
+
+```bash
+git remote add origin https://github.com/SupenBysz/aicrm.git
+```
+
+如需同步 KyCRM 基础框架或将通用能力贡献回上游，可在本地按需添加 `upstream` remote。`upstream` 属于本地 Git 配置，不写入 README、脚本默认值或模板 manifest。
+
+## 衍生模板资产
+
+本仓库保留 `template/` 和初始化脚本，用于从 AiCRM 当前底座抽取后续独立项目的基础框架。模板是辅助资产，不是本工程的主要开发目标。
 
 ```text
 英文产品名：KyCRM
 项目 / 仓库 slug：kysion-crm
 中文显示名：企迅CRM
-模板仓库：https://github.com/kysion/kysion-crm.git
 ```
 
 生成干净模板项目：
 
 ```bash
 scripts/create_project_from_template.sh \
-  --output /tmp/kysion-crm \
-  --git-remote https://github.com/kysion/kysion-crm.git
+  --output /tmp/kysion-crm
 ```
 
 交互式初始化：
@@ -119,6 +128,7 @@ scripts/create_project_from_template.sh \
 ```bash
 scripts/create_project_from_template.sh \
   --output /tmp/kysion-crm \
+  --git-remote https://github.com/example/new-crm.git \
   --init-git
 ```
 
@@ -184,7 +194,7 @@ template/skills/kycrm-create-module/
 - 新独立项目初始化流程、参数说明和生成验证。
 - 后台插件模块创建、完整业务模块创建、菜单路由权限占位和模块验证。
 
-后续在模板项目中继续迭代时，应先读取对应 skill reference，再修改跨模块能力。
+后续只有当 AiCRM 的通用底座能力需要沉淀给新项目时，才更新模板资产；日常业务功能不进入模板同步流程。
 
 ## 常用验证
 

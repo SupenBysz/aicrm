@@ -86,7 +86,7 @@ scripts/create_project_from_template.sh \
 - 不要默认提交或推送生成项目。
 - 用户只说“初始化项目”时，不加 `--init-git`，除非已明确要求。
 - 用户说“创建并绑定仓库”时，可使用 `--init-git --git-remote <url>`。
-- 用户说“推送模板仓库”时，先生成干净模板输出，再同步到模板仓库工作副本，移除 `.template-generated.json` 后提交推送。
+- 用户说“推送生成结果”时，先生成干净模板输出，再同步到用户明确指定的目标仓库工作副本，移除 `.template-generated.json` 后提交推送。
 
 ## 保守迁移边界
 

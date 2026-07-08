@@ -5,7 +5,7 @@ template:
 
 repository:
   type: template
-  remote: https://github.com/kysion/kysion-crm.git
+  remote: ""
 
 identity:
   productName: KyCRM

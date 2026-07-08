@@ -27,7 +27,6 @@
 中文显示名：企迅CRM
 桌面应用名：KyCRM Desktop
 后台标题：企迅CRM 管理后台
-模板专用仓库：https://github.com/kysion/kysion-crm.git
 ```
 
 这些默认值以 `template/manifest.yaml` 为准。生成新项目时可以通过脚本参数覆盖。
@@ -118,8 +117,7 @@ scripts/create_project_from_template.sh \
   --project-slug kysion-crm \
   --product-name KyCRM \
   --product-cn-name 企迅CRM \
-  --package-name kysion-crm \
-  --git-remote https://github.com/kysion/kysion-crm.git
+  --package-name kysion-crm
 ```
 
 交互式初始化：
@@ -144,7 +142,7 @@ scripts/create_project_from_template.sh \
   --desktop-app-name "NewCRM Desktop"
 ```
 
-如需生成后直接绑定模板专用仓库，可追加 `--init-git`。脚本只初始化 remote，不自动提交或推送。
+如需生成后直接绑定目标业务仓库，可追加 `--git-remote <url> --init-git`。脚本只初始化 remote，不自动提交或推送。
 
 第一版采用保守模式：
 

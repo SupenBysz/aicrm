@@ -1,6 +1,6 @@
-# KyaiCRM 贡献规范
+# AiCRM 贡献规范
 
-本仓库采用主平台 monorepo 方式管理，同时承担后续独立项目基础框架模板的源头职责。贡献时需要同时关注代码正确性、模块边界、文档同步、模板安全和可生成性。
+本仓库采用主平台 monorepo 方式管理，是 AiCRM 业务专用解决方案仓库。贡献时优先服务当前产品开发、部署和业务闭环；`template/` 是从当前工程梳理出的衍生模板资产，只在需要沉淀通用能力时更新。
 
 仓库治理以以下文档为准：
 
@@ -18,10 +18,11 @@ template/skills/aicrm-solution/SKILL.md
 
 1. 优先保持现有架构和目录边界，不为了单个页面或接口引入跨层耦合。
 2. Host、Core、Plugin、Desktop、Service、Shared、Ops、Docs、Template 的职责必须分离。
-3. 权限、工作区、数据范围、API 契约、事件通信和模板抽取相关改动，必须先阅读对应 skill reference。
+3. 权限、工作区、数据范围、API 契约、事件通信和模板资产相关改动，必须先阅读对应 skill reference。
 4. 前端隐藏不是安全边界，后端必须重新校验权限和数据范围。
 5. Electron 主进程不维护角色、权限、菜单、工作区策略等业务上下文。
 6. 模板资产不得包含生产域名、真实密钥、客户数据、构建产物、本地截图或一次性部署痕迹。
+7. 上游 KyCRM 基础框架只通过 GitHub fork 关系或本地 `upstream` remote 同步，不在仓库文件中固定上游地址。
 
 ## 分支策略
 
@@ -42,7 +43,7 @@ main
 | `chore/*` | 工程治理、依赖、脚本、模板 |
 | `release/*` | 版本发布准备，可选 |
 
-推荐小步提交，保持分支短生命周期。涉及模板推送时，先在当前仓库完成模板源变更，再通过生成脚本产出模板仓库内容。
+推荐小步提交，保持分支短生命周期。涉及模板资产时，先确认该能力确实可复用；业务专用功能不要进入模板同步流程。
 
 ## 提交规范
 
@@ -52,7 +53,7 @@ main
 feat: add member creation flow
 fix: correct workspace breadcrumb layout
 docs: use Chinese README
-chore: initialize KyCRM foundation template
+chore: update derived template assets
 refactor: simplify admin shell layout
 test: add membership permission coverage
 build: adjust desktop build config
@@ -83,7 +84,7 @@ build: adjust desktop build config
 | 角色、权限点、菜单、数据范围 | `template/skills/aicrm-solution/references/permission-data-scope.md` |
 | API、分页、错误码、批量操作 | `template/skills/aicrm-solution/references/api-contracts.md` |
 | IPC、事件、订阅、桌面桥 | `template/skills/aicrm-solution/references/event-communication.md` |
-| 模板生成、模板仓库推送 | `template/skills/aicrm-solution/references/template-extraction.md` |
+| 模板资产生成、模板能力抽取 | `template/skills/aicrm-solution/references/template-extraction.md` |
 | 后台列表页布局 | 全局 `admin-list-page-layout` skill |
 
 跨模块改动必须说明影响范围，例如：
@@ -102,7 +103,7 @@ build: adjust desktop build config
 3. 权限点、菜单、角色、数据范围。
 4. 工作区、登录、bootstrap、会话、缓存策略。
 5. 桌面端 IPC、preload bridge、事件订阅与消费。
-6. 模板生成规则、模板默认命名、模板仓库地址。
+6. 模板生成规则、模板默认命名、衍生模板资产说明。
 7. 部署脚本、Nginx/systemd 示例、环境变量示例。
 
 文档同步优先更新 `docs/` 下的源文档；如果属于模板执行规范，还要同步 `template/skills/aicrm-solution/references/*.md`。
@@ -135,26 +136,47 @@ bash -n scripts/create_business_module.sh
 python3 /root/.codex/skills/.system/skill-creator/scripts/quick_validate.py template/skills/aicrm-solution
 ```
 
-## 模板生成与推送
+## 业务仓库与模板资产
 
-模板默认信息：
+AiCRM 主仓库：
+
+```text
+https://github.com/SupenBysz/aicrm.git
+```
+
+本地推荐 remote：
+
+```bash
+git remote add origin https://github.com/SupenBysz/aicrm.git
+```
+
+如需同步 KyCRM 基础框架或提交通用能力回上游，可在本地按需添加 `upstream` remote。该 remote 属于本地配置，不写入仓库文件、脚本默认值或模板 manifest。
+
+衍生模板默认信息：
 
 ```text
 英文产品名：KyCRM
 项目 / 仓库 slug：kysion-crm
 中文显示名：企迅CRM
-模板仓库：https://github.com/kysion/kysion-crm.git
 ```
 
 生成干净模板：
 
 ```bash
 scripts/create_project_from_template.sh \
-  --output /tmp/kysion-crm \
+  --output /tmp/kysion-crm
+```
+
+如生成的新项目需要直接绑定自己的业务仓库：
+
+```bash
+scripts/create_project_from_template.sh \
+  --output /tmp/new-crm \
+  --git-remote https://github.com/example/new-crm.git \
   --init-git
 ```
 
-推送模板仓库前必须检查：
+发布或移交模板输出前必须检查：
 
 ```bash
 find /tmp/kysion-crm -type d \( -name node_modules -o -name dist -o -name out -o -name release -o -name .playwright-mcp \) -print
@@ -162,16 +184,7 @@ find /tmp/kysion-crm -type f \( -name '*.png' -o -name server \) -print
 rg -n "Super\\.Admin|[e]ntai\\.im|[k]yaicrm|[c]loudflared|[G]lobal API Key|[t]oken-file|[t]unnel" /tmp/kysion-crm -S -g '!pnpm-lock.yaml'
 ```
 
-模板仓库推送建议：
-
-```bash
-cd /tmp/kysion-crm
-git add .
-git commit -m "docs: update contribution guide"
-git push
-```
-
-不要从当前主仓库直接强推到模板仓库；应使用生成脚本产出干净目录后再推送。
+不要从当前主仓库直接强推到任何模板或上游仓库；需要上游同步时，通过 fork compare、PR 或明确的 cherry-pick 流程处理。
 
 ## 安全要求
 
@@ -197,5 +210,5 @@ git push
 5. 版本级变化已同步 `CHANGELOG.md`。
 6. 已运行必要验证，并记录未能运行的原因。
 7. 已检查敏感信息和本地临时文件。
-8. 模板相关改动已通过生成脚本验证。
+8. 模板资产相关改动已通过生成脚本验证。
 9. 提交信息符合 Conventional Commits。

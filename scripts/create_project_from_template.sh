@@ -7,7 +7,7 @@ PROJECT_SLUG="kysion-crm"
 PRODUCT_NAME="KyCRM"
 PRODUCT_CN_NAME="企迅CRM"
 PACKAGE_NAME=""
-GIT_REMOTE="https://github.com/kysion/kysion-crm.git"
+GIT_REMOTE=""
 OUTPUT_DIR=""
 CONFIG_FILE=""
 DRY_RUN=0
@@ -57,8 +57,7 @@ usage() {
   --desktop-name <name>      桌面客户端显示名称。
   --desktop-description <text>
                              桌面客户端说明。
-  --git-remote <url>         使用 --init-git 时写入的 Git 远端地址，
-                             默认：https://github.com/kysion/kysion-crm.git。
+  --git-remote <url>         使用 --init-git 时写入的 Git 远端地址；默认不设置。
   --init-git                 初始化新的 Git 仓库并设置 origin。
   --dry-run                  只打印计划执行的复制操作，不写入文件。
   -h, --help                 显示帮助信息。
@@ -353,7 +352,7 @@ if [[ "$INTERACTIVE" -eq 1 ]]; then
   PROJECT_SLUG="$(prompt_value "项目 / 仓库 slug" "$PROJECT_SLUG")"
   [[ -n "$PACKAGE_NAME" ]] || PACKAGE_NAME="$PROJECT_SLUG"
   PACKAGE_NAME="$(prompt_value "根 package.json 包名" "$PACKAGE_NAME")"
-  GIT_REMOTE="$(prompt_value "Git 远端地址" "$GIT_REMOTE")"
+  GIT_REMOTE="$(prompt_value "Git 远端地址（可留空，使用 --init-git 时必填）" "$GIT_REMOTE")"
   echo
   echo "管理后台应用"
   ADMIN_DIR="$(prompt_value "apps/ 下的管理后台目录名" "${ADMIN_DIR:-$ADMIN_SOURCE_DIR}")"
@@ -469,7 +468,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "根包名：$PACKAGE_NAME"
   echo "管理后台：apps/$ADMIN_DIR ($ADMIN_PACKAGE) - $ADMIN_NAME"
   echo "桌面客户端：apps/$DESKTOP_DIR ($DESKTOP_PACKAGE) - $DESKTOP_APP_NAME"
-  echo "Git 远端：$GIT_REMOTE"
+  echo "Git 远端：${GIT_REMOTE:-未设置}"
   echo "初始化 Git：$INIT_GIT"
   echo "排除规则文件：$EXCLUDES_FILE"
   rsync -an --exclude-from="$EXCLUDES_FILE" "$ROOT_DIR"/ "$OUTPUT_DIR"/
@@ -741,7 +740,7 @@ cat <<EOF
   根包名：$PACKAGE_NAME
   管理后台：apps/$ADMIN_DIR ($ADMIN_PACKAGE) - $ADMIN_NAME
   桌面客户端：apps/$DESKTOP_DIR ($DESKTOP_PACKAGE) - $DESKTOP_APP_NAME
-  Git 远端：$GIT_REMOTE
+  Git 远端：${GIT_REMOTE:-未设置}
 
 建议执行以下检查：
   cd "$OUTPUT_DIR"

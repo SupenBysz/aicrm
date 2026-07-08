@@ -29,7 +29,7 @@ description: KyCRM 项目初始化指南。Use when Codex needs to create or ini
    - 参数已明确且无需保留配置：读取 `references/parameter-guide.md` 后组装命令。
 3. 执行初始化脚本，保留脚本输出中的目标目录和 app 包名。
 4. 读取 `references/validation-checklist.md`，按清单验证生成项目。
-5. 如果用户要求同步模板仓库，先重新生成模板输出，再同步到模板仓库工作副本、提交并推送。
+5. 如果用户要求发布生成结果，先重新生成干净输出，再同步到用户明确指定的目标仓库工作副本、提交并推送。
 
 ## Reference 加载规则
 

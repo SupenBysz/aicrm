@@ -7,5 +7,5 @@ project:
   packageName: kysion-crm
 
 repository:
-  remote: https://github.com/kysion/kysion-crm.git
+  remote: ""
   initGit: false

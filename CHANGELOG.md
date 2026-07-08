@@ -1,6 +1,32 @@
-# KyaiCRM 更新日志
+# AiCRM 更新日志
 
-本文件记录 KyaiCRM 主平台与 KyCRM 基础框架模板的版本变更。格式遵循“按版本维护，每个版本包含更新时间、更新内容、部署/迁移说明和验证方式”的规范。
+本文件记录 AiCRM 主平台与衍生模板资产的版本变更。格式遵循“按版本维护，每个版本包含更新时间、更新内容、部署/迁移说明和验证方式”的规范。
+
+## [0.1.2] - 2026-07-08 19:15:23 CST +0800
+
+### 更新内容
+
+- 完成用户管理创建用户闭环：支持创建登录账号、绑定角色、选择部门/团队归属、调整角色、调整归属、重置密码、启停/移除与批量操作。
+- 用户管理状态筛选统一为胶囊滑块，当前登录身份禁止被禁用或移除。
+- `ky-auth-service` 增加用户资料更新与密码重置审计，避免敏感明文进入审计详情。
+- 明确 AiCRM 主仓库为业务专用解决方案仓库，衍生模板资产不再固定上游模板仓库地址。
+- 模板初始化脚本默认不设置 Git remote，生成新项目时必须通过 `--git-remote` 显式传入目标业务仓库。
+
+### 部署 / 迁移说明
+
+- 本版本不包含数据库迁移。
+- 已部署 `ky-auth-service`、`ky-membership-service` 和后台前端。
+- 本地与公网健康检查通过，`Super.Admin` 登录与 bootstrap 冒烟通过。
+
+### 验证方式
+
+- 执行 `pnpm --filter @ky/plugin-identity-management typecheck`。
+- 执行 `pnpm --filter @ky/plugin-identity-management build`。
+- 执行 `pnpm --filter @ky/admin-host typecheck`。
+- 执行 `pnpm --filter @ky/admin-host build`。
+- 执行 `go test ./services/ky-auth-service/... ./services/ky-membership-service/...`。
+- 执行 `git diff --check`。
+- 执行 `scripts/verify_deployment.sh`。
 
 ## [0.1.1] - 2026-07-08 11:22:27 CST +0800
 
@@ -48,7 +74,7 @@
 ### 更新内容
 
 - 建立 KyaiCRM 多租户后台管理底座基线，包含 Admin Host、Admin Core、后台插件、Electron 桌面客户端、Go 后端服务、共享模块、数据库脚本、部署脚本和技术文档。
-- 增加 KyCRM / `kysion-crm` / 企迅CRM 基础框架模板配置，模板专用仓库为 `https://github.com/kysion/kysion-crm.git`。
+- 增加 KyCRM / `kysion-crm` / 企迅CRM 衍生模板资产配置。
 - 增加 `scripts/create_project_from_template.sh`，支持从当前工程生成干净模板项目，并可选初始化 Git 远端地址。
 - 增加解决方案级 skill：`template/skills/aicrm-solution/`。
 - 增加模板内置工程规范 reference：模块边界、权限与数据范围、API 契约、桌面端事件通信、模板抽取规范。
@@ -68,4 +94,4 @@
 - 已执行 `bash -n scripts/create_project_from_template.sh`。
 - 已执行 `python3 /root/.codex/skills/.system/skill-creator/scripts/quick_validate.py template/skills/aicrm-solution`。
 - 已使用 `scripts/create_project_from_template.sh` 生成临时模板目录，并检查模板内未包含本地截图、依赖目录、构建产物、旧默认密码、真实部署域名和隧道痕迹。
-- 已推送模板仓库 `https://github.com/kysion/kysion-crm.git` 的 `main` 分支。
+- 已生成并验证衍生模板输出。
