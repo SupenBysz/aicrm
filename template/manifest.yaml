@@ -1,0 +1,98 @@
+template:
+  name: KyCRM
+  version: 0.1.0
+  description: AiCRM-derived independent CRM foundation template
+
+repository:
+  type: template
+  remote: https://github.com/kysion/kysion-crm.git
+
+identity:
+  productName: KyCRM
+  productChineseName: 企迅CRM
+  projectSlug: kysion-crm
+  repositoryName: kysion-crm
+  packageName: kysion-crm
+  packageScope: "@ky"
+  desktopAppName: KyCRM Desktop
+  adminTitle: 企迅CRM 管理后台
+  brandShortName: 企迅
+  brandFullName: 企迅CRM
+
+apps:
+  adminHost:
+    sourceDir: apps/ky-admin-host
+    defaultDir: ky-admin-host
+    defaultPackageName: "@ky/admin-host"
+    defaultDisplayName: 企迅CRM 管理后台
+    defaultDescription: 多租户 CRM 后台管理 Host，负责登录、布局、路由、插件挂载和全局能力。
+  desktop:
+    sourceDir: apps/aicrm-desktop
+    defaultDir: aicrm-desktop
+    defaultPackageName: "@ky/aicrm-desktop"
+    defaultAppName: KyCRM Desktop
+    defaultDisplayName: 企迅CRM 桌面端
+    defaultDescription: 基于 Electron 的桌面客户端壳，提供窗口控制、安全桥、会话、本地能力和 Web 混合承载。
+    stableRuntimeContracts:
+      - window.aicrm
+      - AICRM_* environment variables
+      - aicrm desktop CSS/runtime class names
+
+naming:
+  codePrefixLower: ky
+  codePrefixUpper: KY
+  dbPrefix: ky
+  workspaceHeaderPrefix: X-KY
+  sessionKey: ky.admin.session.v1
+
+copy:
+  include:
+    - apps/
+    - packages/
+    - plugins/
+    - services/
+    - shared/
+    - ops/
+    - scripts/
+    - docs/
+    - template/
+    - README.md
+    - CONTRIBUTING.md
+    - CHANGELOG.md
+    - package.json
+    - pnpm-lock.yaml
+    - pnpm-workspace.yaml
+    - turbo.json
+    - go.work
+    - go.work.sum
+    - .gitignore
+  exclude:
+    - .git/
+    - node_modules/
+    - .turbo/
+    - dist/
+    - out/
+    - release/
+    - tmp/
+    - .playwright-mcp/
+    - server
+    - services/*/server
+    - "*.log"
+    - "*.tmp"
+    - ".env"
+    - ".env.*"
+    - "*.local"
+    - "*.png"
+    - "admin-shell-style-check.json"
+    - "docs/kyai_crm_phase1_devwork_deployment_record.md"
+
+generation:
+  mode: conservative
+  notes:
+    - First pass copies a clean foundation and applies safe project/app metadata replacements only.
+    - App directories, package names, display names, and descriptions can be configured during initialization.
+    - Initialization supports interactive prompts, command-line parameters, and simple YAML config files.
+    - Generated projects can be checked with scripts/validate_generated_project.sh.
+    - Admin plugins can be scaffolded with scripts/create_admin_plugin.sh.
+    - Full business modules can be scaffolded with scripts/create_business_module.sh.
+    - Source-level renames for package scope, db prefix, Electron bridge name, environment prefixes, and Go module path are a later migration step.

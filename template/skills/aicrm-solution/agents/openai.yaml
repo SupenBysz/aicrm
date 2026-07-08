@@ -1,0 +1,4 @@
+interface:
+  display_name: "AiCRM Solution"
+  short_description: "AiCRM solution architecture and template rules"
+  default_prompt: "Use $aicrm-solution to plan or modify an AiCRM-derived solution following its architecture and communication standards."

@@ -1,0 +1,24 @@
+# 自定义 apps 目录、包名、显示名和说明。
+project:
+  output: /tmp/new-crm
+  slug: new-crm
+  productName: NewCRM
+  productChineseName: 新企CRM
+  packageName: new-crm
+
+repository:
+  remote: https://github.com/example/new-crm.git
+  initGit: false
+
+apps:
+  admin:
+    dir: console
+    packageName: "@new/console"
+    displayName: 新企CRM管理后台
+    description: 新企CRM Web 管理后台 Host。
+  desktop:
+    dir: desktop
+    packageName: "@new/desktop"
+    appName: NewCRM Desktop
+    displayName: 新企CRM桌面端
+    description: 新企CRM Electron 桌面客户端。

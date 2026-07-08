@@ -1,0 +1,4 @@
+interface:
+  display_name: "KyCRM 模块创建"
+  short_description: "指导创建 KyCRM 后台插件或完整业务模块并完成验证"
+  default_prompt: "使用 $kycrm-create-module 创建一个新的 KyCRM 业务模块。"

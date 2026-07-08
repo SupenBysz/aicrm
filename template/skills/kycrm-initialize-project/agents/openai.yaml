@@ -1,0 +1,4 @@
+interface:
+  display_name: "KyCRM 项目初始化"
+  short_description: "指导从 KyCRM 模板初始化独立项目并完成验证流程"
+  default_prompt: "使用 $kycrm-initialize-project 从 KyCRM 模板初始化一个新的独立项目。"

@@ -1,0 +1,29 @@
+# 企业品牌化示例。branding 暂作为记录字段，初始化脚本当前不会改运行时品牌资产。
+project:
+  output: /tmp/enterprise-crm
+  slug: enterprise-crm
+  productName: EnterpriseCRM
+  productChineseName: 企业CRM
+  packageName: enterprise-crm
+
+repository:
+  remote: https://github.com/example/enterprise-crm.git
+  initGit: false
+
+apps:
+  admin:
+    dir: admin
+    packageName: "@enterprise/admin"
+    displayName: 企业CRM管理后台
+    description: 企业CRM 多租户后台管理 Host。
+  desktop:
+    dir: desktop-client
+    packageName: "@enterprise/desktop-client"
+    appName: EnterpriseCRM Desktop
+    displayName: 企业CRM桌面客户端
+    description: 企业CRM 桌面客户端壳。
+
+branding:
+  shortName: 企业
+  fullName: 企业CRM
+  note: 品牌 Logo、主题色和运行时配置由后续系统配置或二阶段迁移处理。

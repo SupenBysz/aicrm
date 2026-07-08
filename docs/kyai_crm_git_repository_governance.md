@@ -70,7 +70,7 @@ services/
 shared/                   Go 共享模块
 ```
 
-根目录 `package.json`、`pnpm-workspace.yaml`、`go.work`、`scripts/`、`ops/` 和 `docs/` 属于主仓库编排与治理能力，不单独作为业务模块拆分。
+根目录 `package.json`、`pnpm-workspace.yaml`、`go.work`、`scripts/`、`ops/`、`docs/` 和 `template/` 属于主仓库编排、治理与基础框架模板能力，不单独作为业务模块拆分。
 
 ---
 
@@ -87,6 +87,8 @@ shared/                   Go 共享模块
 7. 数据库迁移与 seed 脚本。
 8. 原生 VM 部署脚本。
 9. 技术架构、需求锁定、实施锁定与治理文档。
+10. 后续独立项目基础框架模板、解决方案级 skill 与通信规范模板。
+11. 模块边界、权限与数据范围、API 契约、事件通信、模板抽取等模板内置工程规范。
 
 主仓库不包含：
 

@@ -1,0 +1,11 @@
+# 最小化初始化示例：保留默认 app 目录和包名。
+project:
+  output: /tmp/kysion-crm
+  slug: kysion-crm
+  productName: KyCRM
+  productChineseName: 企迅CRM
+  packageName: kysion-crm
+
+repository:
+  remote: https://github.com/kysion/kysion-crm.git
+  initGit: false

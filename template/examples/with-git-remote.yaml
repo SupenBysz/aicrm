@@ -1,0 +1,24 @@
+# 初始化 Git 仓库并绑定远端示例。
+project:
+  output: /tmp/team-crm
+  slug: team-crm
+  productName: TeamCRM
+  productChineseName: 团队CRM
+  packageName: team-crm
+
+repository:
+  remote: git@github.com:example/team-crm.git
+  initGit: true
+
+apps:
+  admin:
+    dir: console
+    packageName: "@team/console"
+    displayName: 团队CRM管理后台
+    description: 团队CRM Web 管理后台 Host。
+  desktop:
+    dir: desktop
+    packageName: "@team/desktop"
+    appName: TeamCRM Desktop
+    displayName: 团队CRM桌面端
+    description: 团队CRM Electron 桌面客户端。
