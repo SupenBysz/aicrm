@@ -31,6 +31,37 @@ export class HostRequestClient implements RequestClient {
   constructor(private readonly getWorkspace?: () => WorkspaceIdentity | null) {}
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    const response = await this.fetch(path, options);
+    const requestId = response.requestId;
+    const envelope = await readEnvelope<T>(response.response, requestId);
+    if (!options.skipAuthRedirect && (response.response.status === 401 || envelope.error?.code === "unauthorized")) {
+      handleSessionExpired();
+    }
+    if (!response.response.ok || envelope.error) {
+      throw new ApiError(
+        envelope.error?.message ?? `Request failed: ${response.response.status}`,
+        envelope.error?.code ?? "request_failed",
+        envelope.requestId,
+        envelope.error?.details
+      );
+    }
+
+    return envelope.data as T;
+  }
+
+  async stream(path: string, options: RequestOptions = {}): Promise<Response> {
+    const { response } = await this.fetch(path, options);
+    if (!options.skipAuthRedirect && response.status === 401) {
+      handleSessionExpired();
+    }
+    if (!response.ok) {
+      const envelope = await readEnvelope<unknown>(response, "");
+      throw new ApiError(envelope.error?.message ?? `Request failed: ${response.status}`, envelope.error?.code ?? "request_failed");
+    }
+    return response;
+  }
+
+  private async fetch(path: string, options: RequestOptions): Promise<{ response: Response; requestId: string }> {
     const session = loadStoredSession();
     const workspace = this.getWorkspace?.();
     const requestId = crypto.randomUUID();
@@ -54,21 +85,7 @@ export class HostRequestClient implements RequestClient {
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined
     });
-
-    const envelope = await readEnvelope<T>(response, requestId);
-    if (!options.skipAuthRedirect && (response.status === 401 || envelope.error?.code === "unauthorized")) {
-      handleSessionExpired();
-    }
-    if (!response.ok || envelope.error) {
-      throw new ApiError(
-        envelope.error?.message ?? `Request failed: ${response.status}`,
-        envelope.error?.code ?? "request_failed",
-        envelope.requestId,
-        envelope.error?.details
-      );
-    }
-
-    return envelope.data as T;
+    return { response, requestId };
   }
 }
 
@@ -83,11 +100,23 @@ async function readEnvelope<T>(response: Response, fallbackRequestId: string): P
     return {
       error: {
         code: "invalid_response",
-        message: text.slice(0, 200) || "Invalid response"
+        message: normalizeInvalidResponseMessage(response, text)
       },
       requestId: fallbackRequestId
     };
   }
+}
+
+function normalizeInvalidResponseMessage(response: Response, text: string): string {
+  const contentType = response.headers.get("content-type") ?? "";
+  const lower = text.slice(0, 300).toLowerCase();
+  if (response.status === 413 || lower.includes("too large body")) {
+    return "请求内容过大，请稍后重试";
+  }
+  if (contentType.includes("text/html") || lower.includes("<html") || lower.includes("cloudflare")) {
+    return "服务网关返回异常，请稍后重试";
+  }
+  return text.slice(0, 200) || "Invalid response";
 }
 
 function handleSessionExpired() {

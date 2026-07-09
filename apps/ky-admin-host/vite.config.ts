@@ -10,6 +10,7 @@ export default defineConfig({
       "@ky/plugin-ai-configuration": new URL("../../plugins/ky-ai-configuration/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-audit-management": new URL("../../plugins/ky-audit-management/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-identity-management": new URL("../../plugins/ky-identity-management/src/index.tsx", import.meta.url).pathname,
+      "@ky/plugin-matrix-account": new URL("../../plugins/ky-matrix-account/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-notification": new URL("../../plugins/ky-notification/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-organization-management": new URL("../../plugins/ky-organization-management/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-system-settings": new URL("../../plugins/ky-system-settings/src/index.tsx", import.meta.url).pathname

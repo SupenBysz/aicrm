@@ -167,6 +167,13 @@ interface NavMeta {
   groupLabel?: string;
 }
 
+interface NavGroupMeta {
+  key: string;
+  icon: ReactNode;
+  label: string;
+  items: NavMeta[];
+}
+
 function menuIcon(name?: string): ReactNode {
   return (name && MENU_ICONS[name]) || <AppstoreOutlined />;
 }
@@ -226,12 +233,17 @@ function usePreferredColorScheme() {
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => setScheme(resolveColorScheme());
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === ADMIN_COLOR_SCHEME_KEY) handleChange();
+    };
     handleChange();
     media.addEventListener("change", handleChange);
     window.addEventListener(ADMIN_COLOR_SCHEME_CHANGED_EVENT, handleChange);
+    window.addEventListener("storage", handleStorage);
     return () => {
       media.removeEventListener("change", handleChange);
       window.removeEventListener(ADMIN_COLOR_SCHEME_CHANGED_EVENT, handleChange);
+      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 
@@ -556,12 +568,13 @@ function WorkspaceLayout() {
   }
   selectWorkspace(currentWorkspace);
 
+  const terminalWindowMode = new URLSearchParams(location.search).get("terminalWindow") === "1";
   const workbenchPath = `/w/${currentWorkspace.type}/${currentWorkspace.id}/workbench`;
   const workbenchPathFor = (section?: string) => `${workbenchPath}${section ? `/${section}` : ""}`;
   const workspacePath = (path: string) =>
     `/w/${currentWorkspace.type}/${currentWorkspace.id}${path === "/" ? "/workbench" : path}`;
   const currentNavMode: HeaderNavMode = pathActive(location.pathname, workbenchPath) ? "workbench" : "manage";
-  const workbenchNavMetas: NavMeta[] = [
+  const builtinWorkbenchNavMetas: NavMeta[] = [
     { key: WORKBENCH_KEY, icon: <AppstoreOutlined />, label: "概览", target: workbenchPathFor() },
     { key: "workbench.todos", icon: <BookOutlined />, label: "待办事项", target: workbenchPathFor("todos") },
     { key: "workbench.messages", icon: <BellOutlined />, label: "我的消息", target: workbenchPathFor("messages") },
@@ -575,7 +588,7 @@ function WorkspaceLayout() {
   const orderedPlugins = [...localPlugins].sort((a, b) => (a.navOrder ?? 100) - (b.navOrder ?? 100));
   const navGroups = orderedPlugins
     .map((plugin) => {
-      const visible = (plugin.menus ?? []).filter((menu) => menuVisible(menu, currentWorkspace.permissions));
+      const visible = (plugin.menus ?? []).filter((menu) => Boolean(menu.path) && menuVisible(menu, currentWorkspace.permissions));
       if (visible.length === 0) {
         return null;
       }
@@ -583,7 +596,7 @@ function WorkspaceLayout() {
         key: menu.key,
         icon: menuIcon(menu.icon),
         label: menu.label,
-        target: workspacePath(menu.path),
+        target: workspacePath(menu.path ?? "/"),
         groupLabel: plugin.navGroup ?? plugin.name
       }));
       return {
@@ -594,6 +607,44 @@ function WorkspaceLayout() {
       };
     })
     .filter((group): group is NonNullable<typeof group> => group !== null);
+  const pluginWorkbenchStandalone: NavMeta[] = [];
+  const pluginWorkbenchGroups: NavGroupMeta[] = [];
+  for (const plugin of orderedPlugins) {
+    for (const menu of plugin.workbenchMenus ?? []) {
+      if (!menuVisible(menu, currentWorkspace.permissions)) continue;
+      const children = (menu.children ?? []).filter((child) => Boolean(child.path) && menuVisible(child, currentWorkspace.permissions));
+      if (children.length > 0) {
+        const items = children.map((child) => ({
+          key: child.key,
+          icon: menuIcon(child.icon),
+          label: child.label,
+          target: workspacePath(child.path ?? "/workbench"),
+          groupLabel: menu.label
+        }));
+        pluginWorkbenchGroups.push({
+          key: menu.key,
+          icon: menuGroupIcon(menu.label, menuIcon(menu.icon)),
+          label: menu.label,
+          items
+        });
+        continue;
+      }
+      if (menu.path) {
+        pluginWorkbenchStandalone.push({
+          key: menu.key,
+          icon: menuIcon(menu.icon),
+          label: menu.label,
+          target: workspacePath(menu.path),
+          groupLabel: plugin.navGroup ?? plugin.name
+        });
+      }
+    }
+  }
+  const workbenchNavMetas = [
+    ...builtinWorkbenchNavMetas,
+    ...pluginWorkbenchStandalone,
+    ...pluginWorkbenchGroups.flatMap((group) => group.items)
+  ];
   const navMetas = navGroups.flatMap((group) => group.items);
   const menuTargets = new Map<string, string>(
     (currentNavMode === "workbench" ? workbenchNavMetas : navMetas).map((item) => [item.key, item.target])
@@ -606,7 +657,16 @@ function WorkspaceLayout() {
     .find((item) => pathActive(location.pathname, item.target));
   const menuItems =
     currentNavMode === "workbench"
-      ? workbenchNavMetas.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
+      ? [
+          ...builtinWorkbenchNavMetas.map((item) => ({ key: item.key, icon: item.icon, label: item.label })),
+          ...pluginWorkbenchStandalone.map((item) => ({ key: item.key, icon: item.icon, label: item.label })),
+          ...pluginWorkbenchGroups.map((group) => ({
+            key: group.key,
+            icon: group.icon,
+            label: group.label,
+            children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
+          }))
+        ]
       : navGroups.map((group) => ({
           key: group.key,
           icon: group.icon,
@@ -616,7 +676,14 @@ function WorkspaceLayout() {
   const activeKey = currentNavMode === "workbench" ? activeWorkbenchMenu?.key ?? WORKBENCH_KEY : activeMenu?.key;
   const breadcrumbItems =
     currentNavMode === "workbench"
-      ? [{ title: currentWorkspace.name }, { title: WORKBENCH_LABEL }, { title: activeWorkbenchMenu?.label ?? "概览" }]
+      ? activeWorkbenchMenu?.groupLabel
+        ? [
+            { title: currentWorkspace.name },
+            { title: WORKBENCH_LABEL },
+            { title: activeWorkbenchMenu.groupLabel },
+            { title: activeWorkbenchMenu.label }
+          ]
+        : [{ title: currentWorkspace.name }, { title: WORKBENCH_LABEL }, { title: activeWorkbenchMenu?.label ?? "概览" }]
       : activeMenu
         ? [{ title: currentWorkspace.name }, { title: activeMenu.groupLabel }, { title: activeMenu.label }]
         : [{ title: currentWorkspace.name }, { title: MANAGEMENT_CENTER_LABEL }];
@@ -854,6 +921,26 @@ function WorkspaceLayout() {
   const isMacDesktopClient = isDesktopClient && windowState?.platform === "darwin";
   const showFullscreenAction = !isDesktopClient || isMacDesktopClient;
   const fullscreenActive = isDesktopClient ? Boolean(windowState?.isFullScreen) : webFullscreen;
+
+  if (terminalWindowMode) {
+    return (
+      <CurrentUserContextProvider user={user}>
+        <WorkspaceContextProvider workspace={currentWorkspace}>
+          <PermissionContextProvider
+            value={{
+              permissions: currentWorkspace.permissions,
+              actionPermissions: currentWorkspace.actionPermissions,
+              menuKeys: currentWorkspace.menuKeys
+            }}
+          >
+            <Layout className="app-terminal-window-shell">
+              <Outlet />
+            </Layout>
+          </PermissionContextProvider>
+        </WorkspaceContextProvider>
+      </CurrentUserContextProvider>
+    );
+  }
 
   return (
     <CurrentUserContextProvider user={user}>

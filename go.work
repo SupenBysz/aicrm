@@ -3,6 +3,7 @@ go 1.25.0
 use (
 	./services/ky-ai-model-service
 	./services/ky-auth-service
+	./services/ky-matrix-account-service
 	./services/ky-membership-service
 	./services/ky-org-service
 	./shared

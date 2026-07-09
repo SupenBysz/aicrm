@@ -27,6 +27,7 @@ services=(
   ky-org-service
   ky-membership-service
   ky-ai-model-service
+  ky-matrix-account-service
 )
 
 for service in "${services[@]}"; do
@@ -37,6 +38,7 @@ check_url "${KY_AUTH_READYZ_URL:-http://127.0.0.1:18081/readyz}"
 check_url "${KY_ORG_READYZ_URL:-http://127.0.0.1:18082/readyz}"
 check_url "${KY_MEMBERSHIP_READYZ_URL:-http://127.0.0.1:18083/readyz}"
 check_url "${KY_AI_MODEL_READYZ_URL:-http://127.0.0.1:18086/readyz}"
+check_url "${KY_MATRIX_ACCOUNT_READYZ_URL:-http://127.0.0.1:18085/readyz}"
 
 if [[ "$READYZ_ONLY" == "1" ]]; then
   echo "Readyz verification passed."

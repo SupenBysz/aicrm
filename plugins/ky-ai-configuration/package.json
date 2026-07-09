@@ -11,7 +11,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ky/admin-core": "workspace:*"
+    "@ky/admin-core": "workspace:*",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0"
   },
   "peerDependencies": {
     "@ant-design/icons": "^6.0.0",

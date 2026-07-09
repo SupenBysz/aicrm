@@ -30,9 +30,9 @@ type modelCreateInput struct {
 	Remark            string          `json:"remark"`
 }
 
-// phase1ModelType reports whether the model type is enabled in Phase 1.
+// phase1ModelType reports whether the model type is enabled in the current AI configuration surface.
 func phase1ModelType(t string) bool {
-	return t == "text_generation" || t == "embedding"
+	return t == "text_generation" || t == "embedding" || t == "vision"
 }
 
 func (s *Server) createModel(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -48,7 +48,7 @@ func (s *Server) createModel(w http.ResponseWriter, r *http.Request, wc wsContex
 		return
 	}
 	if !phase1ModelType(in.ModelType) {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "第一阶段仅支持 text_generation / embedding")
+		writeError(w, r, http.StatusBadRequest, "validation_error", "仅支持 text_generation / embedding / vision")
 		return
 	}
 	enabled, err := s.store.ProviderEnabled(r.Context(), in.ProviderID)

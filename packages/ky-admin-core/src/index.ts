@@ -65,12 +65,13 @@ export interface RequestOptions {
 
 export interface RequestClient {
   request<T>(path: string, options?: RequestOptions): Promise<T>;
+  stream?(path: string, options?: RequestOptions): Promise<Response>;
 }
 
 export interface PluginMenuItem {
   key: string;
   label: string;
-  path: string;
+  path?: string;
   menuKey: string;
   /** Icon name resolved by the host icon registry (e.g. "BankOutlined"). */
   icon?: string;
@@ -106,6 +107,8 @@ export interface AdminPlugin {
   /** Relative ordering of this plugin's group in the sidebar (lower first). */
   navOrder?: number;
   menus?: PluginMenuItem[];
+  /** Sidebar menus contributed to the workbench navigation surface. */
+  workbenchMenus?: PluginMenuItem[];
   routes?: PluginRoute[];
   headerActions?: HeaderAction[];
   workbenchContributions?: WorkbenchContribution[];
@@ -120,3 +123,4 @@ export * from "./permissions";
 export * from "./user-context";
 export * from "./workspace-context";
 export * from "./request-context";
+export * from "./matrix-account-desktop";

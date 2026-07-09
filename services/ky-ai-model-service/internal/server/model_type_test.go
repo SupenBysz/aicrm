@@ -6,7 +6,7 @@ func TestPhase1ModelType(t *testing.T) {
 	cases := map[string]bool{
 		"text_generation": true,
 		"embedding":       true,
-		"vision":          false,
+		"vision":          true,
 		"audio":           false,
 		"":                false,
 		"bogus":           false,

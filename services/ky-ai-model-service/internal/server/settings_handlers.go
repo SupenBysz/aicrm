@@ -13,9 +13,10 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request, wc wsContex
 		return
 	}
 	writeData(w, r, map[string]any{
-		"defaultChatModelId":      orNil(m["default_chat_model"]),
-		"defaultSummaryModelId":   orNil(m["default_summary_model"]),
-		"defaultEmbeddingModelId": orNil(m["default_embedding_model"]),
+		"defaultChatModelId":       orNil(m["default_chat_model"]),
+		"defaultSummaryModelId":    orNil(m["default_summary_model"]),
+		"defaultEmbeddingModelId":  orNil(m["default_embedding_model"]),
+		"defaultMultimodalModelId": orNil(m["default_multimodal_model"]),
 	})
 }
 
@@ -27,9 +28,10 @@ func orNil(s string) any {
 }
 
 type settingsInput struct {
-	DefaultChatModelID      *string `json:"defaultChatModelId"`
-	DefaultSummaryModelID   *string `json:"defaultSummaryModelId"`
-	DefaultEmbeddingModelID *string `json:"defaultEmbeddingModelId"`
+	DefaultChatModelID       *string `json:"defaultChatModelId"`
+	DefaultSummaryModelID    *string `json:"defaultSummaryModelId"`
+	DefaultEmbeddingModelID  *string `json:"defaultEmbeddingModelId"`
+	DefaultMultimodalModelID *string `json:"defaultMultimodalModelId"`
 }
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -47,6 +49,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request, wc wsCon
 		{"default_chat_model", in.DefaultChatModelID, "text_generation"},
 		{"default_summary_model", in.DefaultSummaryModelID, "text_generation"},
 		{"default_embedding_model", in.DefaultEmbeddingModelID, "embedding"},
+		{"default_multimodal_model", in.DefaultMultimodalModelID, "vision"},
 	}
 	for _, c := range changes {
 		if c.value == nil {

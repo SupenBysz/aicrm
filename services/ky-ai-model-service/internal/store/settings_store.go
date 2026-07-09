@@ -9,12 +9,13 @@ const (
 
 // SettingsKeys maps API field names to setting_key values.
 var SettingsKeys = map[string]string{
-	"defaultChatModelId":      "default_chat_model",
-	"defaultSummaryModelId":   "default_summary_model",
-	"defaultEmbeddingModelId": "default_embedding_model",
+	"defaultChatModelId":       "default_chat_model",
+	"defaultSummaryModelId":    "default_summary_model",
+	"defaultEmbeddingModelId":  "default_embedding_model",
+	"defaultMultimodalModelId": "default_multimodal_model",
 }
 
-// GetDefaultModels returns the three default-model settings (empty if unset).
+// GetDefaultModels returns default-model settings (empty if unset).
 func (s *Store) GetDefaultModels(ctx context.Context) (map[string]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT setting_key, COALESCE(model_id,'') FROM ky_ai_model_setting

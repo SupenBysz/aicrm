@@ -29,6 +29,22 @@ export const aiConfigurationPlugin: AdminPlugin = {
       icon: "StarOutlined",
       menuKey: "ai.settings.view",
       requiredPermission: "platform.ai_model_settings.view"
+    },
+    {
+      key: "ky-ai-configuration.executors",
+      label: "AI 执行器",
+      path: "/ai-executors",
+      icon: "RobotOutlined",
+      menuKey: "ai.executors.view",
+      requiredPermission: "platform.ai_executors.view"
+    },
+    {
+      key: "ky-ai-configuration.executor-tasks",
+      label: "执行器任务",
+      path: "/ai-executor-tasks",
+      icon: "FileSearchOutlined",
+      menuKey: "ai.executor_tasks.view",
+      requiredPermission: "platform.ai_executor_tasks.view"
     }
   ],
   routes

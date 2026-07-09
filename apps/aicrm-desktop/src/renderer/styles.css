@@ -38,6 +38,7 @@ body {
 }
 
 .desktop-title-bar {
+  -webkit-app-region: drag;
   align-items: center;
   background: #ffffff;
   border-bottom: 1px solid #e8edf5;
@@ -45,6 +46,18 @@ body {
   height: 72px;
   justify-content: space-between;
   padding: 0 20px;
+}
+
+.desktop-title-bar button,
+.desktop-title-bar a,
+.desktop-title-bar input,
+.desktop-title-bar textarea,
+.desktop-title-bar select,
+.desktop-title-bar [role="button"],
+.desktop-title-bar .ant-btn,
+.desktop-title-bar .ant-dropdown-trigger,
+.desktop-title-bar .desktop-user {
+  -webkit-app-region: no-drag;
 }
 
 .desktop-title-icon {

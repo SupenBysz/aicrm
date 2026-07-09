@@ -2,7 +2,11 @@ module github.com/Kysion/KyaiCRM/services/ky-ai-model-service
 
 go 1.25.0
 
-require github.com/jackc/pgx/v5 v5.7.2
+require (
+	github.com/coder/websocket v1.8.15
+	github.com/creack/pty v1.1.24
+	github.com/jackc/pgx/v5 v5.7.2
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

@@ -34,7 +34,8 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 
 const MODEL_TYPE_OPTIONS = [
   { value: "text_generation", label: "文本生成" },
-  { value: "embedding", label: "向量嵌入" }
+  { value: "embedding", label: "向量嵌入" },
+  { value: "vision", label: "多模态/视觉" }
 ];
 
 export function ModelsPage() {

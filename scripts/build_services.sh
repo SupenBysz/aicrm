@@ -10,6 +10,7 @@ services=(
   ky-org-service
   ky-membership-service
   ky-ai-model-service
+  ky-matrix-account-service
 )
 
 for service in "${services[@]}"; do

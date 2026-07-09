@@ -33,6 +33,36 @@ const bridge: AiCrmDesktopBridge = {
   network: {
     getSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.networkLogSnapshot),
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.networkLogClear)
+  },
+  aiExecutor: {
+    openTerminalWindow: (input) => ipcRenderer.invoke(IPC_CHANNELS.aiExecutorOpenTerminalWindow, input)
+  },
+  codex: {
+    authorize: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorAuthorize, input),
+    getAuthStatus: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorGetAuthStatus, input)
+  },
+  matrixAccount: {
+    getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountGetCapabilities),
+    startLogin: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountStartLogin, input),
+    openAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountOpenAccount, input),
+    checkSession: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountCheckSession, input),
+    clearProfile: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountClearProfile, input),
+    onLoginStateChanged: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
+      ipcRenderer.on(IPC_CHANNELS.matrixAccountLoginStateChanged, handler);
+      return () => ipcRenderer.off(IPC_CHANNELS.matrixAccountLoginStateChanged, handler);
+    },
+    createWebSpaceLogin: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountCreateWebSpaceLogin, input),
+    openWebSpace: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountOpenWebSpace, input),
+    detectWebSpaceAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountDetectWebSpaceAccount, input),
+    clearWebSpace: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountClearWebSpace, input),
+    captureWebSpaceSnapshot: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountCaptureWebSpaceSnapshot, input),
+    runWebSpaceLoginScript: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountRunWebSpaceLoginScript, input),
+    onWebSpaceStateChanged: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
+      ipcRenderer.on(IPC_CHANNELS.matrixAccountWebSpaceStateChanged, handler);
+      return () => ipcRenderer.off(IPC_CHANNELS.matrixAccountWebSpaceStateChanged, handler);
+    }
   }
 };
 

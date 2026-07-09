@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-ai-model-service/internal/config"
@@ -12,14 +14,16 @@ import (
 )
 
 type Server struct {
-	cfg    config.Config
-	store  *store.Store
-	cipher *crypto.Cipher
+	cfg           config.Config
+	store         *store.Store
+	cipher        *crypto.Cipher
+	executorPTYMu sync.Mutex
+	executorPTY   map[string]*os.File
 }
 
 func New(cfg config.Config) *Server {
 	c, _ := crypto.New(cfg.AISecretKey)
-	return &Server{cfg: cfg, cipher: c}
+	return &Server{cfg: cfg, cipher: c, executorPTY: map[string]*os.File{}}
 }
 
 type wsContext struct {
@@ -34,6 +38,7 @@ func (s *Server) Run(ctx context.Context) error {
 		if opened, err := store.Open(ctx, s.cfg.DatabaseURL); err == nil {
 			s.store = opened
 			defer opened.Close()
+			go s.runExecutorWorker(ctx)
 		}
 	}
 
@@ -62,6 +67,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	mux.HandleFunc("POST /internal/v1/ai-models/login-script/generate", s.internalGenerateLoginScript)
 
 	perms := func(codes ...string) []string { return codes }
 
@@ -73,6 +79,33 @@ func (s *Server) buildMux() *http.ServeMux {
 
 	mux.HandleFunc("GET /api/v1/ai-models/settings", s.ws(perms("platform.ai_model_settings.view"), s.getSettings))
 	mux.HandleFunc("PATCH /api/v1/ai-models/settings", s.ws(perms("platform.ai_model_settings.update"), s.updateSettings))
+
+	mux.HandleFunc("GET /api/v1/ai-executors", s.ws(perms("platform.ai_executors.view"), s.listExecutors))
+	mux.HandleFunc("POST /api/v1/ai-executors", s.ws(perms("platform.ai_executors.create"), s.createExecutor))
+	mux.HandleFunc("GET /api/v1/ai-executors/codex", s.ws(perms("platform.ai_executors.view"), s.getExecutorConfig))
+	mux.HandleFunc("PATCH /api/v1/ai-executors/codex", s.ws(perms("platform.ai_executors.update"), s.updateExecutorConfig))
+	mux.HandleFunc("GET /api/v1/ai-executors/{id}", s.ws(perms("platform.ai_executors.view"), s.getExecutor))
+	mux.HandleFunc("PATCH /api/v1/ai-executors/{id}", s.ws(perms("platform.ai_executors.update"), s.updateExecutor))
+	mux.HandleFunc("POST /api/v1/ai-executors/{id}/authorize", s.ws(perms("platform.ai_executors.authorize"), s.authorizeExecutor))
+	mux.HandleFunc("POST /api/v1/ai-executors/{id}/auth-status", s.ws(perms("platform.ai_executors.authorize"), s.syncExecutorAuthStatus))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorTasks))
+	mux.HandleFunc("POST /api/v1/ai-executor-tasks", s.ws(perms("platform.ai_executor_tasks.create"), s.createExecutorTask))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{id}", s.ws(perms("platform.ai_executor_tasks.view"), s.getExecutorTask))
+	mux.HandleFunc("POST /api/v1/ai-executor-tasks/{id}/cancel", s.ws(perms("platform.ai_executor_tasks.cancel"), s.cancelExecutorTask))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{id}/events", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorTaskEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{id}/raw-logs", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorTaskRawLogs))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{id}/events-stream", s.ws(perms("platform.ai_executor_tasks.view"), s.streamExecutorTaskEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{id}/terminal-stream", s.ws(perms("platform.ai_executor_tasks.view"), s.streamExecutorTaskTerminal))
+	mux.HandleFunc("GET /api/v1/ai-executor-runs", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorRuns))
+	mux.HandleFunc("POST /api/v1/ai-executor-runs", s.ws(perms("platform.ai_executor_tasks.create"), s.createExecutorRun))
+	mux.HandleFunc("GET /api/v1/ai-executor-runs/{id}", s.ws(perms("platform.ai_executor_tasks.view"), s.getExecutorRun))
+	mux.HandleFunc("GET /api/v1/ai-executor-runs/{id}/events", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorRunEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-runs/{id}/events-stream", s.ws(perms("platform.ai_executor_tasks.view"), s.streamExecutorRunEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-runs/{id}/terminal-frames", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorTerminalFrames))
+	mux.HandleFunc("GET /api/v1/ai-executor-runs/{id}/terminal-stream", s.ws(perms("platform.ai_executor_tasks.view"), s.streamExecutorTerminalFrames))
+	mux.HandleFunc("POST /api/v1/ai-executor-runs/{id}/terminal-resize", s.ws(perms("platform.ai_executor_tasks.view"), s.resizeExecutorTerminal))
+	mux.HandleFunc("POST /api/v1/ai-executor-runs/{id}/interrupt", s.ws(perms("platform.ai_executor_tasks.cancel"), s.interruptExecutorRun))
+	mux.HandleFunc("POST /api/v1/ai-executor-runs/{id}/cancel", s.ws(perms("platform.ai_executor_tasks.cancel"), s.cancelExecutorRun))
 
 	// Models are a sub-collection (/ai-models/models) so the {id} wildcard never
 	// overlaps the sibling literals `providers`/`settings` — otherwise Go 1.22's

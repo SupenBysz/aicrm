@@ -88,17 +88,57 @@ body.aicrm-desktop-window-chrome-enabled .app-content {
   min-height: calc(100vh - var(--aicrm-desktop-topbar-height)) !important;
 }
 
-body.aicrm-desktop-window-chrome-enabled.aicrm-app-overlay-active .app-header,
-body.aicrm-desktop-window-chrome-enabled.aicrm-app-overlay-active .global-account-header,
-body.aicrm-desktop-window-chrome-enabled.aicrm-app-overlay-active .workspace-selection-header {
+body.aicrm-desktop-window-chrome-enabled .ant-modal-root,
+body.aicrm-desktop-window-chrome-enabled .ant-modal-root * {
   -webkit-app-region: no-drag !important;
+}
+
+body.aicrm-desktop-window-chrome-enabled .ant-drawer:not(.ant-drawer-open),
+body.aicrm-desktop-window-chrome-enabled .ant-drawer:not(.ant-drawer-open) *,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer-root:not(:has(.ant-drawer-open)),
+body.aicrm-desktop-window-chrome-enabled .ant-drawer-root:not(:has(.ant-drawer-open)) * {
   pointer-events: none !important;
 }
 
-body.aicrm-desktop-window-chrome-enabled .ant-drawer,
-body.aicrm-desktop-window-chrome-enabled .ant-drawer *,
-body.aicrm-desktop-window-chrome-enabled .ant-modal-root,
-body.aicrm-desktop-window-chrome-enabled .ant-modal-root * {
+body.aicrm-desktop-window-chrome-enabled .ant-drawer:not(.ant-drawer-open) {
+  display: none !important;
+}
+
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open * {
+  -webkit-app-region: no-drag !important;
+}
+
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-title,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-title *,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-title,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-title * {
+  -webkit-app-region: drag !important;
+}
+
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-close,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-extra,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-extra *,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header button,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header a,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header input,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header textarea,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header select,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header [role="button"],
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header .ant-btn,
+body.aicrm-desktop-window-chrome-enabled .ant-drawer.ant-drawer-open .ant-drawer-header .ant-dropdown-trigger,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-close,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-close *,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header button,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header a,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header input,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header textarea,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header select,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header [role="button"],
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header .ant-btn,
+body.aicrm-desktop-window-chrome-enabled .ant-modal .ant-modal-header .ant-dropdown-trigger {
   -webkit-app-region: no-drag !important;
 }
 
@@ -118,8 +158,6 @@ body.aicrm-desktop-window-chrome-enabled .aicrm-desktop-window-host .aicrm-windo
 
 body.aicrm-desktop-window-chrome-enabled .app-header .app-mode-segmented,
 body.aicrm-desktop-window-chrome-enabled .app-header .app-mode-segmented *,
-body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions,
-body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions *,
 body.aicrm-desktop-window-chrome-enabled .app-header button,
 body.aicrm-desktop-window-chrome-enabled .app-header a,
 body.aicrm-desktop-window-chrome-enabled .app-header input,
@@ -137,6 +175,12 @@ body.aicrm-desktop-window-chrome-enabled .app-header .ant-badge {
 body.aicrm-desktop-window-chrome-enabled .app-header .brand-block,
 body.aicrm-desktop-window-chrome-enabled .app-header .brand-title,
 body.aicrm-desktop-window-chrome-enabled .app-header .brand-subtitle {
+  -webkit-app-region: drag;
+}
+
+body.aicrm-desktop-window-chrome-enabled .app-header .app-header-leading,
+body.aicrm-desktop-window-chrome-enabled .app-header .app-header-mode-switch,
+body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions {
   -webkit-app-region: drag;
 }
 
@@ -375,7 +419,16 @@ type ChromeTarget = {
 };
 
 const boundDoubleClickHosts = new WeakSet<HTMLElement>();
+let manualWindowDrag:
+  | {
+      pointerId: number;
+      screenX: number;
+      screenY: number;
+    }
+  | null = null;
 let lastWindowControlActionAt = 0;
+let overlayRecoveryAttempts = 0;
+let overlayRecoveryTimer: number | undefined;
 let syncQueued = false;
 
 function injectWindowChromeStyle(): void {
@@ -586,16 +639,54 @@ function createFloatingChrome(): HTMLElement {
 }
 
 function hasBlockingAppOverlay(): boolean {
-  const overlay = document.querySelector<HTMLElement>(
-    ".ant-drawer-open, .ant-modal-root .ant-modal-wrap, .ant-modal-root .ant-modal-mask"
+  const overlays = document.querySelectorAll<HTMLElement>(
+    [
+      ".ant-drawer-open .ant-drawer-content-wrapper",
+      ".ant-drawer-open .ant-drawer-mask",
+      ".ant-modal-root .ant-modal-wrap",
+      ".ant-modal-root .ant-modal-mask",
+      ".ant-modal-wrap",
+      ".ant-modal-mask"
+    ].join(", ")
   );
-  if (!overlay) return false;
+  return Array.from(overlays).some((overlay) => {
+    const style = window.getComputedStyle(overlay);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.opacity === "0" ||
+      style.pointerEvents === "none"
+    ) {
+      return false;
+    }
 
-  const style = window.getComputedStyle(overlay);
-  if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = overlay.getBoundingClientRect();
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.right > 0 &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.top < window.innerHeight
+    );
+  });
+}
 
-  const rect = overlay.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
+function clearOverlayRecoveryCheck(): void {
+  overlayRecoveryAttempts = 0;
+  if (overlayRecoveryTimer === undefined) return;
+  window.clearTimeout(overlayRecoveryTimer);
+  overlayRecoveryTimer = undefined;
+}
+
+function scheduleOverlayRecoveryCheck(): void {
+  if (overlayRecoveryTimer !== undefined) return;
+  overlayRecoveryAttempts += 1;
+  const delay = overlayRecoveryAttempts <= 4 ? 120 : 320;
+  overlayRecoveryTimer = window.setTimeout(() => {
+    overlayRecoveryTimer = undefined;
+    scheduleSyncWindowChrome();
+  }, delay);
 }
 
 function updateFloatingChromeOverlayState(floatingChrome: HTMLElement): void {
@@ -605,14 +696,28 @@ function updateFloatingChromeOverlayState(floatingChrome: HTMLElement): void {
   if (isOverlayActive) {
     const controls = document.getElementById(CONTROLS_ID);
     if (controls) clearWindowControlInteraction(controls);
+    scheduleOverlayRecoveryCheck();
+  } else {
+    clearOverlayRecoveryCheck();
   }
+}
+
+function restoreWindowDragIfOverlayClosed(): void {
+  if (hasBlockingAppOverlay()) return;
+  const floatingChrome = document.getElementById(FLOATING_CHROME_ID);
+  if (floatingChrome) {
+    floatingChrome.classList.remove("is-obscured-by-app-overlay");
+    floatingChrome.classList.remove("is-hidden");
+  }
+  document.body.classList.remove("aicrm-app-overlay-active");
+  clearOverlayRecoveryCheck();
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return Boolean(
     target.closest(
-      'button, a, input, textarea, select, [role="button"], .ant-btn, .ant-dropdown-trigger, .ant-select, .ant-segmented, .ant-badge, .app-mode-segmented, .app-header-actions, .aicrm-window-controls'
+      'button, a, input, textarea, select, [role="button"], .ant-btn, .ant-dropdown-trigger, .ant-select, .ant-segmented, .ant-badge, .app-mode-segmented, .aicrm-window-controls'
     )
   );
 }
@@ -627,6 +732,46 @@ function bindDoubleClickToToggle(host: HTMLElement): void {
       updateChromeState(controls, state)
     );
   });
+}
+
+function resolveManualWindowDragHost(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) return null;
+  return target.closest<HTMLElement>(
+    ".app-header, .global-account-header, .workspace-selection-header, .ant-drawer.ant-drawer-open .ant-drawer-header"
+  );
+}
+
+function beginManualWindowDrag(event: PointerEvent): void {
+  if (event.button !== 0 || isInteractiveTarget(event.target)) return;
+  const host = resolveManualWindowDragHost(event.target);
+  if (!host) return;
+
+  manualWindowDrag = {
+    pointerId: event.pointerId,
+    screenX: event.screenX,
+    screenY: event.screenY
+  };
+
+  event.preventDefault();
+}
+
+function moveManualWindowDrag(event: PointerEvent): void {
+  const drag = manualWindowDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+
+  const deltaX = event.screenX - drag.screenX;
+  const deltaY = event.screenY - drag.screenY;
+  if (deltaX === 0 && deltaY === 0) return;
+
+  drag.screenX = event.screenX;
+  drag.screenY = event.screenY;
+  ipcRenderer.send(IPC_CHANNELS.windowMoveBy, deltaX, deltaY);
+  event.preventDefault();
+}
+
+function endManualWindowDrag(event?: PointerEvent): void {
+  if (event && manualWindowDrag && event.pointerId !== manualWindowDrag.pointerId) return;
+  manualWindowDrag = null;
 }
 
 function resolveIntegratedTarget(): ChromeTarget | null {
@@ -705,6 +850,15 @@ function mountWindowChrome(): void {
     scheduleSyncWindowChrome();
   });
   observer.observe(document.body, { attributes: true, attributeFilter: ["class", "style"], childList: true, subtree: true });
+  document.addEventListener("pointermove", restoreWindowDragIfOverlayClosed, true);
+  document.addEventListener("pointerdown", restoreWindowDragIfOverlayClosed, true);
+  document.addEventListener("transitionend", restoreWindowDragIfOverlayClosed, true);
+  document.addEventListener("pointerdown", beginManualWindowDrag, true);
+  document.addEventListener("pointermove", moveManualWindowDrag, true);
+  document.addEventListener("pointerup", endManualWindowDrag, true);
+  document.addEventListener("pointercancel", endManualWindowDrag, true);
+  window.addEventListener("blur", () => endManualWindowDrag());
+  window.setInterval(restoreWindowDragIfOverlayClosed, 500);
 }
 
 export function installDesktopWindowChrome(): void {

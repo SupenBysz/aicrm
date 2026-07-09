@@ -16,6 +16,7 @@
     "@ky/plugin-ai-configuration": "workspace:*",
     "@ky/plugin-audit-management": "workspace:*",
     "@ky/plugin-identity-management": "workspace:*",
+    "@ky/plugin-matrix-account": "workspace:*",
     "@ky/plugin-notification": "workspace:*",
     "@ky/plugin-organization-management": "workspace:*",
     "@ky/plugin-system-settings": "workspace:*",

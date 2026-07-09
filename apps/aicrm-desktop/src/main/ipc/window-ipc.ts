@@ -77,6 +77,14 @@ export function registerWindowIpc(): void {
     return buildWindowState(window);
   });
 
+  ipcMain.on(IPC_CHANNELS.windowMoveBy, (event, deltaX: number, deltaY: number) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window || window.isDestroyed() || window.isFullScreen() || window.isMaximized()) return;
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+    const [x, y] = window.getPosition();
+    window.setPosition(Math.round(x + deltaX), Math.round(y + deltaY), false);
+  });
+
   ipcMain.handle(IPC_CHANNELS.windowOpenDevTools, (event): DesktopOpenDevToolsResult => {
     const window = getSenderWindow(event);
     if (!window || window.isDestroyed()) return { opened: false, reason: "unavailable" };

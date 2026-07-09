@@ -28,13 +28,17 @@ export function DefaultModelsPage() {
   const embeddingOptions = enabledModels
     .filter((m) => m.modelType === "embedding")
     .map((m) => ({ value: m.id, label: m.name }));
+  const multimodalOptions = enabledModels
+    .filter((m) => m.modelType === "vision")
+    .map((m) => ({ value: m.id, label: m.name }));
 
   useEffect(() => {
     if (settingsQuery.data && !touched) {
       form.setFieldsValue({
         defaultChatModelId: settingsQuery.data.defaultChatModelId ?? undefined,
         defaultSummaryModelId: settingsQuery.data.defaultSummaryModelId ?? undefined,
-        defaultEmbeddingModelId: settingsQuery.data.defaultEmbeddingModelId ?? undefined
+        defaultEmbeddingModelId: settingsQuery.data.defaultEmbeddingModelId ?? undefined,
+        defaultMultimodalModelId: settingsQuery.data.defaultMultimodalModelId ?? undefined
       });
     }
   }, [settingsQuery.data, form, touched]);
@@ -44,7 +48,8 @@ export function DefaultModelsPage() {
       updateDefaultModels(client, {
         defaultChatModelId: values.defaultChatModelId ?? null,
         defaultSummaryModelId: values.defaultSummaryModelId ?? null,
-        defaultEmbeddingModelId: values.defaultEmbeddingModelId ?? null
+        defaultEmbeddingModelId: values.defaultEmbeddingModelId ?? null,
+        defaultMultimodalModelId: values.defaultMultimodalModelId ?? null
       }),
     onSuccess: () => {
       void message.success("默认模型已保存。");
@@ -86,6 +91,9 @@ export function DefaultModelsPage() {
           </Form.Item>
           <Form.Item label="默认嵌入模型" name="defaultEmbeddingModelId">
             <Select allowClear placeholder="选择向量嵌入模型" options={embeddingOptions} />
+          </Form.Item>
+          <Form.Item label="默认多模态模型" name="defaultMultimodalModelId">
+            <Select allowClear placeholder="选择多模态/视觉模型" options={multimodalOptions} />
           </Form.Item>
         </Form>
       )}

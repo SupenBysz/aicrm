@@ -1,7 +1,27 @@
 import type {
   DesktopApiRequest,
   DesktopApiResponse,
+  AiExecutorTerminalWindowInput,
+  AiExecutorTerminalWindowResult,
+  CodexExecutorAuthInput,
+  CodexExecutorAuthResult,
   DesktopConfig,
+  DesktopCommandResult,
+  MatrixAccountBrowserInput,
+  MatrixAccountBrowserResult,
+  MatrixAccountCapabilities,
+  MatrixAccountCheckResult,
+  MatrixAccountClearProfileResult,
+  MatrixAccountLoginStatePayload,
+  MatrixAccountWebSpaceBrowserResult,
+  MatrixAccountWebSpaceClearResult,
+  MatrixAccountWebSpaceDetectResult,
+  MatrixAccountWebSpaceInput,
+  MatrixAccountWebSpaceScriptInput,
+  MatrixAccountWebSpaceScriptResult,
+  MatrixAccountWebSpaceSnapshotInput,
+  MatrixAccountWebSpaceSnapshotResult,
+  MatrixAccountWebSpaceStatePayload,
   DesktopNetworkLogSnapshot,
   DesktopOpenDevToolsResult,
   DesktopSession,
@@ -34,5 +54,33 @@ export interface AiCrmDesktopBridge {
   network: {
     getSnapshot: () => Promise<DesktopNetworkLogSnapshot>;
     clear: () => Promise<DesktopNetworkLogSnapshot>;
+  };
+  aiExecutor: {
+    openTerminalWindow: (
+      input: AiExecutorTerminalWindowInput
+    ) => Promise<DesktopCommandResult<AiExecutorTerminalWindowResult>>;
+  };
+  codex: {
+    authorize: (input: CodexExecutorAuthInput) => Promise<DesktopCommandResult<CodexExecutorAuthResult>>;
+    getAuthStatus: (input: CodexExecutorAuthInput) => Promise<DesktopCommandResult<CodexExecutorAuthResult>>;
+  };
+  matrixAccount: {
+    getCapabilities: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;
+    startLogin: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountBrowserResult>>;
+    openAccount: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountBrowserResult>>;
+    checkSession: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountCheckResult>>;
+    clearProfile: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountClearProfileResult>>;
+    onLoginStateChanged: (listener: (payload: MatrixAccountLoginStatePayload) => void) => () => void;
+    createWebSpaceLogin: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>>;
+    openWebSpace: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>>;
+    detectWebSpaceAccount: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceDetectResult>>;
+    clearWebSpace: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceClearResult>>;
+    captureWebSpaceSnapshot: (
+      input: MatrixAccountWebSpaceSnapshotInput
+    ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceSnapshotResult>>;
+    runWebSpaceLoginScript: (
+      input: MatrixAccountWebSpaceScriptInput
+    ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceScriptResult>>;
+    onWebSpaceStateChanged: (listener: (payload: MatrixAccountWebSpaceStatePayload) => void) => () => void;
   };
 }
