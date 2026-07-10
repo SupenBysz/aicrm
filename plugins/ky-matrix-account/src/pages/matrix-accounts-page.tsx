@@ -3,6 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { BugOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import {
   Alert,
   App,
@@ -14,9 +15,11 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Popover,
   Segmented,
   Space,
   Spin,
+  Switch,
   Table,
   Tag,
   Tooltip,
@@ -76,6 +79,7 @@ import {
   type AiExecutorEvent,
   type AiExecutorConfigSummary,
   type AiExecutorRawLog,
+  type AiExecutorRun,
   type AiExecutorTerminalFrame,
   type AiExecutorTask,
   type MatrixAccount,
@@ -233,6 +237,9 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
   const [webSpaceFlowLogs, setWebSpaceFlowLogs] = useState<WebSpaceFlowLogEntry[]>([]);
   const [webSpaceActiveTab, setWebSpaceActiveTab] = useState("add");
   const [automationView, setAutomationView] = useState("overview");
+  const [showTaskContext, setShowTaskContext] = useState(false);
+  const [showEnvironmentInfo, setShowEnvironmentInfo] = useState(false);
+  const [redactTerminalContent, setRedactTerminalContent] = useState(true);
   const [selectedScriptId, setSelectedScriptId] = useState("");
   const [scriptDetailDrawerOpen, setScriptDetailDrawerOpen] = useState(false);
   const [sensitiveSnapshot, setSensitiveSnapshot] = useState<MatrixAccountWebSpaceSnapshotResult | null>(null);
@@ -279,12 +286,9 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
   const isSuperAdmin =
     currentUser?.username?.toLowerCase() === "super.admin" ||
     workspace?.roles?.some((role) => role.code === "platform_owner") === true;
-  const debugMode =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1" ||
-      new URLSearchParams(window.location.search).get("debug") === "1" ||
-      window.localStorage.getItem("aicrm.debug") === "1");
+  const debugMode = useClientDebugMode();
+  const canUseDebugTools = debugMode || isSuperAdmin;
+  const taskContextVisible = canUseDebugTools && showTaskContext;
   const showScriptManagement = debugMode || isSuperAdmin || canScriptsView || canScriptsManage;
   const showWebSpaceDebug = debugMode || isSuperAdmin || canWebSpacesDebug;
   const showSensitiveDebug = debugMode || isSuperAdmin || canSensitiveDebugView;
@@ -1304,13 +1308,14 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
       window.location.origin
     );
     terminalUrl.searchParams.set("terminalWindow", "1");
+    terminalUrl.searchParams.set("redactTerminal", canUseDebugTools && !redactTerminalContent ? "0" : "1");
     if (debugMode) terminalUrl.searchParams.set("debug", "1");
 
     if (!desktopRuntime) {
       window.open(
         terminalUrl.toString(),
         `aicrm-executor-terminal-${task.id}`,
-        `popup,width=${EXECUTOR_TERMINAL_DEFAULT_WINDOW_WIDTH},height=${EXECUTOR_TERMINAL_DEFAULT_WINDOW_HEIGHT}`
+        EXECUTOR_TERMINAL_POPUP_FEATURES
       );
       return;
     }
@@ -1666,16 +1671,19 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
           ) : null}
           {automationView === "structured" ? (
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
-              <MatrixAccountScriptStructuredContext
-                currentScript={webSpaceScriptSummary}
-                latestRunLog={webSpaceRunLogs?.[0] ?? null}
-                loading={webSpaceRunLogsFetching}
-                repairTask={webSpaceRepairTask}
-                scriptGroups={showScriptManagement ? loginScriptGroups : []}
-              />
+              {taskContextVisible ? (
+                <MatrixAccountScriptStructuredContext
+                  currentScript={webSpaceScriptSummary}
+                  latestRunLog={webSpaceRunLogs?.[0] ?? null}
+                  loading={webSpaceRunLogsFetching}
+                  repairTask={webSpaceRepairTask}
+                  scriptGroups={showScriptManagement ? loginScriptGroups : []}
+                />
+              ) : null}
               <MatrixAccountExecutorEventStream
                 client={client}
                 onOpenTerminal={() => openExecutorTerminalWindow(webSpaceRepairTask)}
+                showDebugEvents={canUseDebugTools}
                 taskId={webSpaceRepairTask?.id}
                 taskStatus={webSpaceRepairTask?.status}
               />
@@ -2044,6 +2052,15 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
         onClose={closeWebSpaceDrawer}
         extra={
           <Space>
+            <DebugSettingsButton
+              visible={canUseDebugTools}
+              showTaskContext={showTaskContext}
+              showEnvironmentInfo={showEnvironmentInfo}
+              redactTerminalContent={redactTerminalContent}
+              onShowTaskContextChange={setShowTaskContext}
+              onShowEnvironmentInfoChange={setShowEnvironmentInfo}
+              onRedactTerminalContentChange={setRedactTerminalContent}
+            />
             <Button
               loading={openWebSpaceMutation.isPending}
               onClick={() => openWebSpaceMutation.mutate({ showWindow: true })}
@@ -2534,8 +2551,14 @@ function DebugJsonWindow({
 export function MatrixAccountExecutorTerminalPage() {
   const client = useRequestClient();
   const workspace = useCurrentWorkspace();
+  const currentUser = useCurrentUser();
   const { taskId = "" } = useParams<{ taskId: string }>();
   const workspaceReady = Boolean(workspace?.id && workspace?.type);
+  const clientDebugMode = useClientDebugMode();
+  const canUseDebugTools = clientDebugMode || isSuperAdminUser(currentUser, workspace);
+  const [redactTerminalContent, setRedactTerminalContent] = useState(() => !readTerminalSearchFlag("redactTerminal", "0"));
+  const [taskInfoDrawerOpen, setTaskInfoDrawerOpen] = useState(false);
+  const terminalContentRedacted = !canUseDebugTools || redactTerminalContent;
   const { data: task, error, isFetching } = useQuery({
     queryKey: ["ai-executor-run", workspace?.type, workspace?.id, taskId],
     queryFn: () => getAiExecutorRun(client, taskId),
@@ -2588,6 +2611,15 @@ export function MatrixAccountExecutorTerminalPage() {
             <span className="matrix-account-executor-terminal-page__purpose-title">{terminalPurpose.title}</span>
             <span className="matrix-account-executor-terminal-page__purpose-description">{terminalPurpose.description}</span>
           </div>
+          <Tooltip title="查看环境与任务信息">
+            <Button
+              aria-label="查看环境与任务信息"
+              className="desktop-quick-action matrix-account-terminal-info-action"
+              icon={<InfoCircleOutlined style={{ fontSize: 22 }} />}
+              type="text"
+              onClick={() => setTaskInfoDrawerOpen(true)}
+            />
+          </Tooltip>
         </div>
       </header>
       <main className="matrix-account-executor-terminal-page__body">
@@ -2611,12 +2643,288 @@ export function MatrixAccountExecutorTerminalPage() {
             expanded
             fallbackLines={fallbackLines}
             height="100%"
+            redactContent={terminalContentRedacted}
             taskIdOverride={taskId}
             task={task ?? null}
           />
         )}
       </main>
+      <ExecutorTaskInfoDrawer
+        canUseDebugTools={canUseDebugTools}
+        executor={executorConfig ?? null}
+        onClose={() => setTaskInfoDrawerOpen(false)}
+        onRedactTerminalContentChange={setRedactTerminalContent}
+        open={taskInfoDrawerOpen}
+        redactTerminalContent={redactTerminalContent}
+        task={task ?? null}
+        terminalPurpose={terminalPurpose}
+        terminalTitle={terminalTitle}
+      />
     </div>
+  );
+}
+
+const executorTaskInfoLabelStyle: CSSProperties = {
+  minWidth: "26%",
+  verticalAlign: "top",
+  whiteSpace: "nowrap",
+  width: "26%"
+};
+
+const executorTaskInfoContentStyle: CSSProperties = {
+  minWidth: 0,
+  verticalAlign: "top",
+  width: "74%",
+  wordBreak: "break-word"
+};
+
+function ExecutorTaskInfoDrawer({
+  canUseDebugTools,
+  executor,
+  onClose,
+  onRedactTerminalContentChange,
+  open,
+  redactTerminalContent,
+  task,
+  terminalPurpose,
+  terminalTitle
+}: {
+  canUseDebugTools: boolean;
+  executor: AiExecutorConfigSummary | null;
+  onClose: () => void;
+  onRedactTerminalContentChange: (value: boolean) => void;
+  open: boolean;
+  redactTerminalContent: boolean;
+  task: AiExecutorRun | null;
+  terminalPurpose: { title: string; description: string };
+  terminalTitle: { title: string; subtitle: string };
+}) {
+  const [activeTab, setActiveTab] = useState("task");
+  const [contextKeyword, setContextKeyword] = useState("");
+  const visibleTab = canUseDebugTools ? activeTab : "task";
+  const contextSummary = canUseDebugTools ? task?.resultSummary ?? {} : {};
+  const contextJson = useMemo(() => stringifyJson(contextSummary), [contextSummary]);
+  const contextMatchCount = useMemo(() => countTextMatches(contextJson, contextKeyword), [contextJson, contextKeyword]);
+  const taskRequirements = useMemo(() => buildExecutorTaskRequirements(task), [task]);
+  const taskConstraints = useMemo(() => buildExecutorTaskConstraints(task), [task]);
+  const descriptionProps = {
+    bordered: true,
+    column: 1,
+    contentStyle: executorTaskInfoContentStyle,
+    labelStyle: executorTaskInfoLabelStyle,
+    size: "small" as const
+  };
+
+  useEffect(() => {
+    if (!canUseDebugTools && activeTab !== "task") {
+      setActiveTab("task");
+    }
+  }, [activeTab, canUseDebugTools]);
+
+  return (
+    <Drawer
+      title={canUseDebugTools ? "环境与任务信息" : "任务信息"}
+      placement="right"
+      width={drawerWidths.complexDetail}
+      open={open}
+      onClose={onClose}
+      destroyOnHidden
+      styles={{ body: { display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" } }}
+    >
+      <div style={{ display: "flex", flex: 1, flexDirection: "column", gap: 14, minHeight: 0, width: "100%" }}>
+        {canUseDebugTools ? (
+          <Segmented
+            block
+            value={activeTab}
+            onChange={(value) => setActiveTab(String(value))}
+            options={[
+              { label: "任务信息", value: "task" },
+              { label: "运行环境", value: "environment" },
+              { label: "任务上下文", value: "context" }
+            ]}
+          />
+        ) : null}
+        <div style={{ flex: 1, minHeight: 0, overflow: visibleTab === "context" ? "hidden" : "auto" }}>
+          {visibleTab === "task" ? (
+            <Space direction="vertical" size={14} style={{ width: "100%" }}>
+              <Descriptions {...descriptionProps} title="基础信息">
+                <Descriptions.Item label="终端标题">{terminalTitle.title}</Descriptions.Item>
+                {terminalTitle.subtitle ? <Descriptions.Item label="执行器类型">{terminalTitle.subtitle}</Descriptions.Item> : null}
+                <Descriptions.Item label="任务目的">{terminalPurpose.title}</Descriptions.Item>
+                <Descriptions.Item label="触发原因">{terminalPurpose.description}</Descriptions.Item>
+              </Descriptions>
+              <Descriptions {...descriptionProps} title="执行要求">
+                <Descriptions.Item label="处理要求">{renderExecutorTaskTextList(taskRequirements)}</Descriptions.Item>
+                <Descriptions.Item label="执行约束">{renderExecutorTaskTextList(taskConstraints)}</Descriptions.Item>
+              </Descriptions>
+              <Descriptions {...descriptionProps} title="执行对象">
+                <Descriptions.Item label="任务 ID">{task?.id || "-"}</Descriptions.Item>
+                <Descriptions.Item label="任务类型">{task?.taskType || "-"}</Descriptions.Item>
+                <Descriptions.Item label="Web 空间 ID">{task?.webSpaceId || "-"}</Descriptions.Item>
+              </Descriptions>
+              <Descriptions {...descriptionProps} title="脚本信息">
+                <Descriptions.Item label="脚本用途">{task?.purpose ? scriptPurposeLabel(task.purpose) : "-"}</Descriptions.Item>
+                <Descriptions.Item label="触发编码">{task?.triggerReason || "-"}</Descriptions.Item>
+                <Descriptions.Item label="脚本 ID">{task?.scriptId || "-"}</Descriptions.Item>
+                <Descriptions.Item label="脚本版本 ID">{task?.scriptVersionId || "-"}</Descriptions.Item>
+              </Descriptions>
+              <Descriptions {...descriptionProps} title="执行状态">
+                <Descriptions.Item label="状态">{task?.status ? executorTaskStatusLabel(task.status) : "-"}</Descriptions.Item>
+                <Descriptions.Item label="错误信息">{task?.errorMessage || "-"}</Descriptions.Item>
+              </Descriptions>
+            </Space>
+          ) : null}
+          {canUseDebugTools && visibleTab === "environment" ? (
+            <Descriptions {...descriptionProps}>
+              <Descriptions.Item label="执行器 ID">{task?.executorId || executor?.id || "-"}</Descriptions.Item>
+              <Descriptions.Item label="执行器名称">{executor?.name || "-"}</Descriptions.Item>
+              <Descriptions.Item label="执行器类型">{executorTypeLabel(executor?.executorType || task?.executorType || "") || "-"}</Descriptions.Item>
+              <Descriptions.Item label="运行时类型">{executor?.runtimeType || "-"}</Descriptions.Item>
+              <Descriptions.Item label="终端模式">Codex TUI + app-server</Descriptions.Item>
+              <Descriptions.Item label="终端内容脱敏">
+                {canUseDebugTools ? (
+                  <Switch size="small" checked={redactTerminalContent} onChange={onRedactTerminalContentChange} />
+                ) : (
+                  "已开启"
+                )}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+          {canUseDebugTools && visibleTab === "context" ? (
+            Object.keys(contextSummary).length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, height: "100%", minHeight: 0 }}>
+                <Space style={{ flex: "0 0 auto", justifyContent: "space-between", width: "100%" }} align="center">
+                  <Input.Search
+                    allowClear
+                    placeholder="搜索任务上下文"
+                    value={contextKeyword}
+                    onChange={(event) => setContextKeyword(event.target.value)}
+                    style={{ maxWidth: 360 }}
+                  />
+                  <Typography.Text type="secondary" style={{ minWidth: 72, textAlign: "right" }}>
+                    {contextKeyword.trim() ? `${contextMatchCount} 处` : ""}
+                  </Typography.Text>
+                </Space>
+                <div
+                  style={{
+                    background: "rgba(7, 12, 22, 0.94)",
+                    border: "1px solid rgba(127, 127, 127, 0.18)",
+                    borderRadius: 8,
+                    flex: "1 1 auto",
+                    minHeight: 0,
+                    overflow: "auto"
+                  }}
+                >
+                  {renderHighlightedText(contextJson, contextKeyword)}
+                </div>
+              </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无任务上下文" />
+            )
+          ) : null}
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+function DebugSettingsButton({
+  onRedactTerminalContentChange,
+  onShowEnvironmentInfoChange,
+  onShowTaskContextChange,
+  redactTerminalContent,
+  showEnvironmentInfo,
+  showTaskContext,
+  variant = "default",
+  visible
+}: {
+  onRedactTerminalContentChange: (value: boolean) => void;
+  onShowEnvironmentInfoChange: (value: boolean) => void;
+  onShowTaskContextChange: (value: boolean) => void;
+  redactTerminalContent: boolean;
+  showEnvironmentInfo: boolean;
+  showTaskContext: boolean;
+  variant?: "default" | "titlebar";
+  visible: boolean;
+}) {
+  if (!visible) return null;
+  const active = showTaskContext || showEnvironmentInfo || !redactTerminalContent;
+  return (
+    <Popover
+      placement="bottomRight"
+      title="Debug"
+      trigger="click"
+      content={
+        <Space direction="vertical" size={10}>
+          <Space style={{ justifyContent: "space-between", minWidth: 190 }} align="center">
+            <Typography.Text>显示任务上下文</Typography.Text>
+            <Switch size="small" checked={showTaskContext} onChange={onShowTaskContextChange} />
+          </Space>
+          <Space style={{ justifyContent: "space-between", minWidth: 190 }} align="center">
+            <Typography.Text>显示环境信息</Typography.Text>
+            <Switch size="small" checked={showEnvironmentInfo} onChange={onShowEnvironmentInfoChange} />
+          </Space>
+          <Space style={{ justifyContent: "space-between", minWidth: 190 }} align="center">
+            <Typography.Text>终端内容脱敏</Typography.Text>
+            <Switch size="small" checked={redactTerminalContent} onChange={onRedactTerminalContentChange} />
+          </Space>
+        </Space>
+      }
+    >
+      <Button
+        aria-label="Debug 设置"
+        className={variant === "titlebar" ? `desktop-quick-action matrix-account-terminal-debug-action${active ? " is-active" : ""}` : undefined}
+        icon={<BugOutlined style={variant === "titlebar" ? { fontSize: 22 } : undefined} />}
+        type={variant === "titlebar" ? "text" : active ? "primary" : "default"}
+      />
+    </Popover>
+  );
+}
+
+function useClientDebugMode() {
+  const [desktopDebugMode, setDesktopDebugMode] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    let active = true;
+    const appBridge = (window as unknown as {
+      aicrm?: { app?: { getConfig?: () => Promise<{ debugMode?: boolean }> } };
+    }).aicrm?.app;
+    void appBridge?.getConfig?.()
+      .then((config) => {
+        if (active) setDesktopDebugMode(Boolean(config?.debugMode));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return readLocalDebugFlag() || desktopDebugMode;
+}
+
+function readLocalDebugFlag() {
+  if (typeof window === "undefined") return false;
+  return (
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1" ||
+    new URLSearchParams(window.location.search).get("debug") === "1" ||
+    window.localStorage.getItem("aicrm.debug") === "1"
+  );
+}
+
+function readTerminalSearchFlag(key: string, expected = "1") {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get(key) === expected;
+}
+
+function isSuperAdminUser(
+  currentUser: { username?: string | null } | null,
+  workspace: { roles?: Array<{ code?: string | null }> } | null
+) {
+  return (
+    currentUser?.username?.toLowerCase() === "super.admin" ||
+    workspace?.roles?.some((role) => role.code === "platform_owner") === true
   );
 }
 
@@ -2780,6 +3088,7 @@ const matrixAccountMotionCss = `
   }
 }
 .matrix-account-executor-terminal-page {
+  --admin-header-height: 60px;
   background: var(--ant-color-bg-layout, #f7efe4);
   display: flex;
   flex-direction: column;
@@ -2800,8 +3109,11 @@ const matrixAccountMotionCss = `
   min-height: var(--admin-header-height);
   overflow: hidden;
   padding-left: 22px;
-  padding-right: calc(var(--aicrm-window-controls-width, 138px) + 18px);
+  padding-right: 16px;
   position: relative;
+}
+body.aicrm-desktop-window-chrome-enabled .matrix-account-executor-terminal-page__header {
+  padding-right: calc(var(--aicrm-window-controls-width, 138px) + 5px) !important;
 }
 .matrix-account-executor-terminal-page__header::before {
   content: "";
@@ -2884,6 +3196,9 @@ const matrixAccountMotionCss = `
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.matrix-account-terminal-debug-action.ant-btn {
+  flex: 0 0 42px;
 }
 .matrix-account-executor-terminal-page__body {
   display: flex;
@@ -2985,7 +3300,7 @@ const matrixAccountMotionCss = `
   max-height: 420px;
   min-height: 280px;
   overflow: hidden;
-  padding: 10px 0 0;
+  padding: 0;
   scrollbar-color: rgba(215, 247, 223, 0.32) transparent;
   scrollbar-width: thin;
 }
@@ -2993,20 +3308,28 @@ const matrixAccountMotionCss = `
   flex: 1 1 auto;
   height: auto !important;
   max-height: none !important;
-  min-height: 0 !important;
+  min-height: var(--matrix-account-terminal-min-height, 0) !important;
 }
 .matrix-account-terminal__xterm .xterm {
   height: 100%;
+  margin: 0 !important;
+  padding: 0 !important;
   width: 100%;
   overflow: hidden;
 }
 .matrix-account-terminal__xterm .xterm-viewport,
 .matrix-account-terminal__xterm .xterm-screen {
   background: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 .matrix-account-terminal__xterm .xterm-viewport {
   scrollbar-color: rgba(215, 247, 223, 0.32) transparent;
   scrollbar-width: thin;
+}
+.matrix-account-terminal__xterm .xterm-rows {
+  margin: 0 !important;
+  padding: 0 !important;
 }
 .matrix-account-terminal--active {
   box-shadow: inset 0 0 0 1px rgba(82, 196, 26, 0.18);
@@ -3153,8 +3476,24 @@ type DocumentAdminColorScheme = "light" | "dark";
 const GITHUB_DARK_TERMINAL_BACKGROUND = "#0d1117";
 const EXECUTOR_TERMINAL_DEFAULT_WINDOW_WIDTH = 1180;
 const EXECUTOR_TERMINAL_DEFAULT_WINDOW_HEIGHT = 760;
+const EXECUTOR_TERMINAL_POPUP_FEATURES = [
+  "popup=yes",
+  `width=${EXECUTOR_TERMINAL_DEFAULT_WINDOW_WIDTH}`,
+  `height=${EXECUTOR_TERMINAL_DEFAULT_WINDOW_HEIGHT}`,
+  "resizable=yes",
+  "scrollbars=no",
+  "toolbar=no",
+  "location=no",
+  "menubar=no",
+  "status=no"
+].join(",");
 const EXECUTOR_TERMINAL_FIXED_COLS = 150;
 const EXECUTOR_TERMINAL_DEFAULT_ROWS = 32;
+const EXECUTOR_TERMINAL_FONT_SIZE = 13;
+const EXECUTOR_TERMINAL_LINE_HEIGHT = 1.42;
+const EXECUTOR_TERMINAL_MIN_HEIGHT = Math.ceil(
+  EXECUTOR_TERMINAL_DEFAULT_ROWS * EXECUTOR_TERMINAL_FONT_SIZE * EXECUTOR_TERMINAL_LINE_HEIGHT
+);
 
 function getDocumentAdminColorScheme(): DocumentAdminColorScheme {
   if (typeof document !== "undefined") {
@@ -3267,6 +3606,7 @@ function MatrixAccountExecutorTerminal({
   fallbackLines,
   height = 420,
   expanded = false,
+  redactContent = true,
   taskIdOverride,
   task
 }: {
@@ -3275,6 +3615,7 @@ function MatrixAccountExecutorTerminal({
   fallbackLines: string[];
   height?: number | string;
   expanded?: boolean;
+  redactContent?: boolean;
   taskIdOverride?: string;
   task?: AiExecutorTask | null;
 }) {
@@ -3321,6 +3662,7 @@ function MatrixAccountExecutorTerminal({
         "--matrix-account-terminal-footer-divider": terminalChromeTheme.footerDivider,
         "--matrix-account-terminal-footer-fg": terminalChromeTheme.footerForeground,
         "--matrix-account-terminal-footer-muted": terminalChromeTheme.footerMuted,
+        "--matrix-account-terminal-min-height": `${EXECUTOR_TERMINAL_MIN_HEIGHT}px`,
         width: "100%"
       }) as CSSProperties,
     [terminalChromeTheme, terminalTheme.background]
@@ -3336,15 +3678,19 @@ function MatrixAccountExecutorTerminal({
       const host = terminalHostRef.current;
       const xtermElement = host?.querySelector<HTMLElement>(".xterm");
       const rowElement = host?.querySelector<HTMLElement>(".xterm-rows > div");
+      const hostRect = host?.getBoundingClientRect();
       const xtermRect = xtermElement?.getBoundingClientRect();
       const fallbackRowHeight =
-        Number(currentTerminal.options.fontSize ?? 13) * Number(currentTerminal.options.lineHeight ?? 1.42);
+        Number(currentTerminal.options.fontSize ?? EXECUTOR_TERMINAL_FONT_SIZE) *
+        Number(currentTerminal.options.lineHeight ?? EXECUTOR_TERMINAL_LINE_HEIGHT);
       const measuredRowHeight = rowElement?.getBoundingClientRect().height || fallbackRowHeight;
+      const availableHeight = Math.max(hostRect?.height ?? 0, xtermRect?.height ?? 0);
       const measuredRows =
-        xtermRect && measuredRowHeight > 0 ? Math.floor(xtermRect.height / measuredRowHeight) : 0;
+        availableHeight > 0 && measuredRowHeight > 0 ? Math.ceil(availableHeight / measuredRowHeight) : 0;
       const proposed = fitAddon.proposeDimensions();
       const cols = EXECUTOR_TERMINAL_FIXED_COLS;
-      const rows = Math.max(EXECUTOR_TERMINAL_DEFAULT_ROWS, proposed?.rows || measuredRows || currentTerminal.rows);
+      const calculatedRows = measuredRows || proposed?.rows || currentTerminal.rows || EXECUTOR_TERMINAL_DEFAULT_ROWS;
+      const rows = Math.max(EXECUTOR_TERMINAL_DEFAULT_ROWS, calculatedRows);
       if (cols > 0 && rows > 0) {
         if (currentTerminal.cols !== cols || currentTerminal.rows !== rows) {
           currentTerminal.resize(cols, rows);
@@ -3481,8 +3827,8 @@ function MatrixAccountExecutorTerminal({
       cursorBlink: false,
       disableStdin: true,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-      fontSize: 13,
-      lineHeight: 1.42,
+      fontSize: EXECUTOR_TERMINAL_FONT_SIZE,
+      lineHeight: EXECUTOR_TERMINAL_LINE_HEIGHT,
       scrollback: 3000,
       theme: buildExecutorTerminalTheme()
     });
@@ -3503,8 +3849,16 @@ function MatrixAccountExecutorTerminal({
     });
 
     const resizeObserver = new ResizeObserver(() => window.requestAnimationFrame(fitTerminal));
-    resizeObserver.observe(host);
-    if (host.parentElement) resizeObserver.observe(host.parentElement);
+    const observedElements = new Set(
+      [
+        host,
+        host.parentElement,
+        host.closest<HTMLElement>(".matrix-account-terminal"),
+        host.closest<HTMLElement>(".matrix-account-terminal-shell"),
+        host.closest<HTMLElement>(".matrix-account-executor-terminal-page__body")
+      ].filter(Boolean) as HTMLElement[]
+    );
+    observedElements.forEach((element) => resizeObserver.observe(element));
     window.addEventListener("resize", fitTerminal);
     window.visualViewport?.addEventListener("resize", fitTerminal);
     const timers = [0, 80, 220, 520, 1000, 1800, 3000].map((delay) =>
@@ -3523,6 +3877,12 @@ function MatrixAccountExecutorTerminal({
       fitAddonRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    scheduleTerminalFit(0);
+    scheduleTerminalFit(120);
+    scheduleTerminalFit(360);
+  }, [expanded, height]);
 
   useEffect(() => {
     setLiveTask(task ?? null);
@@ -3602,13 +3962,14 @@ function MatrixAccountExecutorTerminal({
       frames.forEach((frame) => {
         if (frame.frameSeq <= lastFrameSeqRef.current) return;
         lastFrameSeqRef.current = frame.frameSeq;
-        const decodedPayload = decodeExecutorTerminalFrame(frame);
+        let decodedPayload = decodeExecutorTerminalFrame(frame);
+        if (redactContent) decodedPayload = redactTerminalText(decodedPayload);
         const status = extractExecutorRuntimeStatus(frame);
         if (status) {
           setRuntimeStatus(status);
         }
         payload += decodedPayload;
-        acceptedByteLength += frame.byteLength || decodedPayload.length;
+        acceptedByteLength += decodedPayload ? frame.byteLength || decodedPayload.length : 0;
         acceptedCount += 1;
         latest = maxIsoTime(latest, frame.createdAt);
       });
@@ -3654,7 +4015,9 @@ function MatrixAccountExecutorTerminal({
       }
       const initial = await listAiExecutorTerminalFrames(client, taskId, 0).catch(() => []);
       if (cancelled) return;
-      if (terminalRef.current) terminalRef.current.clear();
+      if (terminalRef.current) {
+        terminalRef.current.reset();
+      }
       initial.forEach(enqueueFrame);
       scheduleTerminalFit(40);
       scheduleTerminalFit(260);
@@ -3692,7 +4055,7 @@ function MatrixAccountExecutorTerminal({
         frameFlushTimerRef.current = null;
       }
     };
-  }, [client, taskId, workspaceSignature]);
+  }, [client, redactContent, taskId, workspaceSignature]);
 
   const effectiveTask = liveTask ?? task ?? null;
   const taskStatus = effectiveTask?.status;
@@ -3732,7 +4095,7 @@ function MatrixAccountExecutorTerminal({
             style={{
               height,
               maxHeight: expanded ? "none" : undefined,
-              minHeight: expanded ? 420 : undefined
+              minHeight: expanded ? EXECUTOR_TERMINAL_MIN_HEIGHT : undefined
             }}
           />
           <div className="matrix-account-terminal-footer">
@@ -3749,7 +4112,10 @@ function MatrixAccountExecutorTerminal({
                 className="matrix-account-terminal-footer__button"
                 size="small"
                 onClick={() => {
-                  terminalRef.current?.clear();
+                  const terminal = terminalRef.current;
+                  if (terminal) {
+                    terminal.clear();
+                  }
                   setFrameCount(0);
                 }}
               >
@@ -3761,7 +4127,7 @@ function MatrixAccountExecutorTerminal({
                 type={autoScroll ? "primary" : "default"}
                 onClick={() => setAutoScroll((value) => !value)}
               >
-                跟随底部
+                {autoScroll ? "✓ " : ""}跟随底部
               </Button>
             </Space>
           </div>
@@ -3785,7 +4151,7 @@ function MatrixAccountExecutorTerminal({
           style={viewMode === "maximized" ? { top: 0, maxWidth: "100vw", paddingBottom: 0 } : undefined}
           styles={{
             body: {
-              paddingTop: 8
+              padding: "8px 0 0"
             }
           }}
         >
@@ -3795,6 +4161,7 @@ function MatrixAccountExecutorTerminal({
             expanded
             fallbackLines={fallbackLines}
             height={viewMode === "maximized" ? "calc(100vh - 148px)" : "72vh"}
+            redactContent={redactContent}
             task={task}
           />
         </Modal>
@@ -3806,11 +4173,15 @@ function MatrixAccountExecutorTerminal({
 function MatrixAccountExecutorEventStream({
   client,
   onOpenTerminal,
+  showDebugEvents = false,
+  showPayload = true,
   taskId,
   taskStatus
 }: {
   client: RequestClient;
   onOpenTerminal?: () => void;
+  showDebugEvents?: boolean;
+  showPayload?: boolean;
   taskId?: string;
   taskStatus?: string;
 }) {
@@ -3834,6 +4205,7 @@ function MatrixAccountExecutorEventStream({
     const appendEvent = (event: AiExecutorEvent) => {
       if (event.sequence <= lastSequenceRef.current) return;
       lastSequenceRef.current = event.sequence;
+      if (isHiddenExecutorStructuredEvent(event, showDebugEvents)) return;
       setEvents((current) => [...current.slice(-199), event]);
     };
 
@@ -3865,10 +4237,12 @@ function MatrixAccountExecutorEventStream({
     return () => {
       cancelled = true;
     };
-  }, [client, taskId]);
+  }, [client, showDebugEvents, taskId]);
 
   const executing = isExecutorTaskExecuting(taskStatus) || (Boolean(taskId) && streamStatus === "connecting");
   const liveLabel = taskStatus ? executorTaskStatusLabel(taskStatus) : streamStatusLabel(streamStatus);
+  const eventGroups = useMemo(() => groupConsecutiveExecutorEvents(events), [events]);
+  const visibleEventGroups = eventGroups.slice(-30);
 
   return (
     <Space
@@ -3897,13 +4271,13 @@ function MatrixAccountExecutorEventStream({
       </Space>
       {!taskId ? (
         <Typography.Text type="secondary">暂无 Codex 执行器任务，结构化订阅将在 AI 自动化介入后显示。</Typography.Text>
-      ) : events.length === 0 ? (
+      ) : eventGroups.length === 0 ? (
         <Typography.Text type="secondary">等待 Codex 结构化事件...</Typography.Text>
       ) : (
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
-          {events.slice(-30).map((event) => (
+          {visibleEventGroups.map((group) => (
             <div
-              key={event.id}
+              key={group.id}
               style={{
                 border: "1px solid rgba(127, 127, 127, 0.18)",
                 borderRadius: 8,
@@ -3912,17 +4286,20 @@ function MatrixAccountExecutorEventStream({
             >
               <Space direction="vertical" size={6} style={{ width: "100%" }}>
                 <Space wrap size={6}>
-                  <Tag color={executorEventLevelColor(event.level)}>{executorEventLevelLabel(event.level)}</Tag>
-                  <Tag>{event.eventType}</Tag>
+                  <Tag color={executorEventLevelColor(group.event.level)}>{executorEventLevelLabel(group.event.level)}</Tag>
+                  <Tag>{group.event.eventType}</Tag>
+                  {group.count > 1 ? <Tag color="blue">x{group.count}</Tag> : null}
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    #{event.sequence} · {formatShortTime(event.createdAt)}
+                    {formatExecutorEventGroupSequence(group)} · {formatShortTime(group.event.createdAt)}
                   </Typography.Text>
                 </Space>
-                <Typography.Text>{event.message}</Typography.Text>
-                <details>
-                  <summary style={{ cursor: "pointer", color: "var(--ant-color-text-secondary)" }}>查看结构化 payload</summary>
-                  <div style={{ marginTop: 8 }}>{renderHighlightedJson(event.payload, 260)}</div>
-                </details>
+                <Typography.Text>{group.event.message}</Typography.Text>
+                {showPayload ? (
+                  <details>
+                    <summary style={{ cursor: "pointer", color: "var(--ant-color-text-secondary)" }}>结构化上下文与环境信息</summary>
+                    <div style={{ marginTop: 8 }}>{renderHighlightedJson(redactStructuredPayload(group.event.payload), 260)}</div>
+                  </details>
+                ) : null}
               </Space>
             </div>
           ))}
@@ -3930,6 +4307,57 @@ function MatrixAccountExecutorEventStream({
       )}
     </Space>
   );
+}
+
+function isHiddenExecutorStructuredEvent(event: AiExecutorEvent, showDebugEvents: boolean) {
+  return event.eventType === "terminal.resized" || (!showDebugEvents && event.level === "debug");
+}
+
+interface ExecutorEventGroup {
+  count: number;
+  event: AiExecutorEvent;
+  firstSequence: number;
+  id: string;
+  lastSequence: number;
+  repeatKey: string;
+}
+
+function groupConsecutiveExecutorEvents(events: AiExecutorEvent[]): ExecutorEventGroup[] {
+  const groups: ExecutorEventGroup[] = [];
+  events.forEach((event) => {
+    const repeatKey = executorEventRepeatKey(event);
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup?.repeatKey === repeatKey) {
+      lastGroup.count += 1;
+      lastGroup.event = event;
+      lastGroup.lastSequence = event.sequence;
+      return;
+    }
+    groups.push({
+      count: 1,
+      event,
+      firstSequence: event.sequence,
+      id: event.id,
+      lastSequence: event.sequence,
+      repeatKey
+    });
+  });
+  return groups;
+}
+
+function executorEventRepeatKey(event: AiExecutorEvent) {
+  return [
+    event.level,
+    event.eventType,
+    event.message,
+    stringifyJson(redactStructuredPayload(event.payload))
+  ].join("\u001f");
+}
+
+function formatExecutorEventGroupSequence(group: ExecutorEventGroup) {
+  return group.firstSequence === group.lastSequence
+    ? `#${group.lastSequence}`
+    : `#${group.firstSequence}-#${group.lastSequence}`;
 }
 
 function renderJsonPreview(value: unknown, maxHeight = 320) {
@@ -3955,12 +4383,7 @@ function renderJsonPreview(value: unknown, maxHeight = 320) {
 }
 
 function renderHighlightedJson(value: unknown, maxHeight = 420) {
-  let json = "";
-  try {
-    json = JSON.stringify(value ?? {}, null, 2);
-  } catch {
-    json = String(value ?? "");
-  }
+  const json = stringifyJson(value);
   const tokenPattern =
     /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(?:\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g;
   const parts = json.split(tokenPattern);
@@ -3991,6 +4414,14 @@ function renderHighlightedJson(value: unknown, maxHeight = 420) {
       })}
     </pre>
   );
+}
+
+function stringifyJson(value: unknown) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
 }
 
 function renderHighlightedText(json: string, keyword: string) {
@@ -4190,6 +4621,41 @@ function decodeExecutorTerminalFrame(frame: AiExecutorTerminalFrame) {
   } catch {
     return "";
   }
+}
+
+const terminalSensitivePatterns: Array<[RegExp, string]> = [
+  [/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1[已脱敏]"],
+  [/(sk-[A-Za-z0-9_-]{8,})/g, "[已脱敏]"],
+  [
+    /((?:authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|password|passwd|storage|localStorage|sessionStorage|验证码|captcha)(?:["'\s:=]+))([^,\s"'`;}\]]{3,})/gi,
+    "$1[已脱敏]"
+  ],
+  [/((?:token|secret|password|cookie)["']?\s*:\s*["'])([^"']{3,})(["'])/gi, "$1[已脱敏]$3"]
+];
+
+const structuredPayloadSensitiveKeyPattern =
+  /^(authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|password|passwd|captcha|otp|mfa|localStorage|sessionStorage|indexedDB|storage|rawScreenshot|screenshot|imageData|base64|rawPrompt|prompt|rawDom|domHtml|html)$/i;
+
+function redactStructuredPayload(value: unknown, key = ""): unknown {
+  if (value == null) return value;
+  if (structuredPayloadSensitiveKeyPattern.test(key)) return "[已脱敏]";
+  if (typeof value === "string") return redactTerminalText(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((item) => redactStructuredPayload(item));
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
+        entryKey,
+        redactStructuredPayload(entryValue, entryKey)
+      ])
+    );
+  }
+  return value;
+}
+
+function redactTerminalText(value: string) {
+  if (!value) return value;
+  return terminalSensitivePatterns.reduce((current, [pattern, replacement]) => current.replace(pattern, replacement), value);
 }
 
 function extractExecutorRuntimeStatus(frame: AiExecutorTerminalFrame): ExecutorRuntimeStatus | null {
@@ -4634,6 +5100,40 @@ function buildExecutorTerminalPurposeCopy(task: AiExecutorTask | null) {
     description: reason,
     title: `${action}：${purposeTitle}脚本`
   };
+}
+
+function buildExecutorTaskRequirements(task: AiExecutorTask | null) {
+  if (task?.taskType === "script_repair" || !task?.taskType) {
+    return [
+      "根据任务上下文判断为什么脚本没有达到预期标识。",
+      "输出可执行的修复建议或 DSL 脚本调整方案。",
+      "如果上下文不足，明确说明还需要哪些浏览器调试通道数据。"
+    ];
+  }
+  return ["根据任务上下文完成当前执行器任务，并输出可验证的处理结论。"];
+}
+
+function buildExecutorTaskConstraints(task: AiExecutorTask | null) {
+  if (task?.taskType === "script_repair" || !task?.taskType) {
+    return [
+      "本轮先作为后端执行器联调，不要修改仓库文件，不要执行部署命令。",
+      "不要编造已经修复成功；无法确认时输出待补充的调试数据。",
+      "输出中请包含：失败原因、建议脚本步骤、需要保存的新脚本版本说明。"
+    ];
+  }
+  return ["遵循当前执行器任务限制，无法确认时明确说明缺失的上下文。"];
+}
+
+function renderExecutorTaskTextList(items: string[]) {
+  return (
+    <ol style={{ margin: 0, paddingInlineStart: 18 }}>
+      {items.map((item, index) => (
+        <li key={`${index}-${item}`} style={{ marginBottom: index === items.length - 1 ? 0 : 4 }}>
+          {item}
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 function executorScriptActionText(reasonCode: string) {

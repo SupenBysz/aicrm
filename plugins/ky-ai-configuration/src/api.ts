@@ -263,11 +263,20 @@ export interface AiExecutorTask {
   codexThreadId: string;
   resultSummary: Record<string, unknown>;
   errorMessage: string;
+  tokenUsage?: AiExecutorTokenUsage;
   createdBy: string;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AiExecutorTokenUsage {
+  cachedInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
 }
 
 export interface AiExecutorTaskInput {

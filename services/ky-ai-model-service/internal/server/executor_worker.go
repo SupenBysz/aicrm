@@ -160,12 +160,13 @@ func (s *Server) failCodexTask(ctx context.Context, taskID, message string, err 
 	_ = s.store.CompleteExecutorTask(ctx, taskID, "failed", strings.TrimSpace(message+" "+detail))
 }
 
-func buildCodexRepairPrompt(task store.ExecutorTask) string {
-	summary := strings.TrimSpace(string(task.ResultSummary))
-	if len(summary) > 30000 {
-		summary = summary[:30000] + "\n...<truncated>"
-	}
+func buildCodexRepairPrompt(task store.ExecutorTask, contextPath string) string {
 	return fmt.Sprintf(`你是 AiCRM 的 Codex 执行器，负责复检矩阵账号 Web 登录脚本任务。
+
+任务上下文文件：
+%s
+
+请先读取任务上下文文件，根据其中的页面快照、脚本状态、触发原因和运行结果判断问题。
 
 任务目标：
 1. 根据任务上下文判断为什么脚本没有达到预期标识。
@@ -185,10 +186,7 @@ func buildCodexRepairPrompt(task store.ExecutorTask) string {
 Web 空间 ID：%s
 脚本 ID：%s
 脚本版本 ID：%s
-
-任务上下文 JSON：
-%s
-`, task.ID, task.ExecutorID, task.TaskType, task.Purpose, task.TriggerReason, task.WebSpaceID, task.ScriptID, task.ScriptVersionID, summary)
+`, contextPath, task.ID, task.ExecutorID, task.TaskType, task.Purpose, task.TriggerReason, task.WebSpaceID, task.ScriptID, task.ScriptVersionID)
 }
 
 func parseJSONLine(line string) map[string]any {

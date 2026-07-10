@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Empty, List, Space, Tag, Timeline, Typography } from "antd";
 import type { RequestClient } from "@ky/admin-core";
 import { listAiExecutorEvents, type AiExecutorEvent } from "../api";
@@ -7,9 +7,17 @@ interface ExecutorEventTimelineProps {
   client: RequestClient;
   taskId?: string;
   compact?: boolean;
+  showDebugEvents?: boolean;
+  showPayload?: boolean;
 }
 
-export function ExecutorEventTimeline({ client, compact = false, taskId }: ExecutorEventTimelineProps) {
+export function ExecutorEventTimeline({
+  client,
+  compact = false,
+  showDebugEvents = false,
+  showPayload = true,
+  taskId
+}: ExecutorEventTimelineProps) {
   const [events, setEvents] = useState<AiExecutorEvent[]>([]);
   const lastSequenceRef = useRef(0);
 
@@ -25,6 +33,7 @@ export function ExecutorEventTimeline({ client, compact = false, taskId }: Execu
     const append = (event: AiExecutorEvent) => {
       if (event.sequence <= lastSequenceRef.current) return;
       lastSequenceRef.current = event.sequence;
+      if (isHiddenExecutorEvent(event, showDebugEvents)) return;
       setEvents((current) => [...current, event].slice(-200));
     };
 
@@ -47,24 +56,29 @@ export function ExecutorEventTimeline({ client, compact = false, taskId }: Execu
     return () => {
       cancelled = true;
     };
-  }, [client, taskId]);
+  }, [client, showDebugEvents, taskId]);
+
+  const eventGroups = useMemo(() => groupConsecutiveExecutorEvents(events), [events]);
 
   if (!taskId) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行器任务" />;
   }
-  if (events.length === 0) {
+  if (eventGroups.length === 0) {
     return <Typography.Text type="secondary">等待执行器事件...</Typography.Text>;
   }
   if (compact) {
     return (
       <Timeline
-        items={events.slice(-8).map((event) => ({
-          color: eventColor(event.level),
+        items={eventGroups.slice(-8).map((group) => ({
+          color: eventColor(group.event.level),
           children: (
             <Space direction="vertical" size={0}>
-              <Typography.Text>{event.message}</Typography.Text>
+              <Space size={6} wrap>
+                <Typography.Text>{group.event.message}</Typography.Text>
+                {group.count > 1 ? <Tag color="blue">x{group.count}</Tag> : null}
+              </Space>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {formatTime(event.createdAt)} · {event.eventType}
+                {formatTime(group.event.createdAt)} · {group.event.eventType}
               </Typography.Text>
             </Space>
           )
@@ -75,27 +89,124 @@ export function ExecutorEventTimeline({ client, compact = false, taskId }: Execu
   return (
     <List
       size="small"
-      dataSource={events}
-      renderItem={(event) => (
+      dataSource={eventGroups}
+      renderItem={(group) => (
         <List.Item>
           <Space direction="vertical" size={2} style={{ width: "100%" }}>
             <Space wrap>
-              <Tag color={eventColor(event.level)}>{levelLabel(event.level)}</Tag>
-              <Typography.Text strong>{event.message}</Typography.Text>
-              <Typography.Text type="secondary">{formatTime(event.createdAt)}</Typography.Text>
+              <Tag color={eventColor(group.event.level)}>{levelLabel(group.event.level)}</Tag>
+              <Typography.Text strong>{group.event.message}</Typography.Text>
+              {group.count > 1 ? <Tag color="blue">x{group.count}</Tag> : null}
+              <Typography.Text type="secondary">{formatTime(group.event.createdAt)}</Typography.Text>
             </Space>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {event.eventType}
+              {group.event.eventType} · {formatExecutorEventGroupSequence(group)}
             </Typography.Text>
-            <details>
-              <summary style={{ cursor: "pointer", color: "var(--ant-color-text-secondary)" }}>查看结构化 payload</summary>
-              <div style={{ marginTop: 8 }}>{renderJsonPayload(event.payload)}</div>
-            </details>
+            {showPayload ? (
+              <details>
+                <summary style={{ cursor: "pointer", color: "var(--ant-color-text-secondary)" }}>结构化上下文与环境信息</summary>
+                <div style={{ marginTop: 8 }}>{renderJsonPayload(redactStructuredPayload(group.event.payload))}</div>
+              </details>
+            ) : null}
           </Space>
         </List.Item>
       )}
     />
   );
+}
+
+function isHiddenExecutorEvent(event: AiExecutorEvent, showDebugEvents: boolean) {
+  return event.eventType === "terminal.resized" || (!showDebugEvents && event.level === "debug");
+}
+
+interface ExecutorEventGroup {
+  count: number;
+  event: AiExecutorEvent;
+  firstSequence: number;
+  id: string;
+  lastSequence: number;
+  repeatKey: string;
+}
+
+function groupConsecutiveExecutorEvents(events: AiExecutorEvent[]): ExecutorEventGroup[] {
+  const groups: ExecutorEventGroup[] = [];
+  events.forEach((event) => {
+    const repeatKey = executorEventRepeatKey(event);
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup?.repeatKey === repeatKey) {
+      lastGroup.count += 1;
+      lastGroup.event = event;
+      lastGroup.lastSequence = event.sequence;
+      return;
+    }
+    groups.push({
+      count: 1,
+      event,
+      firstSequence: event.sequence,
+      id: event.id,
+      lastSequence: event.sequence,
+      repeatKey
+    });
+  });
+  return groups;
+}
+
+function executorEventRepeatKey(event: AiExecutorEvent) {
+  return [
+    event.level,
+    event.eventType,
+    event.message,
+    stringifyJson(redactStructuredPayload(event.payload))
+  ].join("\u001f");
+}
+
+function formatExecutorEventGroupSequence(group: ExecutorEventGroup) {
+  return group.firstSequence === group.lastSequence
+    ? `#${group.lastSequence}`
+    : `#${group.firstSequence}-#${group.lastSequence}`;
+}
+
+function stringifyJson(value: unknown) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+const structuredPayloadSensitiveKeyPattern =
+  /^(authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|password|passwd|captcha|otp|mfa|localStorage|sessionStorage|indexedDB|storage|rawScreenshot|screenshot|imageData|base64|rawPrompt|prompt|rawDom|domHtml|html)$/i;
+
+const structuredPayloadSensitiveValuePatterns: Array<[RegExp, string]> = [
+  [/(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1[已脱敏]"],
+  [/(sk-[A-Za-z0-9_-]{8,})/g, "[已脱敏]"],
+  [
+    /((?:authorization|cookie|set-cookie|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|password|passwd|storage|localStorage|sessionStorage|验证码|captcha)(?:["'\s:=]+))([^,\s"'`;}\]]{3,})/gi,
+    "$1[已脱敏]"
+  ],
+  [/((?:token|secret|password|cookie)["']?\s*:\s*["'])([^"']{3,})(["'])/gi, "$1[已脱敏]$3"]
+];
+
+function redactStructuredPayload(value: unknown, key = ""): unknown {
+  if (value == null) return value;
+  if (structuredPayloadSensitiveKeyPattern.test(key)) return "[已脱敏]";
+  if (typeof value === "string") {
+    return structuredPayloadSensitiveValuePatterns.reduce(
+      (current, [pattern, replacement]) => current.replace(pattern, replacement),
+      value
+    );
+  }
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((item) => redactStructuredPayload(item));
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([entryKey, entryValue]) => [
+        entryKey,
+        redactStructuredPayload(entryValue, entryKey)
+      ])
+    );
+  }
+  return value;
 }
 
 function renderJsonPayload(value: unknown) {

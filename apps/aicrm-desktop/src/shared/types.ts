@@ -2,6 +2,7 @@ export type WorkspaceType = "platform" | "agency" | "enterprise";
 
 export interface DesktopConfig {
   apiBaseUrl: string;
+  debugMode?: boolean;
   webUrl: string;
 }
 

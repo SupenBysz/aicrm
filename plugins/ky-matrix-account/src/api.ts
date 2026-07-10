@@ -410,6 +410,7 @@ export interface AiExecutorTask {
   scriptId: string;
   scriptVersionId: string;
   status: string;
+  resultSummary?: Record<string, unknown>;
   errorMessage?: string;
   startedAt?: string | null;
   completedAt?: string | null;

@@ -41,7 +41,7 @@ function openTerminalWindow(
     width: TERMINAL_WINDOW_DEFAULT_WIDTH,
     height: TERMINAL_WINDOW_DEFAULT_HEIGHT,
     minWidth: TERMINAL_WINDOW_DEFAULT_WIDTH,
-    minHeight: 520,
+    minHeight: TERMINAL_WINDOW_DEFAULT_HEIGHT,
     title: input.title || "执行器仿真终端",
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#050806" : "#f7efe4",

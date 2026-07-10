@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 
 const defaultExecutorTerminalCols uint16 = 150
 const defaultExecutorTerminalRows uint16 = 32
+const codexProxyWebSocketReadLimit int64 = 64 * 1024 * 1024
 
 type codexTUIRunResult struct {
 	TimedOut bool
@@ -85,7 +87,16 @@ func (s *Server) executeCodexTUIRun(ctx context.Context, task store.ExecutorTask
 		"type": "terminal.clear",
 	})
 
-	prompt := buildCodexRepairPrompt(task)
+	contextPath, cleanupContext, err := writeCodexRepairContextFile(task)
+	if err != nil {
+		return codexTUIRunResult{Err: fmt.Errorf("准备 Codex 任务上下文失败: %w", err)}
+	}
+	defer cleanupContext()
+	_ = s.store.AppendExecutorEvent(ctx, task.ID, "codex.context_prepared", "debug", "Codex 任务上下文文件已准备", map[string]any{
+		"contextPath": contextPath,
+	})
+
+	prompt := buildCodexRepairPrompt(task, contextPath)
 	tuiArgs := []string{
 		"--remote", proxyURL,
 		"--dangerously-bypass-approvals-and-sandbox",
@@ -138,6 +149,11 @@ type codexRPCObserver struct {
 	taskID    string
 }
 
+type codexProxyBridgeError struct {
+	direction string
+	err       error
+}
+
 func newCodexRPCObserver(server *Server, taskID string) *codexRPCObserver {
 	return &codexRPCObserver{
 		seenUsage: map[string]struct{}{},
@@ -153,13 +169,20 @@ func (s *Server) startCodexWebSocketProxy(ctx context.Context, taskID, upstreamU
 	}
 	server := &http.Server{}
 	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		downstream, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		requestedSubprotocols := websocketSubprotocols(r.Header.Get("Sec-WebSocket-Protocol"))
+		downstream, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+			Subprotocols:       requestedSubprotocols,
+		})
 		if err != nil {
 			return
 		}
+		downstream.SetReadLimit(codexProxyWebSocketReadLimit)
 		defer downstream.Close(websocket.StatusNormalClosure, "")
 
-		upstream, _, err := websocket.Dial(r.Context(), upstreamURL, nil)
+		upstream, _, err := websocket.Dial(ctx, upstreamURL, &websocket.DialOptions{
+			Subprotocols: requestedSubprotocols,
+		})
 		if err != nil {
 			_ = downstream.Close(websocket.StatusInternalError, "codex app-server unavailable")
 			_ = s.store.AppendExecutorEvent(r.Context(), taskID, "codex.proxy_failed", "error", "Codex app-server 代理连接失败", map[string]any{
@@ -167,17 +190,24 @@ func (s *Server) startCodexWebSocketProxy(ctx context.Context, taskID, upstreamU
 			})
 			return
 		}
+		upstream.SetReadLimit(codexProxyWebSocketReadLimit)
 		defer upstream.Close(websocket.StatusNormalClosure, "")
 
 		bridgeCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		errs := make(chan error, 2)
+		errs := make(chan codexProxyBridgeError, 2)
 		go s.proxyCodexWebSocketFrames(bridgeCtx, "tui_to_app_server", upstream, downstream, observer, errs)
 		go s.proxyCodexWebSocketFrames(bridgeCtx, "app_server_to_tui", downstream, upstream, observer, errs)
 		select {
 		case <-ctx.Done():
-		case <-r.Context().Done():
-		case <-errs:
+		case bridgeErr := <-errs:
+			if bridgeErr.err != nil && websocket.CloseStatus(bridgeErr.err) != websocket.StatusNormalClosure {
+				_ = s.store.AppendExecutorEvent(context.Background(), taskID, "codex.proxy_closed", "debug", "Codex app-server 代理连接结束", map[string]any{
+					"direction": bridgeErr.direction,
+					"error":     bridgeErr.err.Error(),
+					"status":    int(websocket.CloseStatus(bridgeErr.err)),
+				})
+			}
 		}
 		cancel()
 	})
@@ -206,22 +236,54 @@ func (s *Server) proxyCodexWebSocketFrames(
 	dst *websocket.Conn,
 	src *websocket.Conn,
 	observer *codexRPCObserver,
-	errs chan<- error,
+	errs chan<- codexProxyBridgeError,
 ) {
 	for {
 		messageType, payload, err := src.Read(ctx)
 		if err != nil {
-			errs <- err
+			errs <- codexProxyBridgeError{direction: direction, err: err}
 			return
 		}
 		if observer != nil {
 			observer.observe(ctx, direction, messageType, payload)
 		}
 		if err := dst.Write(ctx, messageType, payload); err != nil {
-			errs <- err
+			errs <- codexProxyBridgeError{direction: direction, err: err}
 			return
 		}
 	}
+}
+
+func websocketSubprotocols(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			items = append(items, part)
+		}
+	}
+	return items
+}
+
+func writeCodexRepairContextFile(task store.ExecutorTask) (string, func(), error) {
+	body := strings.TrimSpace(string(task.ResultSummary))
+	if body == "" {
+		body = "{}"
+	}
+	dir := filepath.Join(os.TempDir(), "aicrm-codex-task-contexts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", func() {}, err
+	}
+	path := filepath.Join(dir, task.ID+".json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return "", func() {}, err
+	}
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 func (observer *codexRPCObserver) observe(ctx context.Context, direction string, messageType websocket.MessageType, payload []byte) {

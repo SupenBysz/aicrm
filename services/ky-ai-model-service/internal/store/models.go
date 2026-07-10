@@ -111,28 +111,37 @@ type ExecutorAuthSession struct {
 }
 
 type ExecutorTask struct {
-	ID              string          `json:"id"`
-	WorkspaceType   string          `json:"workspaceType"`
-	WorkspaceID     string          `json:"workspaceId"`
-	ExecutorID      string          `json:"executorId"`
-	ExecutorType    string          `json:"executorType"`
-	TaskType        string          `json:"taskType"`
-	Purpose         string          `json:"purpose"`
-	TriggerReason   string          `json:"triggerReason"`
-	TargetType      string          `json:"targetType"`
-	TargetID        string          `json:"targetId"`
-	WebSpaceID      string          `json:"webSpaceId"`
-	ScriptID        string          `json:"scriptId"`
-	ScriptVersionID string          `json:"scriptVersionId"`
-	Status          string          `json:"status"`
-	CodexThreadID   string          `json:"codexThreadId"`
-	ResultSummary   json.RawMessage `json:"resultSummary"`
-	ErrorMessage    string          `json:"errorMessage"`
-	CreatedBy       string          `json:"createdBy"`
-	StartedAt       *time.Time      `json:"startedAt"`
-	CompletedAt     *time.Time      `json:"completedAt"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	UpdatedAt       time.Time       `json:"updatedAt"`
+	ID              string             `json:"id"`
+	WorkspaceType   string             `json:"workspaceType"`
+	WorkspaceID     string             `json:"workspaceId"`
+	ExecutorID      string             `json:"executorId"`
+	ExecutorType    string             `json:"executorType"`
+	TaskType        string             `json:"taskType"`
+	Purpose         string             `json:"purpose"`
+	TriggerReason   string             `json:"triggerReason"`
+	TargetType      string             `json:"targetType"`
+	TargetID        string             `json:"targetId"`
+	WebSpaceID      string             `json:"webSpaceId"`
+	ScriptID        string             `json:"scriptId"`
+	ScriptVersionID string             `json:"scriptVersionId"`
+	Status          string             `json:"status"`
+	CodexThreadID   string             `json:"codexThreadId"`
+	ResultSummary   json.RawMessage    `json:"resultSummary"`
+	ErrorMessage    string             `json:"errorMessage"`
+	CreatedBy       string             `json:"createdBy"`
+	StartedAt       *time.Time         `json:"startedAt"`
+	CompletedAt     *time.Time         `json:"completedAt"`
+	CreatedAt       time.Time          `json:"createdAt"`
+	UpdatedAt       time.Time          `json:"updatedAt"`
+	TokenUsage      ExecutorTokenUsage `json:"tokenUsage"`
+}
+
+type ExecutorTokenUsage struct {
+	CachedInputTokens     int64 `json:"cachedInputTokens"`
+	InputTokens           int64 `json:"inputTokens"`
+	OutputTokens          int64 `json:"outputTokens"`
+	ReasoningOutputTokens int64 `json:"reasoningOutputTokens"`
+	TotalTokens           int64 `json:"totalTokens"`
 }
 
 type ExecutorTaskInput struct {

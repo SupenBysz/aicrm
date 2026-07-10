@@ -429,7 +429,13 @@ func (s *Store) ListExecutorTasks(ctx context.Context, workspaceType, workspaceI
 		}
 		items = append(items, item)
 	}
-	return items, total, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err = s.hydrateExecutorTaskTokenUsage(ctx, items); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (s *Store) GetExecutorTask(ctx context.Context, workspaceType, workspaceID, id string) (ExecutorTask, error) {
@@ -441,7 +447,78 @@ func (s *Store) GetExecutorTask(ctx context.Context, workspaceType, workspaceID,
 	if errors.Is(err, sql.ErrNoRows) {
 		return ExecutorTask{}, ErrNotFound
 	}
-	return item, err
+	if err != nil {
+		return ExecutorTask{}, err
+	}
+	items := []ExecutorTask{item}
+	if err = s.hydrateExecutorTaskTokenUsage(ctx, items); err != nil {
+		return ExecutorTask{}, err
+	}
+	return items[0], nil
+}
+
+func (s *Store) hydrateExecutorTaskTokenUsage(ctx context.Context, items []ExecutorTask) error {
+	if len(items) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(items))
+	placeholders := make([]string, 0, len(items))
+	indexByID := map[string]int{}
+	for index, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		if _, exists := indexByID[item.ID]; exists {
+			continue
+		}
+		args = append(args, item.ID)
+		placeholders = append(placeholders, "$"+itoa(len(args)))
+		indexByID[item.ID] = index
+	}
+	if len(args) == 0 {
+		return nil
+	}
+
+	tokenValue := func(key string) string {
+		return `CASE WHEN payload_json->'usage'->>'` + key + `' ~ '^-?[0-9]+$' THEN (payload_json->'usage'->>'` + key + `')::bigint ELSE 0 END`
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT task_id,
+			COALESCE(SUM(`+tokenValue("cached_input_tokens")+`), 0),
+			COALESCE(SUM(`+tokenValue("input_tokens")+`), 0),
+			COALESCE(SUM(`+tokenValue("output_tokens")+`), 0),
+			COALESCE(SUM(`+tokenValue("reasoning_output_tokens")+`), 0),
+			COALESCE(SUM(`+tokenValue("total_tokens")+`), 0)
+		FROM ky_ai_executor_task_event
+		WHERE event_type='codex.usage' AND task_id IN (`+strings.Join(placeholders, ",")+`)
+		GROUP BY task_id
+	`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var taskID string
+		var usage ExecutorTokenUsage
+		if err := rows.Scan(
+			&taskID,
+			&usage.CachedInputTokens,
+			&usage.InputTokens,
+			&usage.OutputTokens,
+			&usage.ReasoningOutputTokens,
+			&usage.TotalTokens,
+		); err != nil {
+			return err
+		}
+		if usage.TotalTokens == 0 {
+			usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+		}
+		if index, ok := indexByID[taskID]; ok {
+			items[index].TokenUsage = usage
+		}
+	}
+	return rows.Err()
 }
 
 func (s *Store) CreateExecutorTask(ctx context.Context, workspaceType, workspaceID, actorUserID string, in ExecutorTaskInput) (ExecutorTask, error) {

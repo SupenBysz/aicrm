@@ -154,7 +154,7 @@ export function ExecutorRawTerminal({ client, height = 280, taskId }: ExecutorRa
             清屏
           </Button>
           <Button size="small" type={autoScroll ? "primary" : "default"} onClick={() => setAutoScroll((value) => !value)}>
-            跟随底部
+            {autoScroll ? "✓ " : ""}跟随底部
           </Button>
         </Space>
       </Space>
