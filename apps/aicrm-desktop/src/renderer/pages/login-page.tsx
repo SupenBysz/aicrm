@@ -2,6 +2,7 @@ import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { App as AntdApp, Button, Form, Input, Typography } from "antd";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { DESKTOP_APPLICATION_NAME } from "../../shared/constants";
 import type { LoginInput } from "../../shared/types";
 import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
@@ -10,6 +11,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const { message } = AntdApp.useApp();
   const signIn = useSessionStore((state) => state.signIn);
+  const programTitle = useSessionStore((state) => state.config?.programTitle);
   const selectWorkspace = useWorkspaceStore((state) => state.selectWorkspace);
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,7 +37,9 @@ export function LoginPage() {
     <div className="desktop-login">
       <div className="desktop-login-panel">
         <div className="desktop-login-copy">
-          <Typography.Text className="login-eyebrow">AiCRM Desktop</Typography.Text>
+          <Typography.Text className="login-eyebrow">
+            {programTitle?.trim() || DESKTOP_APPLICATION_NAME}
+          </Typography.Text>
           <Typography.Title level={1}>桌面工作台</Typography.Title>
           <Typography.Paragraph>
             使用现有 AiCRM 账号登录后，桌面客户端会读取你的后台身份与工作区权限。

@@ -1,3 +1,9 @@
+import desktopPackage from "../../package.json";
+
+export const DESKTOP_APPLICATION_NAME = desktopPackage.productName;
+export const DESKTOP_APPLICATION_ID = desktopPackage.appId;
+export const LEGACY_DESKTOP_USER_DATA_DIRECTORY = "AiCRM Desktop";
+
 export const DEFAULT_API_BASE_URL = "http://127.0.0.1:16178";
 export const DEFAULT_WEB_URL = "https://kyaicrm.entai.im";
 
@@ -30,6 +36,16 @@ export const IPC_CHANNELS = {
   matrixAccountWebSpaceStateChanged: "matrix-account:web-space-state-changed",
   matrixAccountCaptureWebSpaceSnapshot: "matrix-account:capture-web-space-snapshot",
   matrixAccountRunWebSpaceLoginScript: "matrix-account:run-web-space-login-script",
+  matrixAccountStartOnboarding: "matrix-account:start-onboarding",
+  matrixAccountGetOnboarding: "matrix-account:get-onboarding",
+  matrixAccountGetOnboardingQrCode: "matrix-account:get-onboarding-qr-code",
+  matrixAccountRefreshOnboardingQrCode: "matrix-account:refresh-onboarding-qr-code",
+  matrixAccountCancelOnboarding: "matrix-account:cancel-onboarding",
+  matrixAccountOnboardingEvent: "matrix-account:onboarding-event",
+  matrixAccountSealSessionSnapshot: "matrix-account:seal-session-snapshot",
+  matrixAccountVerifySessionSnapshot: "matrix-account:verify-session-snapshot",
+  matrixAccountRestoreSessionSnapshot: "matrix-account:restore-session-snapshot",
+  matrixAccountCleanupSessionWebSpace: "matrix-account:cleanup-session-web-space",
   aiExecutorOpenTerminalWindow: "ai-executor:open-terminal-window",
   codexExecutorAuthorize: "codex-executor:authorize",
   codexExecutorGetAuthStatus: "codex-executor:get-auth-status",

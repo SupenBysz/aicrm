@@ -88,6 +88,113 @@ type MatrixAccountBindResult struct {
 	Created  bool                  `json:"created"`
 }
 
+type MatrixAccountLoginAttempt struct {
+	ID                      string         `json:"id"`
+	WorkspaceType           string         `json:"workspaceType"`
+	WorkspaceID             string         `json:"workspaceId"`
+	Platform                string         `json:"platform"`
+	MemberID                string         `json:"memberId"`
+	DeviceID                string         `json:"deviceId"`
+	WebSpaceID              string         `json:"webSpaceId"`
+	Status                  string         `json:"status"`
+	Phase                   string         `json:"phase"`
+	Activity                string         `json:"activity"`
+	CurrentStep             string         `json:"currentStep"`
+	BlockedMethod           string         `json:"blockedMethod"`
+	QRRevision              int            `json:"qrRevision"`
+	AccountID               string         `json:"accountId"`
+	SnapshotID              string         `json:"snapshotId"`
+	RepairTaskID            string         `json:"repairTaskId"`
+	AccountCandidate        map[string]any `json:"accountCandidate"`
+	BindingInput            map[string]any `json:"bindingInput"`
+	SnapshotVerified        bool           `json:"snapshotVerified"`
+	SnapshotFingerprintHash string         `json:"-"`
+	SnapshotContentHash     string         `json:"-"`
+	Sequence                int64          `json:"sequence"`
+	LastErrorCode           string         `json:"lastErrorCode"`
+	LastErrorMessage        string         `json:"lastErrorMessage"`
+	ExpiresAt               string         `json:"expiresAt"`
+	CompletedAt             *string        `json:"completedAt"`
+	CancelledAt             *string        `json:"cancelledAt"`
+	CreatedAt               string         `json:"createdAt"`
+	UpdatedAt               string         `json:"updatedAt"`
+}
+
+type MatrixAccountLoginAttemptInput struct {
+	Platform       string `json:"platform"`
+	DeviceID       string `json:"deviceId"`
+	IdempotencyKey string `json:"idempotencyKey"`
+	CommandID      string `json:"commandId"`
+}
+
+type MatrixAccountLoginAttemptEvent struct {
+	ID          string         `json:"id"`
+	AttemptID   string         `json:"attemptId"`
+	Sequence    int64          `json:"sequence"`
+	Type        string         `json:"type"`
+	Phase       string         `json:"phase"`
+	Recoverable bool           `json:"recoverable"`
+	NextActions []string       `json:"nextActions"`
+	Data        map[string]any `json:"data"`
+	ActorType   string         `json:"actorType"`
+	CreatedAt   string         `json:"createdAt"`
+}
+
+type MatrixAccountLoginCommand struct {
+	ID          string         `json:"id"`
+	AttemptID   string         `json:"attemptId"`
+	CommandID   string         `json:"commandId"`
+	CommandType string         `json:"commandType"`
+	Status      string         `json:"status"`
+	Result      map[string]any `json:"result"`
+	CreatedAt   string         `json:"createdAt"`
+	CompletedAt *string        `json:"completedAt"`
+}
+
+type MatrixAccountLoginCommandResult struct {
+	Attempt MatrixAccountLoginAttempt       `json:"attempt"`
+	Command MatrixAccountLoginCommand       `json:"command"`
+	Event   *MatrixAccountLoginAttemptEvent `json:"event,omitempty"`
+}
+
+type MatrixAccountLoginStepResultInput struct {
+	OperationID         string         `json:"operationId"`
+	AttemptNo           int            `json:"attemptNo"`
+	MethodKey           string         `json:"methodKey"`
+	ScriptID            string         `json:"scriptId"`
+	ScriptVersionID     string         `json:"scriptVersionId"`
+	Status              string         `json:"status"`
+	ObservedPhase       string         `json:"observedPhase"`
+	ErrorCode           string         `json:"errorCode"`
+	ErrorMessage        string         `json:"errorMessage"`
+	DurationMs          int64          `json:"durationMs"`
+	ResultSummary       map[string]any `json:"resultSummary"`
+	VerificationReceipt string         `json:"verificationReceipt"`
+}
+
+type MatrixAccountLoginMethodRun struct {
+	ID              string         `json:"id"`
+	AttemptID       string         `json:"attemptId"`
+	OperationID     string         `json:"operationId"`
+	AttemptNo       int            `json:"attemptNo"`
+	MethodKey       string         `json:"methodKey"`
+	ScriptID        string         `json:"scriptId"`
+	ScriptVersionID string         `json:"scriptVersionId"`
+	Status          string         `json:"status"`
+	ObservedPhase   string         `json:"observedPhase"`
+	ErrorCode       string         `json:"errorCode"`
+	ErrorMessage    string         `json:"errorMessage"`
+	DurationMs      int64          `json:"durationMs"`
+	ResultSummary   map[string]any `json:"resultSummary"`
+	CreatedAt       string         `json:"createdAt"`
+}
+
+type MatrixAccountLoginStepResult struct {
+	Attempt MatrixAccountLoginAttempt      `json:"attempt"`
+	Run     MatrixAccountLoginMethodRun    `json:"run"`
+	Event   MatrixAccountLoginAttemptEvent `json:"event"`
+}
+
 type LoginScript struct {
 	ID                      string  `json:"id"`
 	WorkspaceType           string  `json:"workspaceType"`

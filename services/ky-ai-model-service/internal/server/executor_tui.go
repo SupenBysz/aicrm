@@ -99,7 +99,8 @@ func (s *Server) executeCodexTUIRun(ctx context.Context, task store.ExecutorTask
 	prompt := buildCodexRepairPrompt(task, contextPath)
 	tuiArgs := []string{
 		"--remote", proxyURL,
-		"--dangerously-bypass-approvals-and-sandbox",
+		"--sandbox", "read-only",
+		"--ask-for-approval", "never",
 		"-C", s.cfg.CodexWorkspace,
 		prompt,
 	}

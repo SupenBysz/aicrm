@@ -3,6 +3,7 @@ export type WorkspaceType = "platform" | "agency" | "enterprise";
 export interface DesktopConfig {
   apiBaseUrl: string;
   debugMode?: boolean;
+  programTitle?: string;
   webUrl: string;
 }
 
@@ -156,6 +157,218 @@ export interface MatrixAccountCapabilities {
   supportsProfileIsolation: boolean;
   supportsSessionDetection: boolean;
   supportsCloudSessionVault: boolean;
+  supportsAccountOnboarding?: boolean;
+  /** Local encrypted snapshot vault. This does not imply cloud upload support. */
+  supportsSessionSnapshotVault?: boolean;
+  /** True only when snapshot receipts can be verified by the backend trust domain. */
+  supportsServerVerifiableSnapshotReceipts?: boolean;
+}
+
+export type MatrixAccountOnboardingStatus = "active" | "completed" | "failed" | "cancelled" | "expired";
+
+export type MatrixAccountOnboardingPhase =
+  | "created"
+  | "opening"
+  | "qr_preparing"
+  | "qr_ready"
+  | "waiting_scan"
+  | "authenticating"
+  | "authenticated"
+  | "identifying"
+  | "awaiting_confirmation"
+  | "snapshot_sealing"
+  | "committing"
+  | "ready"
+  | "blocked_repair"
+  | "verification_required"
+  | "risk_controlled"
+  | "failed"
+  | "cancelled";
+
+export type MatrixAccountOnboardingActivity =
+  | "executing"
+  | "waiting_user"
+  | "repairing_adapter"
+  | "retrying"
+  | "none";
+
+export type MatrixAccountOnboardingNextAction =
+  | "wait"
+  | "refresh_qr"
+  | "open_controlled_window"
+  | "complete_platform_verification"
+  | "confirm_binding"
+  | "retry_snapshot"
+  | "retry_step"
+  | "cancel";
+
+export type MatrixAccountOnboardingEventType =
+  | "onboarding.created"
+  | "login.phase.changed"
+  | "qr.ready"
+  | "qr.refreshed"
+  | "qr.expired"
+  | "user.action.required"
+  | "adapter.repairing"
+  | "account.identified"
+  | "binding.review_required"
+  | "snapshot.sealing"
+  | "snapshot.verified"
+  | "account.bound"
+  | "account.ready"
+  | "onboarding.failed"
+  | "onboarding.cancelled";
+
+export interface MatrixAccountOnboardingStartInput {
+  attemptId?: string;
+  operationId?: string;
+  /** @internal Resolved from the backend login-attempt aggregate; never entered by the business UI. */
+  webSpaceId: string;
+  workspaceId: string;
+  workspaceType: WorkspaceType;
+  platform: MatrixAccountPlatform;
+  memberId?: string;
+  deviceId?: string;
+  showWindow?: boolean;
+  idempotencyKey?: string;
+}
+
+export interface MatrixAccountOnboardingLookupInput {
+  attemptId: string;
+}
+
+export interface MatrixAccountOnboardingQrInput extends MatrixAccountOnboardingLookupInput {
+  qrRevision?: number;
+}
+
+export interface MatrixAccountOnboardingRefreshQrInput extends MatrixAccountOnboardingLookupInput {
+  operationId?: string;
+  expectedQrRevision?: number;
+}
+
+export interface MatrixAccountOnboardingCancelInput extends MatrixAccountOnboardingLookupInput {
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionReference {
+  /** Reserved for account-oriented session operations after backend mapping is available. */
+  accountId?: string;
+  /** Reserved for account-oriented session operations after backend mapping is available. */
+  clientSessionId?: string;
+}
+
+export interface MatrixAccountSessionVaultTarget {
+  /** Current implementation resolves the trusted WebSpace exclusively through this coordinator aggregate. */
+  attemptId: string;
+  sessionRef?: MatrixAccountSessionReference;
+}
+
+export interface MatrixAccountSessionSnapshotSealInput extends MatrixAccountSessionVaultTarget {
+  snapshotId?: string;
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionSnapshotVerifyInput extends MatrixAccountSessionVaultTarget {
+  snapshotId: string;
+}
+
+export interface MatrixAccountSessionSnapshotRestoreInput extends MatrixAccountSessionVaultTarget {
+  snapshotId: string;
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionWebSpaceCleanupInput extends MatrixAccountSessionVaultTarget {
+  /** Cleanup is rejected unless this is the coordinator's current verified snapshot. */
+  verifiedSnapshotId: string;
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionSnapshotView {
+  snapshotId: string;
+  schemaVersion: 1;
+  status: "verified";
+  createdAt: string;
+  verifiedAt: string;
+  contentHash: string;
+  fingerprintHash: string;
+  sizeBytes: number;
+  sourceBytes: number;
+  fileCount: number;
+}
+
+export interface MatrixAccountSessionSnapshotVerificationResult extends MatrixAccountSessionSnapshotView {
+  /** Sensitive bearer proof for backend step completion. Never persist it in telemetry or logs. */
+  verificationReceipt: string;
+}
+
+export interface MatrixAccountSessionSnapshotRestoreResult extends MatrixAccountSessionSnapshotVerificationResult {
+  restoreId: string;
+  restoredAt: string;
+}
+
+export interface MatrixAccountSessionWebSpaceCleanupResult {
+  attemptId: string;
+  verifiedSnapshotId: string;
+  cleared: boolean;
+  releasedBytes: number;
+  cleanedAt: string;
+}
+
+export interface MatrixAccountOnboardingView {
+  attemptId: string;
+  operationId: string;
+  methodKey: string;
+  workspaceId: string;
+  platform: MatrixAccountPlatform;
+  phase: MatrixAccountOnboardingPhase;
+  status: MatrixAccountOnboardingStatus;
+  activity: MatrixAccountOnboardingActivity;
+  qrRevision: number;
+  sequence: number;
+  nextActions: MatrixAccountOnboardingNextAction[];
+  createdAt: string;
+  updatedAt: string;
+  snapshotId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface MatrixAccountOnboardingQrCodeView {
+  attemptId: string;
+  operationId: string;
+  methodKey: "login.qr.get.v1" | "login.qr.refresh.v1";
+  phase: MatrixAccountOnboardingPhase;
+  status: MatrixAccountOnboardingStatus;
+  qrRevision: number;
+  qrCodeDataUrl?: string;
+  recognized?: boolean;
+  payloadLength?: number;
+  reasonCode?: string;
+  message?: string;
+  observedAt: string;
+}
+
+export interface MatrixAccountOnboardingSanitizedResult {
+  qrAvailable?: boolean;
+  qrRecognized?: boolean;
+  qrPayloadLength?: number;
+  reasonCode?: string;
+  message?: string;
+}
+
+export interface MatrixAccountOnboardingEvent {
+  attemptId: string;
+  operationId: string;
+  methodKey: string;
+  sequence: number;
+  type: MatrixAccountOnboardingEventType;
+  phase: MatrixAccountOnboardingPhase;
+  status: MatrixAccountOnboardingStatus;
+  qrRevision: number;
+  occurredAt: string;
+  recoverable: boolean;
+  nextActions: MatrixAccountOnboardingNextAction[];
+  sanitizedResult: MatrixAccountOnboardingSanitizedResult;
 }
 
 export interface MatrixAccountBrowserInput {
@@ -262,6 +475,11 @@ export type MatrixAccountScriptRunStatus = "success" | "failed" | "timeout" | "c
 
 export interface MatrixAccountElementRect {
   key: string;
+  /**
+   * A deterministic key derived from a public, unique DOM attribute such as
+   * data-testid or id. Login scripts should prefer this over a CSS selector.
+   */
+  stableKey?: string;
   text?: string;
   selector?: string;
   rect: {
@@ -300,7 +518,8 @@ export type MatrixAccountLoginScriptStep =
     }
   | {
       action: "clickSelector";
-      selector: string;
+      selector?: string;
+      elementKey?: string;
       timeoutMs?: number;
     }
   | {
@@ -309,18 +528,21 @@ export type MatrixAccountLoginScriptStep =
     }
   | {
       action: "waitForElement";
-      selector: string;
+      selector?: string;
+      elementKey?: string;
       timeoutMs?: number;
     }
   | {
       action: "captureElement";
-      selector: string;
+      selector?: string;
+      elementKey?: string;
       resultKey?: "qrCodeDataUrl";
       timeoutMs?: number;
     }
   | {
       action: "readText";
       selector?: string;
+      elementKey?: string;
       resultKey?: string;
       timeoutMs?: number;
     }

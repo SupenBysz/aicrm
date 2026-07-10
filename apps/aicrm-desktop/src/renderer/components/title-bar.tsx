@@ -1,5 +1,6 @@
 import { CloudServerOutlined, DesktopOutlined } from "@ant-design/icons";
 import { Space, Tag, Typography } from "antd";
+import { DESKTOP_APPLICATION_NAME } from "../../shared/constants";
 import { useSessionStore } from "../stores/session-store";
 
 export function TitleBar() {
@@ -14,7 +15,9 @@ export function TitleBar() {
           <DesktopOutlined />
         </div>
         <div>
-          <Typography.Text className="desktop-title">AiCRM Desktop</Typography.Text>
+          <Typography.Text className="desktop-title">
+            {config?.programTitle?.trim() || DESKTOP_APPLICATION_NAME}
+          </Typography.Text>
           <Typography.Text className="desktop-subtitle">桌面客户端</Typography.Text>
         </div>
       </Space>

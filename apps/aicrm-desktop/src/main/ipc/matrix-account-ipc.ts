@@ -1,7 +1,31 @@
-import { createHash } from "node:crypto";
-import { appendFile } from "node:fs/promises";
-import { BrowserWindow, ipcMain, session as electronSession, type IpcMainInvokeEvent, type NativeImage, type Rectangle } from "electron";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFile, chmod, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  screen,
+  session as electronSession,
+  type IpcMainInvokeEvent,
+  type NativeImage,
+  type Rectangle,
+  type Session
+} from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
+import { MatrixAccountOnboardingCoordinator } from "../matrix-account-onboarding-coordinator";
+import {
+  getLegacyCredentialAdapterSubstitution,
+  getMatrixAccountScriptPolicyViolation
+} from "../matrix-account-script-policy";
+import {
+  MatrixAccountSessionVault,
+  SessionVaultError,
+  type MatrixAccountSessionFingerprint,
+  type MatrixAccountSessionSnapshotManifest,
+  type MatrixAccountSessionSnapshotVerification,
+  type MatrixAccountSessionVaultScope
+} from "../matrix-account-session-vault";
 import type {
   DesktopCommandResult,
   MatrixAccountLoginScriptDsl,
@@ -13,7 +37,19 @@ import type {
   MatrixAccountCheckResult,
   MatrixAccountClearProfileResult,
   MatrixAccountLoginStatePayload,
+  MatrixAccountOnboardingCancelInput,
+  MatrixAccountOnboardingLookupInput,
+  MatrixAccountOnboardingQrInput,
+  MatrixAccountOnboardingRefreshQrInput,
+  MatrixAccountOnboardingStartInput,
   MatrixAccountPlatform,
+  MatrixAccountSessionSnapshotRestoreInput,
+  MatrixAccountSessionSnapshotRestoreResult,
+  MatrixAccountSessionSnapshotSealInput,
+  MatrixAccountSessionSnapshotVerificationResult,
+  MatrixAccountSessionSnapshotVerifyInput,
+  MatrixAccountSessionWebSpaceCleanupInput,
+  MatrixAccountSessionWebSpaceCleanupResult,
   MatrixAccountWebSpaceBrowserResult,
   MatrixAccountWebSpaceClearResult,
   MatrixAccountWebSpaceDetectResult,
@@ -28,7 +64,9 @@ import type {
 const controlledWindows = new Map<string, BrowserWindow>();
 const webSpaceWindowPartitions = new Set<string>();
 const releasingWindowPartitions = new Set<string>();
+const lockedSessionFingerprintByPartition = new Map<string, MatrixAccountSessionFingerprint>();
 const matrixAccountDebugLogPath = "/tmp/aicrm-matrix-cdp-debug.log";
+const matrixAccountDebugLogMaxBytes = 5 * 1024 * 1024;
 
 const loginUrls: Record<MatrixAccountPlatform, string> = {
   douyin: "https://creator.douyin.com/",
@@ -41,13 +79,67 @@ const capabilities: MatrixAccountCapabilities = {
   supportsControlledBrowser: true,
   supportsProfileIsolation: true,
   supportsSessionDetection: false,
-  supportsCloudSessionVault: false
+  supportsCloudSessionVault: false,
+  supportsAccountOnboarding: true,
+  supportsSessionSnapshotVault: true,
+  supportsServerVerifiableSnapshotReceipts: false
 };
 
+const onboardingCoordinator = new MatrixAccountOnboardingCoordinator({
+  openLogin: (event, input) => openControlledWebSpace(event, input, true),
+  refreshQr: refreshControlledWebSpaceQr,
+  cancel: clearControlledWebSpace
+});
+
+let sessionVault: MatrixAccountSessionVault;
+
 export function registerMatrixAccountIpc(): void {
+  sessionVault = new MatrixAccountSessionVault({
+    vaultRoot: path.join(app.getPath("userData"), "matrix-account-session-vault")
+  });
   ipcMain.handle(IPC_CHANNELS.matrixAccountGetCapabilities, (): DesktopCommandResult<MatrixAccountCapabilities> => {
     return ok(capabilities);
   });
+
+  ipcMain.handle(IPC_CHANNELS.matrixAccountStartOnboarding, (event, input: MatrixAccountOnboardingStartInput) => {
+    return onboardingCoordinator.start(event, input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.matrixAccountGetOnboarding, (_event, input: MatrixAccountOnboardingLookupInput) => {
+    return onboardingCoordinator.get(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.matrixAccountGetOnboardingQrCode, (_event, input: MatrixAccountOnboardingQrInput) => {
+    return onboardingCoordinator.getQr(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.matrixAccountRefreshOnboardingQrCode, (_event, input: MatrixAccountOnboardingRefreshQrInput) => {
+    return onboardingCoordinator.refreshQr(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.matrixAccountCancelOnboarding, (_event, input: MatrixAccountOnboardingCancelInput) => {
+    return onboardingCoordinator.cancel(input);
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.matrixAccountSealSessionSnapshot,
+    async (_event, input: MatrixAccountSessionSnapshotSealInput) => sealOnboardingSessionSnapshot(input)
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.matrixAccountVerifySessionSnapshot,
+    async (_event, input: MatrixAccountSessionSnapshotVerifyInput) => verifyOnboardingSessionSnapshot(input)
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.matrixAccountRestoreSessionSnapshot,
+    async (_event, input: MatrixAccountSessionSnapshotRestoreInput) => restoreOnboardingSessionSnapshot(input)
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.matrixAccountCleanupSessionWebSpace,
+    async (_event, input: MatrixAccountSessionWebSpaceCleanupInput) => cleanupOnboardingSessionWebSpace(input)
+  );
 
   ipcMain.handle(IPC_CHANNELS.matrixAccountStartLogin, (event, input: MatrixAccountBrowserInput) => {
     return openControlledBrowser(event, input, true);
@@ -126,22 +218,15 @@ export function registerMatrixAccountIpc(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.matrixAccountClearWebSpace, async (_event, input: MatrixAccountWebSpaceInput) => {
-    const validated = validateWebSpaceInput(input);
-    if (!validated.ok) return validated;
-    const browserPartition = webSpacePartition(input);
-    releaseControlledWindow(browserPartition);
-    await electronSession.fromPartition(browserPartition).clearStorageData();
-    return ok<MatrixAccountWebSpaceClearResult>({
-      webSpaceId: input.webSpaceId,
-      platform: input.platform,
-      browserPartition,
-      cleared: true
-    });
+    return clearControlledWebSpace(input);
   });
 
-  ipcMain.handle(IPC_CHANNELS.matrixAccountCaptureWebSpaceSnapshot, async (_event, input: MatrixAccountWebSpaceSnapshotInput) => {
+  ipcMain.handle(IPC_CHANNELS.matrixAccountCaptureWebSpaceSnapshot, async (event, input: MatrixAccountWebSpaceSnapshotInput) => {
     const validated = validateWebSpaceInput(input);
     if (!validated.ok) return validated;
+    if (input.includeSensitiveContext === true && !canCaptureSensitiveMatrixDebug(event)) {
+      return fail("sensitive_context_forbidden", "敏感登录上下文采集仅允许在显式启用的受信任调试环境中使用");
+    }
     const browserPartition = webSpacePartition(input);
     const browser = controlledWindows.get(browserPartition);
     if (!browser || browser.isDestroyed()) {
@@ -160,6 +245,288 @@ export function registerMatrixAccountIpc(): void {
     }
     return runWebSpaceLoginScript(browser, input, browserPartition);
   });
+}
+
+async function sealOnboardingSessionSnapshot(
+  input: MatrixAccountSessionSnapshotSealInput
+): Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>> {
+  const invalid = validateSessionVaultTarget(input, input?.snapshotId);
+  if (invalid) return fail(invalid.code, invalid.message);
+  const trusted = onboardingCoordinator.beginSessionSnapshotSeal(input);
+  if (!trusted.ok || !trusted.data) return copyFailure(trusted);
+  const webSpaceInput = trusted.data;
+  const browserPartition = webSpacePartition(webSpaceInput);
+  const session = electronSession.fromPartition(browserPartition);
+  const scope = sessionVaultScope(input.attemptId, webSpaceInput);
+  const fingerprint = buildSessionFingerprint(session, webSpaceInput, browserPartition);
+
+  try {
+    await suspendControlledWebSpace(browserPartition);
+    await flushPersistentSession(session);
+    const storagePath = requireSessionStoragePath(session);
+    const verification = await sessionVault.seal({
+      snapshotId: input.snapshotId,
+      sourceStoragePath: storagePath,
+      scope,
+      fingerprint
+    });
+    onboardingCoordinator.completeSessionSnapshotSeal(
+      input.attemptId,
+      verification.manifest.snapshotId,
+      input.operationId
+    );
+    return ok(toSessionSnapshotVerificationResult(verification));
+  } catch (error) {
+    const known = normalizeSessionVaultError(error, "session_snapshot_seal_failed", "登录态快照封存失败");
+    onboardingCoordinator.failSessionSnapshotSeal(input.attemptId, input.operationId, known.code, known.message);
+    return fail(known.code, known.message);
+  }
+}
+
+async function verifyOnboardingSessionSnapshot(
+  input: MatrixAccountSessionSnapshotVerifyInput
+): Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>> {
+  const invalid = validateSessionVaultTarget(input, input?.snapshotId, true);
+  if (invalid) return fail(invalid.code, invalid.message);
+  const trusted = onboardingCoordinator.resolveTrustedVaultWebSpace(input.attemptId);
+  if (!trusted.ok || !trusted.data) return copyFailure(trusted);
+  try {
+    const verification = await sessionVault.verify({
+      snapshotId: input.snapshotId,
+      expectedScope: sessionVaultScope(input.attemptId, trusted.data)
+    });
+    onboardingCoordinator.completeSessionSnapshotSeal(input.attemptId, input.snapshotId);
+    return ok(toSessionSnapshotVerificationResult(verification));
+  } catch (error) {
+    const known = normalizeSessionVaultError(error, "session_snapshot_verify_failed", "登录态快照校验失败");
+    return fail(known.code, known.message);
+  }
+}
+
+async function restoreOnboardingSessionSnapshot(
+  input: MatrixAccountSessionSnapshotRestoreInput
+): Promise<DesktopCommandResult<MatrixAccountSessionSnapshotRestoreResult>> {
+  const invalid = validateSessionVaultTarget(input, input?.snapshotId, true);
+  if (invalid) return fail(invalid.code, invalid.message);
+  const trusted = onboardingCoordinator.resolveTrustedVaultWebSpace(input.attemptId);
+  if (!trusted.ok || !trusted.data) return copyFailure(trusted);
+  const webSpaceInput = trusted.data;
+  const scope = sessionVaultScope(input.attemptId, webSpaceInput);
+  const restoreId = randomUUID();
+  const targetBrowserPartition = restoredWebSpacePartition(webSpaceInput, input.snapshotId, restoreId);
+  const targetSession = electronSession.fromPartition(targetBrowserPartition);
+
+  try {
+    const verified = await sessionVault.verify({ snapshotId: input.snapshotId, expectedScope: scope });
+    assertSessionFingerprintCompatible(
+      verified.manifest,
+      buildSessionFingerprint(targetSession, webSpaceInput, targetBrowserPartition)
+    );
+    targetSession.setUserAgent(verified.manifest.fingerprint.userAgent);
+    const targetStoragePath = requireSessionStoragePath(targetSession);
+    await targetSession.clearStorageData();
+    await sessionVault.cleanupStoragePath(targetStoragePath);
+    const restored = await sessionVault.restore({
+      snapshotId: input.snapshotId,
+      expectedScope: scope,
+      targetStoragePath
+    });
+    lockedSessionFingerprintByPartition.set(targetBrowserPartition, verified.manifest.fingerprint);
+    onboardingCoordinator.switchToRestoredWebSpace(input.attemptId, targetBrowserPartition, input.snapshotId);
+    return ok({
+      ...toSessionSnapshotVerificationResult(restored),
+      restoreId,
+      restoredAt: restored.restoredAt
+    });
+  } catch (error) {
+    const known = normalizeSessionVaultError(error, "session_snapshot_restore_failed", "登录态快照恢复失败");
+    return fail(known.code, known.message);
+  }
+}
+
+async function cleanupOnboardingSessionWebSpace(
+  input: MatrixAccountSessionWebSpaceCleanupInput
+): Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>> {
+  const invalid = validateSessionVaultTarget(input, input?.verifiedSnapshotId, true);
+  if (invalid) return fail(invalid.code, invalid.message);
+  const trusted = onboardingCoordinator.resolveVerifiedCleanupWebSpace(input);
+  if (!trusted.ok || !trusted.data) return copyFailure(trusted);
+  const webSpaceInput = trusted.data;
+  const browserPartition = webSpacePartition(webSpaceInput);
+  const session = electronSession.fromPartition(browserPartition);
+
+  try {
+    await sessionVault.verify({
+      snapshotId: input.verifiedSnapshotId,
+      expectedScope: sessionVaultScope(input.attemptId, webSpaceInput)
+    });
+    await suspendControlledWebSpace(browserPartition);
+    await flushPersistentSession(session);
+    const storagePath = requireSessionStoragePath(session);
+    const releasedBytes = await sessionVault.measureStoragePath(storagePath);
+    await session.clearStorageData();
+    await sessionVault.cleanupStoragePath(storagePath);
+    lockedSessionFingerprintByPartition.delete(browserPartition);
+    return ok({
+      attemptId: input.attemptId,
+      verifiedSnapshotId: input.verifiedSnapshotId,
+      cleared: true,
+      releasedBytes,
+      cleanedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    const known = normalizeSessionVaultError(error, "web_space_cleanup_failed", "WebSpace 物理清理失败");
+    return fail(known.code, known.message);
+  }
+}
+
+function sessionVaultScope(
+  attemptId: string,
+  input: MatrixAccountWebSpaceInput
+): MatrixAccountSessionVaultScope {
+  return {
+    attemptId,
+    webSpaceId: input.webSpaceId,
+    workspaceId: input.workspaceId,
+    workspaceType: input.workspaceType,
+    platform: input.platform,
+    deviceId: input.deviceId || "default"
+  };
+}
+
+function buildSessionFingerprint(
+  session: Session,
+  input: MatrixAccountWebSpaceInput,
+  browserPartition: string
+): MatrixAccountSessionFingerprint {
+  const browser = controlledWindows.get(browserPartition);
+  let viewport: NonNullable<MatrixAccountSessionFingerprint["viewport"]> = {
+    width: 1180,
+    height: 820,
+    deviceScaleFactor: 1
+  };
+  try {
+    viewport.deviceScaleFactor = screen.getPrimaryDisplay().scaleFactor || 1;
+  } catch {
+    viewport.deviceScaleFactor = 1;
+  }
+  if (browser && !browser.isDestroyed()) {
+    const bounds = browser.getBounds();
+    let deviceScaleFactor = 1;
+    try {
+      deviceScaleFactor = screen.getDisplayMatching(bounds).scaleFactor || 1;
+    } catch {
+      deviceScaleFactor = 1;
+    }
+    viewport = { width: bounds.width, height: bounds.height, deviceScaleFactor };
+  }
+  return {
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron || "unknown",
+    chromiumVersion: process.versions.chrome || "unknown",
+    operatingSystem: process.platform,
+    architecture: process.arch,
+    userAgent: session.getUserAgent(),
+    locale: app.getLocale() || "unknown",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown",
+    viewport,
+    deviceId: input.deviceId || "default"
+  };
+}
+
+function assertSessionFingerprintCompatible(
+  manifest: MatrixAccountSessionSnapshotManifest,
+  current: MatrixAccountSessionFingerprint
+): void {
+  const expected = manifest.fingerprint;
+  const incompatible =
+    expected.electronVersion !== current.electronVersion ||
+    expected.chromiumVersion !== current.chromiumVersion ||
+    expected.operatingSystem !== current.operatingSystem ||
+    expected.architecture !== current.architecture ||
+    expected.locale !== current.locale ||
+    expected.timezone !== current.timezone ||
+    expected.deviceId !== current.deviceId ||
+    (expected.viewport?.deviceScaleFactor ?? 1) !== (current.viewport?.deviceScaleFactor ?? 1);
+  if (incompatible) {
+    throw new SessionVaultError("snapshot_fingerprint_incompatible", "当前设备运行环境与快照锁定指纹不兼容");
+  }
+}
+
+function restoredWebSpacePartition(input: MatrixAccountWebSpaceInput, snapshotId: string, restoreId: string): string {
+  const restoreScopeHash = createHash("sha256")
+    .update(
+      [
+        input.workspaceType,
+        input.workspaceId,
+        input.platform,
+        input.webSpaceId,
+        snapshotId,
+        restoreId,
+        input.deviceId || "default"
+      ].join(":"),
+      "utf8"
+    )
+    .digest("hex")
+    .slice(0, 40);
+  return `persist:matrix-account-space:restore:${restoreScopeHash}`;
+}
+
+function requireSessionStoragePath(session: Session): string {
+  if (!session.storagePath) {
+    throw new SessionVaultError("web_space_storage_unavailable", "当前 WebSpace 不是可持久化 Session");
+  }
+  return session.storagePath;
+}
+
+function toSessionSnapshotVerificationResult(
+  verification: MatrixAccountSessionSnapshotVerification
+): MatrixAccountSessionSnapshotVerificationResult {
+  const manifest = verification.manifest;
+  return {
+    snapshotId: manifest.snapshotId,
+    schemaVersion: manifest.schemaVersion,
+    status: "verified",
+    createdAt: manifest.createdAt,
+    verifiedAt: verification.verifiedAt,
+    contentHash: manifest.archive.contentHash,
+    fingerprintHash: manifest.fingerprintHash,
+    sizeBytes: manifest.archive.ciphertextBytes,
+    sourceBytes: manifest.archive.sourceBytes,
+    fileCount: manifest.archive.fileCount,
+    verificationReceipt: verification.verificationReceipt
+  };
+}
+
+function validateSessionVaultTarget(
+  input: { attemptId?: string; sessionRef?: unknown } | undefined,
+  snapshotId?: string,
+  snapshotIdRequired = false
+): { code: string; message: string } | null {
+  if (!input || typeof input !== "object" || !/^[a-zA-Z0-9_.:-]{1,160}$/.test(String(input.attemptId || ""))) {
+    return { code: "validation_error", message: "登录流程标识无效" };
+  }
+  if (snapshotIdRequired && !snapshotId) return { code: "validation_error", message: "快照标识不能为空" };
+  if (snapshotId && !/^[a-zA-Z0-9_.:-]{1,160}$/.test(snapshotId)) {
+    return { code: "validation_error", message: "快照标识无效" };
+  }
+  if (input.sessionRef !== undefined && (!input.sessionRef || typeof input.sessionRef !== "object")) {
+    return { code: "validation_error", message: "会话引用格式无效" };
+  }
+  return null;
+}
+
+function normalizeSessionVaultError(error: unknown, fallbackCode: string, fallbackMessage: string): SessionVaultError {
+  if (error instanceof SessionVaultError) return error;
+  return new SessionVaultError(fallbackCode, fallbackMessage);
+}
+
+function copyFailure<T>(result: DesktopCommandResult<unknown>): DesktopCommandResult<T> {
+  return {
+    ok: false,
+    error: result.error || { code: "unknown_error", message: "矩阵账号操作失败" },
+    requestId: result.requestId
+  };
 }
 
 function openControlledBrowser(
@@ -262,9 +629,11 @@ async function openControlledWebSpace(
   }
 
   const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const lockedFingerprint = lockedSessionFingerprintByPartition.get(browserPartition);
+  const lockedViewport = lockedFingerprint?.viewport;
   const browser = new BrowserWindow({
-    width: 1180,
-    height: 820,
+    width: Math.max(960, lockedViewport?.width || 1180),
+    height: Math.max(640, lockedViewport?.height || 820),
     minWidth: 960,
     minHeight: 640,
     parent: shouldShowWindow ? parent : undefined,
@@ -321,6 +690,60 @@ async function openControlledWebSpace(
     qrCodeRecognized: qrCode.recognized,
     qrCodePayloadLength: qrCode.payloadLength,
     qrCodeVerifyReason: qrCode.verifyReason
+  });
+}
+
+async function refreshControlledWebSpaceQr(
+  input: MatrixAccountWebSpaceInput
+): Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>> {
+  const validated = validateWebSpaceInput(input);
+  if (!validated.ok) return validated;
+  const browserPartition = webSpacePartition(input);
+  const browser = controlledWindows.get(browserPartition);
+  if (!browser || browser.isDestroyed()) {
+    return fail("web_space_window_not_open", "受控浏览器窗口未打开，请重新开始登录流程");
+  }
+  await loadControlledUrl(browser, loginUrls[input.platform]);
+  const qrCode = await extractLoginQrCode(browser, input.showWindow === true ? 2200 : 9000);
+  return ok({
+    webSpaceId: input.webSpaceId,
+    platform: input.platform,
+    browserPartition,
+    loginStatus: "login_pending",
+    opened: true,
+    visible: browser.isVisible(),
+    qrCodeDataUrl: qrCode.dataUrl,
+    qrCodeReason: qrCode.reason,
+    qrCodeRecognized: qrCode.recognized,
+    qrCodePayloadLength: qrCode.payloadLength,
+    qrCodeVerifyReason: qrCode.verifyReason
+  });
+}
+
+async function clearControlledWebSpace(
+  input: MatrixAccountWebSpaceInput
+): Promise<DesktopCommandResult<MatrixAccountWebSpaceClearResult>> {
+  const validated = validateWebSpaceInput(input);
+  if (!validated.ok) return validated;
+  const browserPartition = webSpacePartition(input);
+  await suspendControlledWebSpace(browserPartition);
+  const session = electronSession.fromPartition(browserPartition);
+  await flushPersistentSession(session);
+  const storagePath = session.storagePath;
+  await session.clearStorageData();
+  if (storagePath) {
+    try {
+      await sessionVault.cleanupStoragePath(storagePath);
+    } catch (error) {
+      const known = normalizeSessionVaultError(error, "web_space_cleanup_failed", "WebSpace 物理清理失败");
+      return fail(known.code, known.message);
+    }
+  }
+  return ok({
+    webSpaceId: input.webSpaceId,
+    platform: input.platform,
+    browserPartition,
+    cleared: true
   });
 }
 
@@ -562,6 +985,11 @@ interface ScriptRuntimeState {
   textResults: Record<string, string>;
 }
 
+interface ScriptElementTarget {
+  selector?: string;
+  elementKey?: string;
+}
+
 async function captureWebSpaceSnapshot(
   browser: BrowserWindow,
   input: MatrixAccountWebSpaceSnapshotInput,
@@ -577,9 +1005,8 @@ async function captureWebSpaceSnapshot(
       webSpaceId: input.webSpaceId,
       platform: input.platform,
       purpose: "capture",
-      url: page.url,
+      url: normalizeFingerprintUrl(page.url),
       title: page.title,
-      visibleTextPreview: page.visibleText.slice(0, 800),
       signals: compactDebugSignals(sensitiveContext)
     });
     return ok({
@@ -605,9 +1032,21 @@ async function runWebSpaceLoginScript(
   const state: ScriptRuntimeState = { textResults: {} };
   try {
     assertValidScriptDsl(input.dsl, input.purpose);
-    for (const step of input.dsl.steps) {
-      if (browser.isDestroyed()) throw scriptError("window_closed", "受控浏览器窗口已关闭");
-      await runScriptStep(browser, input.platform, step, state);
+    const legacySubstitution = getLegacyCredentialAdapterSubstitution(input.scriptVersionId, input.dsl);
+    if (legacySubstitution) {
+      void writeMatrixAccountDebugLog("legacy-credential-adapter-substituted", {
+        webSpaceId: input.webSpaceId,
+        platform: input.platform,
+        purpose: input.purpose,
+        scriptVersionId: input.scriptVersionId,
+        reasonCode: legacySubstitution.reasonCode,
+        expiresAt: legacySubstitution.expiresAt
+      });
+    } else {
+      for (const step of input.dsl.steps) {
+        if (browser.isDestroyed()) throw scriptError("window_closed", "受控浏览器窗口已关闭");
+        await runScriptStep(browser, input.platform, step, state);
+      }
     }
     const accountCandidate =
       input.purpose === "account_detect"
@@ -625,7 +1064,15 @@ async function runWebSpaceLoginScript(
       textResultKeys: Object.keys(state.textResults),
       hasQrCode: Boolean(state.qrCodeDataUrl),
       qrCodeLength: state.qrCodeDataUrl ? state.qrCodeDataUrl.length : 0,
-      accountCandidate,
+      accountCandidateSignals: accountCandidate
+        ? {
+            hasIdentityKey: Boolean(accountCandidate.identityKey),
+            hasPlatformUid: Boolean(accountCandidate.platformUid),
+            hasDisplayName: Boolean(accountCandidate.displayName || accountCandidate.nickname),
+            hasAvatarUrl: Boolean(accountCandidate.avatarUrl),
+            hasHomeUrl: Boolean(accountCandidate.homeUrl)
+          }
+        : undefined,
       usableCandidate
     });
     return ok({
@@ -705,6 +1152,21 @@ async function getSanitizedPageSnapshot(browser: BrowserWindow): Promise<WebSpac
         }
         return parts.join(" > ");
       };
+      const stableKeyFor = (node) => {
+        if (!(node instanceof Element)) return "";
+        // These attributes are intentionally ordered by their usual contract
+        // strength. A stable key is emitted only when it uniquely identifies a
+        // visible-page node, so it cannot silently pick a sibling.
+        const attributeNames = ["data-testid", "data-test", "data-e2e", "data-qa", "data-cy", "id", "name", "aria-label"];
+        for (const name of attributeNames) {
+          const value = node.getAttribute(name);
+          if (!value || isSensitiveName(name) || isSensitiveName(value)) continue;
+          const matches = Array.from(document.querySelectorAll("[" + name + "]"))
+            .filter((item) => item.getAttribute(name) === value);
+          if (matches.length === 1 && matches[0] === node) return name + ":" + text(value, 160);
+        }
+        return "";
+      };
       const visible = (node) => {
         if (!(node instanceof Element)) return false;
         const rect = node.getBoundingClientRect();
@@ -744,6 +1206,7 @@ async function getSanitizedPageSnapshot(browser: BrowserWindow): Promise<WebSpac
           const rect = node.getBoundingClientRect();
           return {
             key: "el_" + index,
+            stableKey: stableKeyFor(node),
             tag: node.tagName.toLowerCase(),
             text: safeNodeText(node),
             selector: selectorFor(node),
@@ -764,13 +1227,14 @@ async function getSanitizedPageSnapshot(browser: BrowserWindow): Promise<WebSpac
           title: text(document.title, 240),
           interactive: interactive.slice(0, 120).map((item) => ({
             key: item.key,
+            stableKey: item.stableKey,
             tag: item.tag,
             text: item.text,
             role: item.attrs.role || "",
             label: item.attrs["aria-label"] || item.attrs.title || item.attrs.alt || ""
           }))
         },
-        elementRects: interactive.slice(0, 160).map((item) => ({ key: item.key, text: item.text, selector: item.selector, rect: item.rect }))
+        elementRects: interactive.slice(0, 160).map((item) => ({ key: item.key, stableKey: item.stableKey || undefined, text: item.text, selector: item.selector, rect: item.rect }))
       };
     })()`,
     true
@@ -1097,24 +1561,24 @@ async function runScriptStep(
       await loadControlledUrl(browser, step.url);
       return;
     case "waitForElement":
-      await waitForElement(browser, step.selector, scriptTimeoutMs(step));
+      await waitForElement(browser, scriptElementTarget(step), scriptTimeoutMs(step));
       return;
     case "clickSelector":
-      await waitForElement(browser, step.selector, scriptTimeoutMs(step));
-      if (!(await clickSelector(browser, step.selector))) throw scriptError("element_click_failed", "脚本点击元素失败");
+      await waitForElement(browser, scriptElementTarget(step), scriptTimeoutMs(step));
+      if (!(await clickSelector(browser, scriptElementTarget(step)))) throw scriptError("element_click_failed", "脚本点击元素失败");
       return;
     case "clickText":
       if (!(await clickText(browser, step.text, scriptTimeoutMs(step)))) throw scriptError("text_click_failed", "脚本点击文本失败");
       return;
     case "captureElement": {
-      const rect = await waitForElement(browser, step.selector, scriptTimeoutMs(step));
+      const rect = await waitForElement(browser, scriptElementTarget(step), scriptTimeoutMs(step));
       const dataUrl = await captureQrCandidate(browser, rect);
       if (!dataUrl) throw scriptError("element_capture_failed", "脚本截图元素失败");
       if (!step.resultKey || step.resultKey === "qrCodeDataUrl") state.qrCodeDataUrl = dataUrl;
       return;
     }
     case "readText": {
-      const value = await readSafeText(browser, step.selector, scriptTimeoutMs(step));
+      const value = await readSafeText(browser, scriptElementTarget(step, true), scriptTimeoutMs(step));
       if (step.resultKey) state.textResults[step.resultKey] = value;
       return;
     }
@@ -1133,6 +1597,21 @@ async function runScriptStep(
   }
 }
 
+function scriptElementTarget(step: MatrixAccountLoginScriptStep): ScriptElementTarget;
+function scriptElementTarget(step: MatrixAccountLoginScriptStep, optional: true): ScriptElementTarget | undefined;
+function scriptElementTarget(step: MatrixAccountLoginScriptStep, optional = false): ScriptElementTarget | undefined {
+  const candidate = step as ScriptElementTarget;
+  const selector = candidate.selector?.trim();
+  const elementKey = candidate.elementKey?.trim();
+  if (!selector && !elementKey) {
+    if (optional) return undefined;
+    throw scriptError("missing_element_target", "脚本元素目标缺失");
+  }
+  if (selector) assertSafeSelector(selector);
+  if (elementKey) assertSafeElementKey(elementKey);
+  return { selector, elementKey };
+}
+
 function scriptWaitMs(step: MatrixAccountLoginScriptStep): number {
   const raw = step as { ms?: number; duration?: number; timeoutMs?: number; timeout?: number };
   return raw.ms ?? raw.duration ?? raw.timeoutMs ?? raw.timeout ?? 0;
@@ -1143,22 +1622,35 @@ function scriptTimeoutMs(step: MatrixAccountLoginScriptStep): number | undefined
   return raw.timeoutMs ?? raw.timeout;
 }
 
-async function waitForElement(browser: BrowserWindow, selector: string, timeoutMs = 8000): Promise<Rectangle> {
-  assertSafeSelector(selector);
+async function waitForElement(browser: BrowserWindow, target: ScriptElementTarget, timeoutMs = 8000): Promise<Rectangle> {
   const deadline = Date.now() + clampNumber(timeoutMs, 300, 30000);
   while (!browser.isDestroyed() && Date.now() <= deadline) {
-    const rect = await getVisibleElementRect(browser, selector);
+    const rect = await getVisibleElementRect(browser, target);
     if (rect) return rect;
     await delay(250);
   }
   throw scriptError("script_timeout", "等待脚本元素超时");
 }
 
-async function getVisibleElementRect(browser: BrowserWindow, selector: string): Promise<Rectangle | null> {
-  assertSafeSelector(selector);
+async function getVisibleElementRect(browser: BrowserWindow, target: ScriptElementTarget): Promise<Rectangle | null> {
   return (await browser.webContents.executeJavaScript(
-    `((selector) => {
-      const node = document.querySelector(selector);
+    `((target) => {
+      const nodeFor = (candidate) => {
+        const key = String(candidate.elementKey || "");
+        if (key) {
+          const separator = key.indexOf(":");
+          const attribute = key.slice(0, separator);
+          const value = key.slice(separator + 1);
+          const allowed = ["data-testid", "data-test", "data-e2e", "data-qa", "data-cy", "id", "name", "aria-label"];
+          if (separator > 0 && allowed.includes(attribute) && value) {
+            const matches = Array.from(document.querySelectorAll("[" + attribute + "]"))
+              .filter((item) => item.getAttribute(attribute) === value);
+            if (matches.length === 1) return matches[0];
+          }
+        }
+        return candidate.selector ? document.querySelector(candidate.selector) : null;
+      };
+      const node = nodeFor(target);
       if (!node) return null;
       const rect = node.getBoundingClientRect();
       const style = getComputedStyle(node);
@@ -1169,16 +1661,30 @@ async function getVisibleElementRect(browser: BrowserWindow, selector: string): 
         width: Math.ceil(rect.width),
         height: Math.ceil(rect.height)
       };
-    })(${JSON.stringify(selector)})`,
+    })(${JSON.stringify(target)})`,
     true
   )) as Rectangle | null;
 }
 
-async function clickSelector(browser: BrowserWindow, selector: string): Promise<boolean> {
-  assertSafeSelector(selector);
+async function clickSelector(browser: BrowserWindow, target: ScriptElementTarget): Promise<boolean> {
   return (await browser.webContents.executeJavaScript(
-    `((selector) => {
-      const node = document.querySelector(selector);
+    `((target) => {
+      const nodeFor = (candidate) => {
+        const key = String(candidate.elementKey || "");
+        if (key) {
+          const separator = key.indexOf(":");
+          const attribute = key.slice(0, separator);
+          const value = key.slice(separator + 1);
+          const allowed = ["data-testid", "data-test", "data-e2e", "data-qa", "data-cy", "id", "name", "aria-label"];
+          if (separator > 0 && allowed.includes(attribute) && value) {
+            const matches = Array.from(document.querySelectorAll("[" + attribute + "]"))
+              .filter((item) => item.getAttribute(attribute) === value);
+            if (matches.length === 1) return matches[0];
+          }
+        }
+        return candidate.selector ? document.querySelector(candidate.selector) : null;
+      };
+      const node = nodeFor(target);
       if (!node) return false;
       if (node instanceof HTMLInputElement && /password|hidden/i.test(node.type || "")) return false;
       node.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true, view: window }));
@@ -1186,7 +1692,7 @@ async function clickSelector(browser: BrowserWindow, selector: string): Promise<
       node.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
       node.click();
       return true;
-    })(${JSON.stringify(selector)})`,
+    })(${JSON.stringify(target)})`,
     true
   )) as boolean;
 }
@@ -1221,18 +1727,33 @@ async function clickText(browser: BrowserWindow, targetText: string, timeoutMs =
   return false;
 }
 
-async function readSafeText(browser: BrowserWindow, selector?: string, timeoutMs = 8000): Promise<string> {
-  const targetSelector = selector?.trim();
-  if (targetSelector) await waitForElement(browser, targetSelector, timeoutMs);
+async function readSafeText(browser: BrowserWindow, target?: ScriptElementTarget, timeoutMs = 8000): Promise<string> {
+  if (target) await waitForElement(browser, target, timeoutMs);
   return (await browser.webContents.executeJavaScript(
-    `((selector) => {
-      const node = selector ? document.querySelector(selector) : document.body;
+    `((target) => {
+      const nodeFor = (candidate) => {
+        if (!candidate) return document.body;
+        const key = String(candidate.elementKey || "");
+        if (key) {
+          const separator = key.indexOf(":");
+          const attribute = key.slice(0, separator);
+          const value = key.slice(separator + 1);
+          const allowed = ["data-testid", "data-test", "data-e2e", "data-qa", "data-cy", "id", "name", "aria-label"];
+          if (separator > 0 && allowed.includes(attribute) && value) {
+            const matches = Array.from(document.querySelectorAll("[" + attribute + "]"))
+              .filter((item) => item.getAttribute(attribute) === value);
+            if (matches.length === 1) return matches[0];
+          }
+        }
+        return candidate.selector ? document.querySelector(candidate.selector) : null;
+      };
+      const node = nodeFor(target);
       if (!node) return "";
       if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
         return String(node.getAttribute("aria-label") || node.getAttribute("placeholder") || "").replace(/\\s+/g, " ").trim().slice(0, 500);
       }
       return String(node.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 2000);
-    })(${JSON.stringify(targetSelector || "")})`,
+    })(${JSON.stringify(target)})`,
     true
   )) as string;
 }
@@ -1365,6 +1886,14 @@ function assertValidScriptStep(step: MatrixAccountLoginScriptStep): void {
     throw scriptError("unsupported_step", "脚本动作不支持");
   }
   if ("selector" in step && step.selector) assertSafeSelector(step.selector);
+  if ("elementKey" in step && step.elementKey) assertSafeElementKey(step.elementKey);
+  if (
+    ["clickSelector", "waitForElement", "captureElement"].includes(step.action) &&
+    !("selector" in step && step.selector) &&
+    !("elementKey" in step && step.elementKey)
+  ) {
+    throw scriptError("missing_element_target", "脚本元素目标缺失");
+  }
   if ("text" in step && step.text) safeScriptText(step.text);
   if ("key" in step && step.key) safeScriptDataKey(step.key);
   if ("database" in step && step.database) safeScriptDataKey(step.database);
@@ -1379,6 +1908,17 @@ function assertSafeSelector(selector: string): void {
   const value = selector.trim();
   if (!value || value.length > 400) throw scriptError("invalid_selector", "脚本选择器无效");
   if (/script|iframe|webview/i.test(value)) throw scriptError("blocked_selector", "脚本选择器不允许访问该元素");
+}
+
+function assertSafeElementKey(elementKey: string): void {
+  const value = elementKey.trim();
+  const separator = value.indexOf(":");
+  const attribute = value.slice(0, separator);
+  const keyValue = value.slice(separator + 1);
+  const allowed = new Set(["data-testid", "data-test", "data-e2e", "data-qa", "data-cy", "id", "name", "aria-label"]);
+  if (separator <= 0 || !allowed.has(attribute) || !keyValue || value.length > 240 || /password|passwd|pwd|token|cookie|secret|验证码|校验码/i.test(keyValue)) {
+    throw scriptError("invalid_element_key", "脚本元素键无效");
+  }
 }
 
 function safeScriptText(value: string): string {
@@ -1421,7 +1961,7 @@ function compactDebugSignals(value: unknown): unknown {
       sessionStorage?: Record<string, unknown>;
       indexedDB?: Array<{ name?: string; stores?: Array<{ name?: string; records?: unknown[] }> }>;
     };
-    cookies?: Array<{ name?: string; domain?: string; path?: string }>;
+    cookies?: unknown[];
     cdp?: {
       url?: string;
       title?: string;
@@ -1442,28 +1982,31 @@ function compactDebugSignals(value: unknown): unknown {
       error?: string;
     };
   };
+  const indexedDB = raw?.page?.indexedDB || [];
   return {
-    pageUrl: raw?.page?.url,
+    pageUrl: raw?.page?.url ? normalizeFingerprintUrl(raw.page.url) : undefined,
     origin: raw?.page?.origin,
-    cookieNames: raw?.cookies?.map((item) => item.name).filter(Boolean).slice(0, 80),
+    cookieCount: raw?.cookies?.length ?? 0,
     documentCookieLength: String(raw?.page?.documentCookie || "").length,
-    localStorageKeys: Object.keys(raw?.page?.localStorage || {}).slice(0, 80),
-    sessionStorageKeys: Object.keys(raw?.page?.sessionStorage || {}).slice(0, 80),
-    indexedDB: raw?.page?.indexedDB?.map((db) => ({
-      name: db.name,
-      stores: db.stores?.map((store) => ({ name: store.name, records: store.records?.length ?? 0 }))
-    })),
+    localStorageKeyCount: Object.keys(raw?.page?.localStorage || {}).length,
+    sessionStorageKeyCount: Object.keys(raw?.page?.sessionStorage || {}).length,
+    indexedDBCount: indexedDB.length,
+    indexedDBStoreCount: indexedDB.reduce((total, db) => total + (db.stores?.length ?? 0), 0),
+    indexedDBRecordCount: indexedDB.reduce(
+      (total, db) => total + (db.stores || []).reduce((storeTotal, store) => storeTotal + (store.records?.length ?? 0), 0),
+      0
+    ),
     cdp: {
-      url: raw?.cdp?.url,
+      url: raw?.cdp?.url ? normalizeFingerprintUrl(raw.cdp.url) : undefined,
       title: raw?.cdp?.title,
       readyState: raw?.cdp?.readyState,
-      loginSignals: raw?.cdp?.loginSignals,
-      qrCandidates: raw?.cdp?.qrCandidates?.slice(0, 10),
-      localStorageKeys: raw?.cdp?.localStorageKeys?.slice(0, 40),
-      sessionStorageKeys: raw?.cdp?.sessionStorageKeys?.slice(0, 40),
+      hasLoginSignals: Boolean(raw?.cdp?.loginSignals),
+      qrCandidateCount: raw?.cdp?.qrCandidates?.length ?? 0,
+      localStorageKeyCount: raw?.cdp?.localStorageKeys?.length ?? 0,
+      sessionStorageKeyCount: raw?.cdp?.sessionStorageKeys?.length ?? 0,
       cookieLength: String(raw?.cdp?.cookie || "").length,
-      bodyTextPreview: raw?.cdp?.bodyText?.slice(0, 500),
-      error: raw?.cdp?.error
+      hasBodyText: Boolean(raw?.cdp?.bodyText),
+      hasError: Boolean(raw?.cdp?.error)
     }
   };
 }
@@ -1471,7 +2014,20 @@ function compactDebugSignals(value: unknown): unknown {
 async function writeMatrixAccountDebugLog(event: string, payload: unknown): Promise<void> {
   try {
     const line = JSON.stringify({ at: new Date().toISOString(), event, payload }).slice(0, 20000);
-    await appendFile(matrixAccountDebugLogPath, `${line}\n`, "utf8");
+    const entry = `${line}\n`;
+    let resetLog = false;
+    try {
+      const info = await stat(matrixAccountDebugLogPath);
+      resetLog = info.size + Buffer.byteLength(entry, "utf8") > matrixAccountDebugLogMaxBytes;
+    } catch {
+      resetLog = false;
+    }
+    if (resetLog) {
+      await writeFile(matrixAccountDebugLogPath, entry, { encoding: "utf8", mode: 0o600 });
+    } else {
+      await appendFile(matrixAccountDebugLogPath, entry, { encoding: "utf8", mode: 0o600 });
+    }
+    await chmod(matrixAccountDebugLogPath, 0o600);
   } catch {
     // Debug logging must never affect the login flow.
   }
@@ -1492,6 +2048,28 @@ function releaseControlledWindow(browserPartition: string): void {
   releasingWindowPartitions.delete(browserPartition);
 }
 
+async function suspendControlledWebSpace(browserPartition: string): Promise<void> {
+  const existing = controlledWindows.get(browserPartition);
+  if (existing && !existing.isDestroyed()) {
+    releasingWindowPartitions.add(browserPartition);
+    await new Promise<void>((resolve) => {
+      existing.once("closed", resolve);
+      existing.destroy();
+      if (existing.isDestroyed()) resolve();
+    });
+  }
+  controlledWindows.delete(browserPartition);
+  webSpaceWindowPartitions.delete(browserPartition);
+  releasingWindowPartitions.delete(browserPartition);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function flushPersistentSession(session: Session): Promise<void> {
+  await session.cookies.flushStore();
+  session.flushStorageData();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 function emitLoginState(event: IpcMainInvokeEvent, payload: MatrixAccountLoginStatePayload): void {
   if (event.sender.isDestroyed()) return;
   event.sender.send(IPC_CHANNELS.matrixAccountLoginStateChanged, payload);
@@ -1500,6 +2078,16 @@ function emitLoginState(event: IpcMainInvokeEvent, payload: MatrixAccountLoginSt
 function emitWebSpaceState(event: IpcMainInvokeEvent, payload: MatrixAccountWebSpaceStatePayload): void {
   if (event.sender.isDestroyed()) return;
   event.sender.send(IPC_CHANNELS.matrixAccountWebSpaceStateChanged, payload);
+}
+
+function canCaptureSensitiveMatrixDebug(event: IpcMainInvokeEvent): boolean {
+  if (process.env.AICRM_ENABLE_SENSITIVE_MATRIX_DEBUG !== "1" || event.sender.isDestroyed()) return false;
+  const callerWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!callerWindow || callerWindow.isDestroyed()) return false;
+  for (const controlledWindow of controlledWindows.values()) {
+    if (!controlledWindow.isDestroyed() && controlledWindow.webContents.id === event.sender.id) return false;
+  }
+  return true;
 }
 
 function validateInput(input: MatrixAccountBrowserInput): DesktopCommandResult<never> {
@@ -1558,6 +2146,9 @@ function validateWebSpaceScriptInput(input: MatrixAccountWebSpaceScriptInput): D
     const known = normalizeScriptError(err);
     return fail("validation_error", known.message);
   }
+  const legacySubstitution = getLegacyCredentialAdapterSubstitution(input.scriptVersionId, input.dsl);
+  const policyViolation = legacySubstitution ? null : getMatrixAccountScriptPolicyViolation(input.purpose, input.dsl);
+  if (policyViolation) return fail(policyViolation.code, policyViolation.message);
   return ok(undefined as never);
 }
 

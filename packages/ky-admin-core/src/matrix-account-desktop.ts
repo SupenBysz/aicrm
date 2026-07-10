@@ -28,6 +28,218 @@ export interface MatrixAccountCapabilities {
   supportsProfileIsolation: boolean;
   supportsSessionDetection: boolean;
   supportsCloudSessionVault: boolean;
+  supportsAccountOnboarding?: boolean;
+  /** Local encrypted snapshot vault. This does not imply cloud upload support. */
+  supportsSessionSnapshotVault?: boolean;
+  /** True only when snapshot receipts can be verified by the backend trust domain. */
+  supportsServerVerifiableSnapshotReceipts?: boolean;
+}
+
+export type MatrixAccountOnboardingStatus = "active" | "completed" | "failed" | "cancelled" | "expired";
+
+export type MatrixAccountOnboardingPhase =
+  | "created"
+  | "opening"
+  | "qr_preparing"
+  | "qr_ready"
+  | "waiting_scan"
+  | "authenticating"
+  | "authenticated"
+  | "identifying"
+  | "awaiting_confirmation"
+  | "snapshot_sealing"
+  | "committing"
+  | "ready"
+  | "blocked_repair"
+  | "verification_required"
+  | "risk_controlled"
+  | "failed"
+  | "cancelled";
+
+export type MatrixAccountOnboardingActivity =
+  | "executing"
+  | "waiting_user"
+  | "repairing_adapter"
+  | "retrying"
+  | "none";
+
+export type MatrixAccountOnboardingNextAction =
+  | "wait"
+  | "refresh_qr"
+  | "open_controlled_window"
+  | "complete_platform_verification"
+  | "confirm_binding"
+  | "retry_snapshot"
+  | "retry_step"
+  | "cancel";
+
+export type MatrixAccountOnboardingEventType =
+  | "onboarding.created"
+  | "login.phase.changed"
+  | "qr.ready"
+  | "qr.refreshed"
+  | "qr.expired"
+  | "user.action.required"
+  | "adapter.repairing"
+  | "account.identified"
+  | "binding.review_required"
+  | "snapshot.sealing"
+  | "snapshot.verified"
+  | "account.bound"
+  | "account.ready"
+  | "onboarding.failed"
+  | "onboarding.cancelled";
+
+export interface MatrixAccountOnboardingStartInput {
+  attemptId?: string;
+  operationId?: string;
+  /** @internal Resolved from the backend login-attempt aggregate; never entered by the business UI. */
+  webSpaceId: string;
+  workspaceId: string;
+  workspaceType: MatrixAccountWorkspaceType;
+  platform: MatrixAccountPlatform;
+  memberId?: string;
+  deviceId?: string;
+  showWindow?: boolean;
+  idempotencyKey?: string;
+}
+
+export interface MatrixAccountOnboardingLookupInput {
+  attemptId: string;
+}
+
+export interface MatrixAccountOnboardingQrInput extends MatrixAccountOnboardingLookupInput {
+  qrRevision?: number;
+}
+
+export interface MatrixAccountOnboardingRefreshQrInput extends MatrixAccountOnboardingLookupInput {
+  operationId?: string;
+  expectedQrRevision?: number;
+}
+
+export interface MatrixAccountOnboardingCancelInput extends MatrixAccountOnboardingLookupInput {
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionReference {
+  /** Reserved for account-oriented session operations after backend mapping is available. */
+  accountId?: string;
+  /** Reserved for account-oriented session operations after backend mapping is available. */
+  clientSessionId?: string;
+}
+
+export interface MatrixAccountSessionVaultTarget {
+  /** Current implementation resolves the trusted WebSpace exclusively through this coordinator aggregate. */
+  attemptId: string;
+  sessionRef?: MatrixAccountSessionReference;
+}
+
+export interface MatrixAccountSessionSnapshotSealInput extends MatrixAccountSessionVaultTarget {
+  snapshotId?: string;
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionSnapshotVerifyInput extends MatrixAccountSessionVaultTarget {
+  snapshotId: string;
+}
+
+export interface MatrixAccountSessionSnapshotRestoreInput extends MatrixAccountSessionVaultTarget {
+  snapshotId: string;
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionWebSpaceCleanupInput extends MatrixAccountSessionVaultTarget {
+  /** Cleanup is rejected unless this is the coordinator's current verified snapshot. */
+  verifiedSnapshotId: string;
+  operationId?: string;
+}
+
+export interface MatrixAccountSessionSnapshotView {
+  snapshotId: string;
+  schemaVersion: 1;
+  status: "verified";
+  createdAt: string;
+  verifiedAt: string;
+  contentHash: string;
+  fingerprintHash: string;
+  sizeBytes: number;
+  sourceBytes: number;
+  fileCount: number;
+}
+
+export interface MatrixAccountSessionSnapshotVerificationResult extends MatrixAccountSessionSnapshotView {
+  /** Sensitive bearer proof for backend step completion. Never persist it in telemetry or logs. */
+  verificationReceipt: string;
+}
+
+export interface MatrixAccountSessionSnapshotRestoreResult extends MatrixAccountSessionSnapshotVerificationResult {
+  restoreId: string;
+  restoredAt: string;
+}
+
+export interface MatrixAccountSessionWebSpaceCleanupResult {
+  attemptId: string;
+  verifiedSnapshotId: string;
+  cleared: boolean;
+  releasedBytes: number;
+  cleanedAt: string;
+}
+
+export interface MatrixAccountOnboardingView {
+  attemptId: string;
+  operationId: string;
+  methodKey: string;
+  workspaceId: string;
+  platform: MatrixAccountPlatform;
+  phase: MatrixAccountOnboardingPhase;
+  status: MatrixAccountOnboardingStatus;
+  activity: MatrixAccountOnboardingActivity;
+  qrRevision: number;
+  sequence: number;
+  nextActions: MatrixAccountOnboardingNextAction[];
+  createdAt: string;
+  updatedAt: string;
+  snapshotId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface MatrixAccountOnboardingQrCodeView {
+  attemptId: string;
+  operationId: string;
+  methodKey: "login.qr.get.v1" | "login.qr.refresh.v1";
+  phase: MatrixAccountOnboardingPhase;
+  status: MatrixAccountOnboardingStatus;
+  qrRevision: number;
+  qrCodeDataUrl?: string;
+  recognized?: boolean;
+  payloadLength?: number;
+  reasonCode?: string;
+  message?: string;
+  observedAt: string;
+}
+
+export interface MatrixAccountOnboardingSanitizedResult {
+  qrAvailable?: boolean;
+  qrRecognized?: boolean;
+  qrPayloadLength?: number;
+  reasonCode?: string;
+  message?: string;
+}
+
+export interface MatrixAccountOnboardingEvent {
+  attemptId: string;
+  operationId: string;
+  methodKey: string;
+  sequence: number;
+  type: MatrixAccountOnboardingEventType;
+  phase: MatrixAccountOnboardingPhase;
+  status: MatrixAccountOnboardingStatus;
+  qrRevision: number;
+  occurredAt: string;
+  recoverable: boolean;
+  nextActions: MatrixAccountOnboardingNextAction[];
+  sanitizedResult: MatrixAccountOnboardingSanitizedResult;
 }
 
 export interface MatrixAccountBrowserInput {
@@ -134,6 +346,7 @@ export type MatrixAccountScriptRunStatus = "success" | "failed" | "timeout" | "c
 
 export interface MatrixAccountElementRect {
   key: string;
+  stableKey?: string;
   text?: string;
   selector?: string;
   rect: {
@@ -172,7 +385,8 @@ export type MatrixAccountLoginScriptStep =
     }
   | {
       action: "clickSelector";
-      selector: string;
+      selector?: string;
+      elementKey?: string;
       timeoutMs?: number;
     }
   | {
@@ -181,18 +395,21 @@ export type MatrixAccountLoginScriptStep =
     }
   | {
       action: "waitForElement";
-      selector: string;
+      selector?: string;
+      elementKey?: string;
       timeoutMs?: number;
     }
   | {
       action: "captureElement";
-      selector: string;
+      selector?: string;
+      elementKey?: string;
       resultKey?: "qrCodeDataUrl";
       timeoutMs?: number;
     }
   | {
       action: "readText";
       selector?: string;
+      elementKey?: string;
       resultKey?: string;
       timeoutMs?: number;
     }
@@ -288,6 +505,34 @@ interface MatrixAccountBridgeLike {
       input: MatrixAccountWebSpaceScriptInput
     ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceScriptResult>>;
     onWebSpaceStateChanged?: (listener: (payload: MatrixAccountWebSpaceStatePayload) => void) => () => void;
+    startAccountOnboarding?: (
+      input: MatrixAccountOnboardingStartInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+    getAccountOnboarding?: (
+      input: MatrixAccountOnboardingLookupInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+    getLoginQrCode?: (
+      input: MatrixAccountOnboardingQrInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
+    refreshLoginQrCode?: (
+      input: MatrixAccountOnboardingRefreshQrInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
+    cancelAccountOnboarding?: (
+      input: MatrixAccountOnboardingCancelInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+    sealSessionSnapshot?: (
+      input: MatrixAccountSessionSnapshotSealInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
+    verifySessionSnapshot?: (
+      input: MatrixAccountSessionSnapshotVerifyInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
+    restoreSessionSnapshot?: (
+      input: MatrixAccountSessionSnapshotRestoreInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotRestoreResult>>;
+    cleanupSessionWebSpace?: (
+      input: MatrixAccountSessionWebSpaceCleanupInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>>;
+    onAccountOnboardingEvent?: (listener: (payload: MatrixAccountOnboardingEvent) => void) => () => void;
   };
 }
 
@@ -330,6 +575,28 @@ export function hasMatrixAccountLoginScriptDesktopCapability(): boolean {
     hasMatrixAccountWebSpaceDesktopCapability() &&
     typeof bridge?.captureWebSpaceSnapshot === "function" &&
     typeof bridge.runWebSpaceLoginScript === "function"
+  );
+}
+
+export function hasMatrixAccountOnboardingDesktopCapability(): boolean {
+  const bridge = matrixAccountBridge();
+  return (
+    typeof bridge?.startAccountOnboarding === "function" &&
+    typeof bridge.getAccountOnboarding === "function" &&
+    typeof bridge.getLoginQrCode === "function" &&
+    typeof bridge.refreshLoginQrCode === "function" &&
+    typeof bridge.cancelAccountOnboarding === "function" &&
+    typeof bridge.onAccountOnboardingEvent === "function"
+  );
+}
+
+export function hasMatrixAccountSessionSnapshotVaultCapability(): boolean {
+  const bridge = matrixAccountBridge();
+  return (
+    typeof bridge?.sealSessionSnapshot === "function" &&
+    typeof bridge.verifySessionSnapshot === "function" &&
+    typeof bridge.restoreSessionSnapshot === "function" &&
+    typeof bridge.cleanupSessionWebSpace === "function"
   );
 }
 
@@ -432,6 +699,93 @@ export function onMatrixAccountWebSpaceStateChanged(
   listener: (payload: MatrixAccountWebSpaceStatePayload) => void
 ): () => void {
   return matrixAccountBridge()?.onWebSpaceStateChanged?.(listener) ?? (() => undefined);
+}
+
+export function startMatrixAccountOnboarding(
+  input: MatrixAccountOnboardingStartInput
+): Promise<DesktopCommandResult<MatrixAccountOnboardingView>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.startAccountOnboarding) return Promise.resolve(missingBridgeResult());
+  return bridge.startAccountOnboarding(input);
+}
+
+export function getMatrixAccountOnboarding(
+  attemptId: string
+): Promise<DesktopCommandResult<MatrixAccountOnboardingView>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.getAccountOnboarding) return Promise.resolve(missingBridgeResult());
+  return bridge.getAccountOnboarding({ attemptId });
+}
+
+export function getMatrixAccountLoginQrCode(
+  input: MatrixAccountOnboardingQrInput
+): Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.getLoginQrCode) return Promise.resolve(missingBridgeResult());
+  return bridge.getLoginQrCode(input);
+}
+
+export function refreshMatrixAccountLoginQrCode(
+  input: MatrixAccountOnboardingRefreshQrInput
+): Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.refreshLoginQrCode) return Promise.resolve(missingBridgeResult());
+  return bridge.refreshLoginQrCode(input);
+}
+
+export function cancelMatrixAccountOnboarding(
+  input: MatrixAccountOnboardingCancelInput
+): Promise<DesktopCommandResult<MatrixAccountOnboardingView>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.cancelAccountOnboarding) return Promise.resolve(missingBridgeResult());
+  return bridge.cancelAccountOnboarding(input);
+}
+
+export function sealMatrixAccountSessionSnapshot(
+  input: MatrixAccountSessionSnapshotSealInput
+): Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.sealSessionSnapshot) return Promise.resolve(missingBridgeResult());
+  return bridge.sealSessionSnapshot(input);
+}
+
+export function verifyMatrixAccountSessionSnapshot(
+  input: MatrixAccountSessionSnapshotVerifyInput
+): Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.verifySessionSnapshot) return Promise.resolve(missingBridgeResult());
+  return bridge.verifySessionSnapshot(input);
+}
+
+export function restoreMatrixAccountSessionSnapshot(
+  input: MatrixAccountSessionSnapshotRestoreInput
+): Promise<DesktopCommandResult<MatrixAccountSessionSnapshotRestoreResult>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.restoreSessionSnapshot) return Promise.resolve(missingBridgeResult());
+  return bridge.restoreSessionSnapshot(input);
+}
+
+export function cleanupMatrixAccountSessionWebSpace(
+  input: MatrixAccountSessionWebSpaceCleanupInput
+): Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>> {
+  const bridge = matrixAccountBridge();
+  if (!bridge?.cleanupSessionWebSpace) return Promise.resolve(missingBridgeResult());
+  return bridge.cleanupSessionWebSpace(input);
+}
+
+export function subscribeMatrixAccountOnboarding(
+  attemptId: string,
+  afterSequence: number,
+  listener: (payload: MatrixAccountOnboardingEvent) => void
+): () => void {
+  let cursor = Number.isFinite(afterSequence) ? Math.max(0, Math.trunc(afterSequence)) : 0;
+  return (
+    matrixAccountBridge()?.onAccountOnboardingEvent?.((payload) => {
+      if (payload.attemptId !== attemptId || payload.sequence <= cursor) return;
+      cursor = payload.sequence;
+      listener(payload);
+    }) ?? (() => undefined)
+  );
 }
 
 export function openAiExecutorTerminalWindow(

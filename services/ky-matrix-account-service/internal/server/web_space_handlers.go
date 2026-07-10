@@ -38,6 +38,17 @@ func (s *Server) getWebSpace(w http.ResponseWriter, r *http.Request, wc wsContex
 }
 
 func (s *Server) submitWebSpaceDetectResult(w http.ResponseWriter, r *http.Request, wc wsContext) {
+	managed, err := s.store.HasLoginAttemptForWebSpace(
+		r.Context(), wc.WorkspaceType, wc.WorkspaceID, wc.MembershipID, r.PathValue("id"),
+	)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	if managed {
+		writeError(w, r, http.StatusConflict, "login_attempt_required", "该登录空间由业务登录流程管理，必须在快照验证后完成绑定")
+		return
+	}
 	var in store.MatrixAccountDetectResultInput
 	if !decodeJSON(w, r, &in) {
 		return
@@ -81,6 +92,9 @@ func (s *Server) submitWebSpaceDetectResult(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) abandonWebSpace(w http.ResponseWriter, r *http.Request, wc wsContext) {
+	if s.rejectLoginAttemptManagedWebSpace(w, r, wc) {
+		return
+	}
 	item, err := s.store.AbandonWebSpace(r.Context(), wc.WorkspaceType, wc.WorkspaceID, wc.MembershipID, wc.UserID, r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
@@ -91,6 +105,9 @@ func (s *Server) abandonWebSpace(w http.ResponseWriter, r *http.Request, wc wsCo
 }
 
 func (s *Server) clearWebSpace(w http.ResponseWriter, r *http.Request, wc wsContext) {
+	if s.rejectLoginAttemptManagedWebSpace(w, r, wc) {
+		return
+	}
 	item, err := s.store.ClearWebSpace(r.Context(), wc.WorkspaceType, wc.WorkspaceID, wc.MembershipID, wc.UserID, r.PathValue("id"))
 	if err != nil {
 		writeStoreError(w, r, err)
@@ -98,6 +115,21 @@ func (s *Server) clearWebSpace(w http.ResponseWriter, r *http.Request, wc wsCont
 	}
 	s.audit(r.Context(), r, wc, "matrix_account.web_space_cleared", "matrix_account_web_space", item.ID, nil)
 	writeData(w, r, item)
+}
+
+func (s *Server) rejectLoginAttemptManagedWebSpace(w http.ResponseWriter, r *http.Request, wc wsContext) bool {
+	managed, err := s.store.HasLoginAttemptForWebSpace(
+		r.Context(), wc.WorkspaceType, wc.WorkspaceID, wc.MembershipID, r.PathValue("id"),
+	)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return true
+	}
+	if !managed {
+		return false
+	}
+	writeError(w, r, http.StatusConflict, "login_attempt_required", "该登录空间由业务登录流程管理，请通过登录流程命令操作")
+	return true
 }
 
 func normalizeDetectResultInput(in *store.MatrixAccountDetectResultInput) {

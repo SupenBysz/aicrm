@@ -37,12 +37,13 @@ function openTerminalWindow(
     });
   }
 
+  const windowTitle = input.title?.trim() || "执行器仿真终端";
   const window = new BrowserWindow({
     width: TERMINAL_WINDOW_DEFAULT_WIDTH,
     height: TERMINAL_WINDOW_DEFAULT_HEIGHT,
     minWidth: TERMINAL_WINDOW_DEFAULT_WIDTH,
     minHeight: TERMINAL_WINDOW_DEFAULT_HEIGHT,
-    title: input.title || "执行器仿真终端",
+    title: windowTitle,
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#050806" : "#f7efe4",
     frame: false,
@@ -71,6 +72,10 @@ function openTerminalWindow(
   });
   window.webContents.on("context-menu", (_event, params) => {
     showContextMenu(window, params);
+  });
+  window.webContents.on("page-title-updated", (titleEvent) => {
+    titleEvent.preventDefault();
+    window.setTitle(windowTitle);
   });
   window.webContents.on("devtools-opened", () => {
     if (isDesktopProductionMode()) window.webContents.closeDevTools();

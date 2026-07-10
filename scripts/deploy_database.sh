@@ -14,6 +14,6 @@ done
 echo "Set KY_EXECUTE_DATABASE_DEPLOY=1 to execute with psql."
 if [[ "${KY_EXECUTE_DATABASE_DEPLOY:-}" == "1" ]]; then
   for file in "${sql_files[@]}"; do
-    psql "$KY_TENANT_DATABASE_URL" -f "$ROOT_DIR/ops/db/$file"
+    psql "$KY_TENANT_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f "$ROOT_DIR/ops/db/$file"
   done
 fi

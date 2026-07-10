@@ -62,6 +62,20 @@ const bridge: AiCrmDesktopBridge = {
       const handler = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
       ipcRenderer.on(IPC_CHANNELS.matrixAccountWebSpaceStateChanged, handler);
       return () => ipcRenderer.off(IPC_CHANNELS.matrixAccountWebSpaceStateChanged, handler);
+    },
+    startAccountOnboarding: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountStartOnboarding, input),
+    getAccountOnboarding: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountGetOnboarding, input),
+    getLoginQrCode: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountGetOnboardingQrCode, input),
+    refreshLoginQrCode: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountRefreshOnboardingQrCode, input),
+    cancelAccountOnboarding: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountCancelOnboarding, input),
+    sealSessionSnapshot: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountSealSessionSnapshot, input),
+    verifySessionSnapshot: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountVerifySessionSnapshot, input),
+    restoreSessionSnapshot: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountRestoreSessionSnapshot, input),
+    cleanupSessionWebSpace: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountCleanupSessionWebSpace, input),
+    onAccountOnboardingEvent: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
+      ipcRenderer.on(IPC_CHANNELS.matrixAccountOnboardingEvent, handler);
+      return () => ipcRenderer.off(IPC_CHANNELS.matrixAccountOnboardingEvent, handler);
     }
   }
 };

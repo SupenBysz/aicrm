@@ -175,6 +175,8 @@ func buildCodexRepairPrompt(task store.ExecutorTask, contextPath string) string 
 
 当前限制：
 - 本轮先作为后端执行器联调，不要修改仓库文件，不要执行部署命令。
+- 任务上下文只允许包含脱敏页面投影；不得索取、推断、输出或持久化 Cookie、Token、Storage、密码和验证码。
+- 账号 identityKey 必须来自稳定的平台账号身份，不得使用 sessionid、uid_tt 或其他会话凭据代替。
 - 不要编造已经修复成功；无法确认时输出待补充的调试数据。
 - 输出中请包含：失败原因、建议脚本步骤、需要保存的新脚本版本说明。
 

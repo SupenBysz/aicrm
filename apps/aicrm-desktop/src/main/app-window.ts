@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { BrowserWindow, Menu, nativeTheme, shell } from "electron";
+import { DESKTOP_APPLICATION_NAME } from "../shared/constants";
 import { loadDesktopConfig } from "./config";
 import { emitWindowState } from "./ipc/window-ipc";
 import { isDesktopDebugMode, isDesktopProductionMode } from "./runtime-mode";
@@ -84,7 +85,7 @@ export function createMainWindow(): BrowserWindow {
     height: 760,
     minWidth: 960,
     minHeight: 640,
-    title: "AiCRM Desktop",
+    title: DESKTOP_APPLICATION_NAME,
     autoHideMenuBar: true,
     backgroundColor: getWindowBackgroundColor(),
     frame: false,

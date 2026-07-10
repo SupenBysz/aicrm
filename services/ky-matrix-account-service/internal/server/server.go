@@ -83,6 +83,11 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/matrix-account-web-spaces/{id}/login-script/runs", s.ws("create", s.listWebSpaceLoginScriptRuns))
 	mux.HandleFunc("POST /api/v1/matrix-account-web-spaces/{id}/abandon", s.ws("create", s.abandonWebSpace))
 	mux.HandleFunc("POST /api/v1/matrix-account-web-spaces/{id}/clear", s.ws("clear_session", s.clearWebSpace))
+	mux.HandleFunc("POST /api/v1/matrix-account-login-attempts", s.ws("create", s.createLoginAttempt))
+	mux.HandleFunc("GET /api/v1/matrix-account-login-attempts/{id}", s.ws("view", s.getLoginAttempt))
+	mux.HandleFunc("GET /api/v1/matrix-account-login-attempts/{id}/events", s.ws("view", s.listLoginAttemptEvents))
+	mux.HandleFunc("POST /api/v1/matrix-account-login-attempts/{id}/commands/{command}", s.ws("login", s.runLoginAttemptCommand))
+	mux.HandleFunc("POST /api/v1/matrix-account-login-attempts/{id}/step-results", s.ws("login", s.submitLoginAttemptStepResult))
 
 	return mux
 }

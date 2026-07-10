@@ -108,7 +108,7 @@ func scanExecutorTask(row interface{ Scan(...any) error }) (ExecutorTask, error)
 	if len(summary) == 0 {
 		summary = []byte("{}")
 	}
-	item.ResultSummary = summary
+	item.ResultSummary = sanitizeExecutorSummaryJSON(summary)
 	return item, nil
 }
 
@@ -522,7 +522,7 @@ func (s *Store) hydrateExecutorTaskTokenUsage(ctx context.Context, items []Execu
 }
 
 func (s *Store) CreateExecutorTask(ctx context.Context, workspaceType, workspaceID, actorUserID string, in ExecutorTaskInput) (ExecutorTask, error) {
-	summary, _ := json.Marshal(in.ResultSummary)
+	summary, _ := json.Marshal(sanitizeExecutorResultSummary(in.ResultSummary))
 	if len(summary) == 0 {
 		summary = []byte("{}")
 	}

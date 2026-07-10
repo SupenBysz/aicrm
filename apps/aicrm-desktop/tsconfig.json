@@ -9,6 +9,7 @@
     "noEmit": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "types": ["node", "vite/client"]
   },
   "include": ["src", "electron.vite.config.ts"]

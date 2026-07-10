@@ -1,7 +1,7 @@
 # AiCRM 矩阵账号模块需求与契约
 
-> 文档状态：已锁定 / 矩阵账号 v8 输入基线  
-> 锁定日期：2026-07-09  
+> 文档状态：已锁定 / 矩阵账号 v9 实现输入基线
+> 锁定日期：2026-07-10
 > 适用范围：工作台矩阵账号菜单、Web 后台插件、Electron 受控浏览器能力、AI 执行代理、后端矩阵账号服务、数据库权限与审计
 
 ## 1. 模块目标
@@ -88,6 +88,18 @@ v8 锁定新增语义：
 - Codex 修复脚本后必须通过对应契约测试，测试通过后才允许将候选版本提升为 active。
 - 执行代理、结构化事件、终端帧和脚本契约均必须遵守普通视图脱敏边界；敏感调试仍仅允许在调试模式、超级管理员或专用权限下显式读取。
 
+v9 锁定新增语义：
+
+- AI 执行器、Codex 协助授权、执行器默认模型、脚本执行器与模型绑定的完整真相源为 `docs/kyai_crm_ai_executor_authorization_requirements.md`。
+- v9 覆盖 v4 的模型解析与兜底条款，以及 v8 的执行器服务归属、物理运行真相源、App Server 传输、终端投影和任务创建入口；v8 其余脚本方法契约、受限 DSL、候选验证、脱敏与业务运行流规则继续有效。
+- Codex 执行器模型键与 `ky_ai_model.id` 完全分离；旧 `model_id` 只保留 legacy provider 语义。
+- 新链路按“脚本指定执行器 -> 平台全局默认 Codex 执行器，并校验当前 workspace grant”和“脚本模型覆盖 -> 执行器默认模型”解析；缺失或不可用时阻断，不从 grant 中任挑其他执行器，也不回退平台全局 API 模型。
+- 客户端和服务端 Codex 授权必须通过 App Server 结构化协议、专属凭据修订和可信设备/服务证明完成，普通 Web 请求不得提交授权成功。
+- 只有 `scriptMaintenanceReady=true` 的执行器能被脚本选择；Desktop Agent 任务传输未验收前，客户端执行器不进入可选列表。
+- v8 的 `ky_ai_executor_run/run_event/terminal_frame`、`/ai-executor-runs` 创建入口和 `codex --remote`/WebSocket/PTY 描述只保留为历史逻辑/API/UI 投影；v9 不创建第二套 run 表，不启动 remote TUI，也不开放 App Server WebSocket。唯一物理执行存储、stdio 传输和 ANSI 只读投影以执行器授权需求 §20.2、§20.5 为准。
+- v9 Codex 生成统一使用异步 `generation-runs`，Matrix 预生成的 `runId` 同时作为 executor task.id；同一 runId 关联脚本版本、事件、ANSI 投影，以及存在时的 WebSpace。旧同步 `/login-script/generate` 仅保留 `legacy_provider` 一个兼容周期，之后返回 410。
+- 业务动作、LoginAttempt、版本化方法 ID 以及登录态快照封存/恢复/清理继续以 `docs/matrix_account_ai_onboarding_contract.md` 为真相源；v9 执行器链路只维护脚本方法，不把 Cookie/Profile/快照交给 AI，也不自动打开该合同 §8 的生产门禁。
+
 ## 2. 能力边界
 
 ### 2.1 Web 后台
@@ -128,7 +140,7 @@ Electron 客户端负责：
 - 采集受控 Web 空间的脱敏页面快照。
 - 执行后端下发的受限登录 DSL 脚本。
 - 承载客户端运行时执行代理需要的本机受控浏览器、CDP 调试通道和 Profile 访问能力。
-- 在客户端运行时启动或协助启动 Codex app-server、Codex TUI PTY 与执行代理进程，但不得把 Codex 原始协议直接暴露给业务插件。
+- 在客户端隔离 Runtime 内仅通过 stdio 启动 Codex app-server，用于授权、校验和模型目录；不启动 Codex remote TUI/PTY，不开放 App Server socket，也不得把 Codex 原始协议直接暴露给业务插件。Desktop Agent 任务传输验收前不执行脚本维护任务。
 - 按脚本执行结果裁剪二维码区域并通过安全桥透传给 Web 后台。
 - 承载用户扫码或手动登录；手动窗口默认不显示，只在用户主动打开时显示。
 - 用户关闭手动窗口时仅隐藏窗口，不释放 Profile。
@@ -161,7 +173,7 @@ Electron 客户端禁止：
 - 平台登录脚本契约、契约测试和契约执行记录。
 - AI 执行代理运行记录、结构化事件、终端帧和状态流。
 - AI 辅助生成或更新登录脚本。
-- 脚本指定模型、平台/场景模型和默认模型解析。
+- 按 `generation_engine` 解析模型：`codex_executor` 使用脚本模型覆盖与执行器默认模型；`legacy_provider` 兼容平台/场景及历史默认 API 模型。
 - 脚本生成 token 消耗统计。
 - 登录任务状态（兼容既有账号登录流程）。
 - 客户端登录态元数据。
@@ -408,7 +420,11 @@ ky_matrix_account_login_script
   url_pattern
   page_fingerprint
   active_version_id
-  model_id
+  model_id                    # legacy_provider only
+  executor_id                 # nullable: inherit platform global default
+  model_key_override          # nullable: inherit executor default
+  generation_engine           # legacy_provider | codex_executor
+  config_revision
   status
   failure_threshold
   success_count
@@ -446,15 +462,15 @@ learning
 failed
 ```
 
-脚本模型选择优先级：
+脚本模型选择优先级（v9 新链路；替代 v4 默认链）：
 
 ```text
-本次请求指定模型
-脚本 model_id
-平台/场景策略 model_id
-系统默认多模态模型
-系统默认对话模型
+脚本 model_key_override
+执行器 default_model_key
+缺失或不可用时阻断
 ```
+
+旧 `model_id`、平台/场景 `model_id` 及系统默认多模态/对话模型只服务于迁移期 legacy provider 生成链路，不得作为 Codex 执行器链路的隐式回退。
 
 ### 5.6 平台登录脚本版本
 
@@ -463,7 +479,18 @@ ky_matrix_account_login_script_version
   id
   script_id
   version
-  model_id
+  model_id                    # legacy_provider only
+  effective_executor_id
+  effective_model_key
+  executor_source
+  model_source
+  executor_config_revision
+  credential_binding_revision
+  runtime_binding_id
+  runtime_binding_revision
+  model_catalog_revision
+  generation_engine
+  generation_run_id
   dsl_json
   source
   status
@@ -518,6 +545,7 @@ detect_script_missing
 detect_script_failed
 login_completed_detect_missing
 account_identity_not_found
+contract_validation
 ```
 
 脚本生成原因只用于流程判断、运行记录和用户侧业务化文案映射。普通新增账号侧滑可以展示脚本用途、版本号、版本状态、来源和用户可理解原因；不得展示原始后端错误、脚本 ID、版本 ID、token、模型调用明细、prompt、截图或 DOM 明文。
@@ -552,7 +580,7 @@ timeout
 cancelled
 ```
 
-用户侧可查看的脚本运行日志字段必须经过脱敏，建议限定为：
+用户侧可查看的脚本运行日志字段必须经过脱敏，字段固定为：
 
 ```text
 purpose
@@ -579,7 +607,7 @@ ky_matrix_account_login_script_policy
   workspace_id
   platform
   purpose
-  model_id
+  model_id                    # legacy_provider 兼容期专用
   failure_threshold
   status
   created_by
@@ -643,15 +671,41 @@ getAccountProfile
 ```text
 getQrCode            -> qr_login_prepare
 refreshQrCode        -> qr_login_refresh
-verifyQrCodeReadable -> qr_code_verify
-detectLoginPhase     -> login_phase_detect
+verifyQrCodeReadable -> qr_login_prepare / qr_login_refresh 的输出契约断言
+detectLoginPhase     -> session_check
 getAccountIdentity   -> account_detect
 getAccountProfile    -> account_detect
 ```
 
-新增 `qr_code_verify`、`login_phase_detect` 可先作为契约方法存在，落库执行仍可复用现有脚本版本结构；实现阶段再决定是否扩展 `purpose` 约束。
+v9 不新增 `qr_code_verify`、`login_phase_detect` purpose；它们分别按上表作为既有 purpose 的契约方法/断言落库，避免方法名和脚本资产类型形成双轨。
 
-### 5.10 AI 执行代理运行记录
+业务层只调用版本化方法 ID，camelCase 名称只是平台 adapter 内部函数；映射锁定为：
+
+| 业务方法 ID | Adapter 方法/可信运行时动作 | 脚本 purpose |
+|---|---|---|
+| `login.open.v1` | 打开隔离 WebSpace 后编排 `getQrCode` | `qr_login_prepare` |
+| `login.qr.get.v1` | `getQrCode` + `verifyQrCodeReadable` | `qr_login_prepare` |
+| `login.qr.refresh.v1` | `refreshQrCode` + `verifyQrCodeReadable` | `qr_login_refresh` |
+| `login.status.probe.v1` | `detectLoginPhase` + `detectLoginCompleted` | `session_check` |
+| `account.identity.get.v1` | `getAccountIdentity` | `account_detect` |
+| `account.profile.get.v1` | `getAccountProfile` | `account_detect` |
+| `session.snapshot.seal.v1` | Desktop Vault 内部封存，不经 AI/DSL | 无 |
+| `web_space.cleanup.v1` | Desktop 可信清理与 receipt | 无 |
+
+`generate|repair` Generation run 成功只产生 candidate adapter 版本；`contract_test` 成功只更新目标 candidate 与 contract revision 的测试结果，不创建新 candidate。LoginAttempt 必须在隔离契约测试通过并激活后，以新的 `attempt_no` 续跑原业务方法，不能另建一条脱离 Attempt 的登录流程。
+
+### 5.10 AI 执行代理运行投影（v8 兼容）
+
+以下 `ky_ai_executor_run/run_event/terminal_frame` 名称只描述 v8 逻辑/API 投影，不是 v9 数据库表。v9 必须映射为：
+
+```text
+ky_ai_executor_run            -> ky_ai_executor_task
+ky_ai_executor_run_event      -> ky_ai_executor_task_event
+ky_ai_executor_terminal_frame -> ky_ai_executor_task_raw_log(source=executor, direction=internal, terminal_line)
+runId                         -> task.id
+```
+
+本轮禁止创建 `ky_ai_executor_run`、`ky_ai_executor_run_event`、`ky_ai_executor_terminal_frame` 第二套物理表。下面字段仅用于兼容投影与旧 UI DTO：
 
 ```text
 ky_ai_executor_run
@@ -719,6 +773,68 @@ timeout
 
 `payload_json` 和 `terminal_frame.payload` 默认不得包含 Cookie、Storage、Token、密码、验证码、原始截图、未脱敏 DOM、原始 prompt 或第三方平台敏感凭据。若调试模式确需读取敏感上下文，必须进入敏感调试区并写审计，不进入普通结构化日志和终端投影。
 
+### 5.11 脚本生成运行（v9 canonical）
+
+Matrix service 物理保存业务生成运行，不复制 executor task 内容：
+
+```text
+ky_matrix_account_login_script_generation_run
+  id                          # 与 executor task.id 使用同一 runId
+  workspace_type
+  workspace_id
+  web_space_id                  # 手动脚本维护时可空
+  script_id
+  script_purpose
+  operation
+  generation_reason
+  generation_engine
+  contract_id
+  contract_revision
+  target_version_id
+  status
+  dispatch_status
+  dispatch_attempt
+  dispatch_lease_expires_at
+  candidate_version_id
+  expected_script_revision
+  effective_executor_id
+  effective_model_key
+  executor_source
+  model_source
+  executor_config_revision
+  credential_binding_revision
+  runtime_binding_id
+  runtime_binding_revision
+  model_catalog_revision
+  current_sequence
+  revision
+  idempotency_key_hash
+  request_hash
+  failure_code
+  created_by
+  created_at
+  updated_at
+  finished_at
+
+ky_matrix_account_login_script_generation_run_event
+  id
+  generation_run_id
+  sequence
+  event_type
+  safe_payload_json
+  occurred_at
+  created_at
+```
+
+Event 对 `(generation_run_id, sequence)` 唯一；run/event/outbox 状态与序列同事务提交。完整创建、幂等、SSE 和恢复合同以执行器授权需求 §20.6 为准。
+
+```text
+status = queued | running | materializing | succeeded | failed | cancelled
+dispatch_status = pending | dispatching | dispatched | cancelled | failed
+```
+
+Contract test generation run 必须冻结 `contract_id/contract_revision/target_version_id`；成功只写契约测试记录与目标 candidate 验证结果，不创建新 candidate。
+
 ## 6. API 契约
 
 账号档案 API 前缀固定为：
@@ -754,12 +870,23 @@ POST /api/v1/matrix-account-web-spaces
 GET  /api/v1/matrix-account-web-spaces/{id}
 POST /api/v1/matrix-account-web-spaces/{id}/detect-result
 POST /api/v1/matrix-account-web-spaces/{id}/login-script/resolve
-POST /api/v1/matrix-account-web-spaces/{id}/login-script/generate
 POST /api/v1/matrix-account-web-spaces/{id}/login-script/run-result
 GET  /api/v1/matrix-account-web-spaces/{id}/login-script/runs
+POST /api/v1/matrix-account-web-spaces/{id}/login-script/generation-runs
+POST /api/v1/matrix-account-login-scripts/{scriptId}/generation-runs
+GET  /api/v1/matrix-account-login-script-generation-runs/{runId}
+GET  /api/v1/matrix-account-login-script-generation-runs/{runId}/events
+GET  /api/v1/matrix-account-login-script-generation-runs/{runId}/events-stream
+GET  /api/v1/matrix-account-login-script-generation-runs/{runId}/terminal-frames
+GET  /api/v1/matrix-account-login-script-generation-runs/{runId}/terminal-stream
+POST /api/v1/matrix-account-login-script-generation-runs/{runId}/cancel
 POST /api/v1/matrix-account-web-spaces/{id}/abandon
 POST /api/v1/matrix-account-web-spaces/{id}/clear
 ```
+
+上述 WebSpace 与 script `generation-runs` 分别是自动修复和手动再生成的 `codex_executor` canonical 入口，均返回 202 `{runId,status,dispatchStatus}`。旧 `POST /api/v1/matrix-account-web-spaces/{id}/login-script/generate` 仅在一个兼容周期服务 `legacy_provider` 同步生成；旧 `POST /api/v1/matrix-account-login-scripts/{id}/regenerate` 在同周期代理 script generation-runs；随后两者固定返回 410。
+
+WebSpace 创建 body 固定为 `{scriptPurpose,operation,generationReason,expectedWebSpaceRevision,contextSnapshotId?}`，operation 只允许 `generate|repair`；script 创建 body 固定为 `{operation,generationReason,expectedScriptRevision,contextSnapshotId?}`，scriptPurpose 从资源派生，operation 同样只允许 `generate|repair`。Cancel body 固定为 `{expectedRevision}`。WebSpace create、script create、cancel 三个 generation Command 均要求 Idempotency-Key；contract test 按下方独立入口；详细 dispatch/cancel 收敛、权限和 SSE/ANSI 协议以执行器授权需求 §20.6–§20.9 为准。
 
 登录脚本管理接口：
 
@@ -785,19 +912,20 @@ POST   /api/v1/matrix-account-login-script-contracts/{id}/tests
 GET    /api/v1/matrix-account-login-script-contracts/{id}/test-runs
 ```
 
-AI 执行代理运行接口：
+`POST /contracts/{id}/tests` 是 `contract_test` 的唯一 canonical 创建入口，body 固定为 `{candidateVersionId,expectedScriptRevision,expectedContractRevision,contextSnapshotId?}` 并要求 Idempotency-Key；script generation-runs 不接受 contract_test。成功只更新该 candidate/version + contract revision 的测试记录，不生成候选版本。
+
+AI 执行代理运行接口（v8 兼容投影）：
 
 ```text
-POST /api/v1/ai-executor-runs
 GET  /api/v1/ai-executor-runs/{runId}
 GET  /api/v1/ai-executor-runs/{runId}/events?after=0
 GET  /api/v1/ai-executor-runs/{runId}/events-stream?after=0
 GET  /api/v1/ai-executor-runs/{runId}/terminal-frames?afterFrame=0
 GET  /api/v1/ai-executor-runs/{runId}/terminal-stream?afterFrame=0
-POST /api/v1/ai-executor-runs/{runId}/terminal-resize
-POST /api/v1/ai-executor-runs/{runId}/interrupt
 POST /api/v1/ai-executor-runs/{runId}/cancel
 ```
+
+这些 GET/stream/cancel 在一个发布周期内代理同 ID 的 `/api/v1/ai-executor-tasks/{runId}` 安全投影，之后以 task API 为准。v9 禁止公共 `POST /ai-executor-runs` 直接创建 Codex 任务；旧 create、terminal-resize 和 interrupt 返回 410。业务取消必须调用 generation-run cancel，由 Matrix service 再通过内部 API 取消同 ID task。
 
 终端帧响应字段：
 
@@ -924,7 +1052,15 @@ interface MatrixAccountWebSpaceSnapshotResult {
   domSummary: unknown;
   accessibilityTree: unknown;
   visibleText: string;
-  elementRects: Array<{ key: string; text?: string; selector?: string; rect: { x: number; y: number; width: number; height: number } }>;
+  elementRects: Array<{
+    key: string;
+    keySource: "platform_semantic" | "a11y_role_name" | "stable_id_name" |
+      "scoped_text" | "structural_selector" | "coordinate";
+    stability: "high" | "medium" | "low";
+    text?: string;
+    selector?: string;
+    rect: { x: number; y: number; width: number; height: number };
+  }>;
   screenshotDataUrl?: string;
 }
 ```
@@ -966,6 +1102,10 @@ interface MatrixAccountWebSpaceScriptResult {
 脚本 DSL 只允许执行白名单动作：
 
 ```text
+clickElementKey
+waitForElementKey
+captureElementKey
+readElementKey
 clickText
 clickSelector
 wait
@@ -981,24 +1121,23 @@ Web 业务插件不得直接调用 `window.aicrm`，必须经由 `apps/ky-admin-
 
 ### 7.1 AI 执行代理通信契约
 
-执行代理链路：
+v9 执行代理链路（替代 v8 `codex --remote`/PTY/WebSocket 传输）：
 
 ```text
 App
 ├─ xterm.js 终端投影
-│  └─ WebSocket/SSE terminal frames <- ANSI frames <- PTY <- codex --remote
+│  └─ SSE ANSI projection <- task raw-log <- 脱敏事件渲染器
 └─ 结构化日志
-   └─ WebSocket/SSE events <- AiCRM 执行代理 <- Codex app-server JSON-RPC
+   └─ SSE events <- AiCRM 执行代理 <- Codex app-server stdio JSON-RPC
 ```
 
 执行代理职责：
 
-- 启动、停止和健康检查 Codex app-server。
-- 启动、停止和 resize `codex --remote` TUI PTY。
+- 只在隔离 Runtime 内通过 stdio 启动、停止和健康检查 Codex app-server。
 - 作为 Codex app-server JSON-RPC broker，归一 `threadId`、`turnId`、`itemId` 到 AiCRM `runId`。
-- 记录结构化事件和 ANSI terminal frames。
+- 记录结构化事件，并从同一脱敏事件生成只读 ANSI projection；不启动 remote TUI/PTY，不形成第二控制通道。
 - 支持断线后按 `sequence` 和 `frameSeq` 补齐。
-- 支持 `interrupt`、`cancel`、超时回收和资源释放。
+- 支持 task cancel、超时回收和资源释放。
 - 将脚本契约、失败上下文、脱敏页面快照和浏览器调试能力作为 Codex 修复上下文。
 
 前端终端投影要求：
@@ -1009,14 +1148,34 @@ App
 - 支持 WebLinksAddon 识别链接。
 - 支持自动跟随、清屏、复制、重连。
 - 底部固定状态栏展示执行中、已完成、失败、取消、超时和耗时。
-- resize 时调用 `POST /api/v1/ai-executor-runs/{runId}/terminal-resize` 上报 `cols`、`rows`。
+- FitAddon 只在前端调整只读投影尺寸，不向后端或 Codex 发送 terminal resize。
 
 生产安全：
 
 - Web 前端不得直连 Codex app-server。
-- 非本机或非受控内网不得暴露未鉴权的 Codex WebSocket。
+- 授权期和任务期都不得在 host、本机 loopback 或受控内网暴露 Codex WebSocket；App Server 只允许 stdio 父子进程通道。
 - 终端帧和结构化事件不得自动带出敏感调试上下文。
 - 执行代理应按 workspace、actor、runId 写审计。
+- 验收必须证明同机其他 UID、同 UID 非父进程和相邻 Runtime 均无法连接或调用该 App Server。
+
+### 7.2 稳定元素 Key 合同
+
+抖音及其他平台的 AI 脚本维护必须优先使用 Electron 快照生成的 `elementKey`，不得默认生成脆弱 CSS/XPath 或坐标动作。Key 解析优先级锁定为：
+
+```text
+1. 平台适配器 allowlist 的语义属性（如稳定 data-* 标识）
+2. role + accessible name + 稳定 landmark
+3. 通过随机性过滤的稳定 id/name
+4. 稳定容器 key + 规范化可见文本
+5. 结构选择器
+6. 坐标（仅当次候选验证，禁止直接激活）
+```
+
+- `key` 是上述证据规范化后的确定性摘要，不等同于 selector；运行时按 keySource 和证据重新解析元素。
+- `id/name` 含时间戳、会话片段、长哈希、递增随机数或页面刷新后变化时必须降级，不能标 high。
+- AI prompt、候选 DSL 和自动修复结果都必须先尝试 `*ElementKey` 动作；使用 selector/text/coordinate 时记录 fallback reason 和稳定性等级。
+- 二维码获取、二维码刷新、登录状态检测和账号身份读取等关键方法，候选版本若仅依赖 low-stability selector/coordinate，不得自动提升 active；需稳定 key 或人工批准的有期限平台例外。
+- 契约测试至少覆盖刷新后 key 复现、同级节点插入、文案轻微变化、多元素歧义和不可见元素，且不得为密码、验证码、Token 字段生成可读取 key。
 
 ## 8. 列表页规范
 
@@ -1054,7 +1213,7 @@ App
 - Web 空间创建、打开、识别、绑定、放弃、清理流程契约完整。
 - 识别结果不包含 Cookie、Storage、验证码、Token 等敏感信息。
 - 新增账号二维码获取默认走平台登录脚本，不再依赖客户端内置平台专用提取规则。
-- 无脚本或脚本连续失败达到阈值时，可调用指定模型或默认多模态模型生成候选脚本版本。
+- 无脚本或脚本连续失败达到阈值时，`codex_executor` 链路只调用已解析的 Codex 执行器与模型生成候选版本；仅迁移期 `legacy_provider` 链路可继续使用指定 API 模型或默认多模态模型。
 - AI 生成脚本必须记录脚本版本、本次 token 消耗和脚本累计 token 消耗。
 - 候选脚本执行成功后才提升为 active 版本。
 - 页面截图仅作为当次多模态上下文，不落库、不进入审计明文、不写入客户端日志。
@@ -1068,8 +1227,10 @@ App
 - 执行脚本时必须展示安全版本信息，用户能判断当前脚本是否发生更新。
 - 用户可查看当前流程和历史运行的脱敏执行日志。
 - AI 自动化结构化日志可通过执行代理事件流查看，并支持断线后补事件。
-- AI 自动化终端输出使用 xterm.js 渲染执行代理终端帧，并支持断线后补帧。
-- 同一次 Codex 介入必须使用同一 `runId` 关联结构化事件、终端帧、脚本版本和 WebSpace。
+- AI 自动化终端输出使用 xterm.js 渲染由同一结构化事件生成的只读 ANSI 投影，并支持断线后补帧；不启动 remote TUI/PTY。
+- 同一次 Codex 介入必须使用同一 `runId` 关联结构化事件、终端帧、脚本版本，以及存在时的 WebSpace。
+- v9 只使用 executor task/event/raw-log 三张既有物理表；run/terminal API 仅为兼容投影，不新建第二套执行表。
+- AI 生成和修复脚本优先使用稳定 elementKey；关键方法仅依赖 low-stability selector/coordinate 时不得自动激活。
 - 扫码登录页脚本契约必须包含获取二维码、刷新二维码、验证二维码可识别、检测登录阶段。
 - 账号识别脚本契约必须包含检测扫码完成、获取稳定账号身份、获取账号展示资料。
 - Codex 修复后必须通过契约测试才允许激活候选脚本版本。

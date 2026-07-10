@@ -13,6 +13,21 @@ import type {
   MatrixAccountCheckResult,
   MatrixAccountClearProfileResult,
   MatrixAccountLoginStatePayload,
+  MatrixAccountOnboardingCancelInput,
+  MatrixAccountOnboardingEvent,
+  MatrixAccountOnboardingLookupInput,
+  MatrixAccountOnboardingQrCodeView,
+  MatrixAccountOnboardingQrInput,
+  MatrixAccountOnboardingRefreshQrInput,
+  MatrixAccountOnboardingStartInput,
+  MatrixAccountOnboardingView,
+  MatrixAccountSessionSnapshotRestoreInput,
+  MatrixAccountSessionSnapshotRestoreResult,
+  MatrixAccountSessionSnapshotSealInput,
+  MatrixAccountSessionSnapshotVerificationResult,
+  MatrixAccountSessionSnapshotVerifyInput,
+  MatrixAccountSessionWebSpaceCleanupInput,
+  MatrixAccountSessionWebSpaceCleanupResult,
   MatrixAccountWebSpaceBrowserResult,
   MatrixAccountWebSpaceClearResult,
   MatrixAccountWebSpaceDetectResult,
@@ -82,5 +97,33 @@ export interface AiCrmDesktopBridge {
       input: MatrixAccountWebSpaceScriptInput
     ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceScriptResult>>;
     onWebSpaceStateChanged: (listener: (payload: MatrixAccountWebSpaceStatePayload) => void) => () => void;
+    startAccountOnboarding: (
+      input: MatrixAccountOnboardingStartInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+    getAccountOnboarding: (
+      input: MatrixAccountOnboardingLookupInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+    getLoginQrCode: (
+      input: MatrixAccountOnboardingQrInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
+    refreshLoginQrCode: (
+      input: MatrixAccountOnboardingRefreshQrInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
+    cancelAccountOnboarding: (
+      input: MatrixAccountOnboardingCancelInput
+    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+    sealSessionSnapshot: (
+      input: MatrixAccountSessionSnapshotSealInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
+    verifySessionSnapshot: (
+      input: MatrixAccountSessionSnapshotVerifyInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
+    restoreSessionSnapshot: (
+      input: MatrixAccountSessionSnapshotRestoreInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotRestoreResult>>;
+    cleanupSessionWebSpace: (
+      input: MatrixAccountSessionWebSpaceCleanupInput
+    ) => Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>>;
+    onAccountOnboardingEvent: (listener: (payload: MatrixAccountOnboardingEvent) => void) => () => void;
   };
 }

@@ -2,6 +2,8 @@ import type { AdminPlugin } from "@ky/admin-core";
 import { routes } from "./routes";
 import { matrixAccountPermissions } from "./permissions";
 
+export * from "./account-onboarding";
+
 export const matrixAccountPlugin: AdminPlugin = {
   name: "ky-matrix-account",
   navGroup: "矩阵账号",
@@ -46,4 +48,3 @@ export const matrixAccountPlugin: AdminPlugin = {
 };
 
 export default matrixAccountPlugin;
-

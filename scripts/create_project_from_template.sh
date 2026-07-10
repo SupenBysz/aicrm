@@ -555,6 +555,15 @@ function updatePackage(filePath, updates) {
   writeJson(filePath, pkg);
 }
 
+function desktopApplicationId(value) {
+  const normalized = String(value)
+    .replace(/^@/, "")
+    .replace(/[^a-zA-Z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .toLowerCase();
+  return `com.${normalized || "desktop"}.desktop`;
+}
+
 function setHtmlTitle(filePath, title) {
   if (!fs.existsSync(filePath)) {
     return;
@@ -582,6 +591,7 @@ updatePackage(path.join(root, "apps", desktopDir, "package.json"), {
   name: desktopPackage,
   displayName: desktopName,
   productName: desktopAppName,
+  appId: desktopApplicationId(packageName),
   description: desktopDescription
 });
 

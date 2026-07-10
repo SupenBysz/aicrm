@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
+import { isDesktopClientMode } from "./desktop-client";
 
 export interface PlatformProfile {
   companyName: string;
@@ -66,14 +67,16 @@ function readCache(): PlatformProfile {
 
 export function PlatformProfileProvider({ children }: PropsWithChildren) {
   const [profile, setProfile] = useState<PlatformProfile>(readCache);
+  const refreshGeneration = useRef(0);
 
   const refresh = useCallback(() => {
+    const generation = ++refreshGeneration.current;
     // Public, no-auth endpoint: usable on the login page before sign-in.
     fetch("/api/v1/public/platform-profile")
       .then((r) => (r.ok ? r.json() : null))
       .then((body) => {
         const data = body?.data;
-        if (data) {
+        if (data && generation === refreshGeneration.current) {
           const next = normalizeProfile(data);
           setProfile(next);
           try {
@@ -92,14 +95,18 @@ export function PlatformProfileProvider({ children }: PropsWithChildren) {
     refresh();
     const handler = () => refresh();
     window.addEventListener(PLATFORM_PROFILE_UPDATED_EVENT, handler);
-    return () => window.removeEventListener(PLATFORM_PROFILE_UPDATED_EVENT, handler);
+    return () => {
+      refreshGeneration.current += 1;
+      window.removeEventListener(PLATFORM_PROFILE_UPDATED_EVENT, handler);
+    };
   }, [refresh]);
 
   const resolved = resolveProfile(profile);
 
-  // Keep the browser tab title in sync with the brand logo text.
+  // The desktop program title is the configured brand name. Browser tabs keep
+  // the context suffix so they remain distinguishable from the native client.
   useEffect(() => {
-    document.title = `${resolved.logoTextLong} 后台`;
+    document.title = isDesktopClientMode() ? resolved.logoTextLong : `${resolved.logoTextLong} 后台`;
   }, [resolved.logoTextLong]);
 
   return (

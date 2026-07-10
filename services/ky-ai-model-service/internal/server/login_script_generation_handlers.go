@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -216,7 +217,7 @@ func generateLoginScriptWithModel(ctx context.Context, baseURL, apiKey, modelKey
 }
 
 func buildLoginScriptMessages(prompt, modelType string, snapshot json.RawMessage) []map[string]any {
-	if modelType == "vision" {
+	if modelType == "vision" && os.Getenv("AICRM_ALLOW_AI_LOGIN_SCREENSHOTS") == "1" {
 		imageURL := snapshotImageURL(snapshot)
 		if imageURL != "" {
 			return []map[string]any{
@@ -242,23 +243,23 @@ func loginScriptPrompt(in loginScriptGenerateInput) string {
 硬性规则：
 - 只能输出 JSON，不要 Markdown，不要解释。
 - JSON 必须形如 {"version":1,"purpose":"%s","steps":[...]}。
-- 只允许动作：clickText、clickSelector、wait、waitForElement、captureElement、readText、readStorage、readIndexedDB、navigateAllowedUrl。
+- 只允许动作：clickText、clickSelector、wait、waitForElement、captureElement、readText、navigateAllowedUrl。
 - 字段名必须严格使用 DSL 约定：wait 使用 {"action":"wait","ms":1000}，不要使用 duration；waitForElement/clickSelector/clickText/captureElement 使用 timeoutMs，不能使用 timeout。
-- 可以读取页面快照中提供的 Cookie、localStorage、sessionStorage、IndexedDB、网络/页面状态等调试上下文来判断登录状态和账号身份。
-- 可以生成 readStorage 动作读取 localStorage、sessionStorage 或 cookie，格式为 {"action":"readStorage","storage":"localStorage|sessionStorage|cookie","key":"键名或all","resultKey":"profileText"}。
-- 可以生成 readIndexedDB 动作读取 IndexedDB，格式为 {"action":"readIndexedDB","database":"库名","store":"对象仓库名","key":"可选键","limit":20,"resultKey":"profileText"}。
+- 不得读取或请求 Cookie、Token、localStorage、sessionStorage、IndexedDB、密码、验证码或其他登录凭据。
+- 不得生成 readStorage 或 readIndexedDB 动作；账号身份只能来自可见页面文本、稳定主页 URL 或平台公开账号字段。
 - 不允许生成任意 JavaScript。
 - 如果是 qr_login_prepare，最终必须尽量 captureElement，并将 resultKey 设置为 "qrCodeDataUrl"。
 - 如果是 qr_login_refresh，必须先寻找“刷新二维码/二维码已失效/重新获取/reload/refresh”等可见入口并点击，等待二维码更新后 captureElement，resultKey 设置为 "qrCodeDataUrl"。
-- 生成二维码脚本时，优先使用快照中 sensitiveContext.cdp.qrCandidates 或 elementRects 中真实存在的 selector；不要虚构 selector。
-- 如果已有二维码候选 selector，优先直接 waitForElement + captureElement；只有页面不是扫码登录模式时才先 clickText 切换“扫码登录”。
-- 如果是 account_detect，目标是让页面进入已登录账号主页或可识别账号身份的页面；可以结合 readText、readStorage、readIndexedDB 读取账号身份相关数据。
+- 优先使用快照里 stableKey 非空的元素。stableKey 是页面公开且唯一的稳定元素键；将它写入步骤的 elementKey 字段。可同时保留同一元素的 selector 作为受控兜底。
+- 稳定键优先级为 data-testid/data-test/data-e2e/data-qa/data-cy、id、name、aria-label；严禁使用 el_序号、CSS class 哈希、:nth-of-type、坐标作为首选定位。
+- 只有 stableKey 不存在或验证失败时，才使用快照中真实存在的 selector；不要虚构 selector。
+- 如果已有二维码候选 stableKey，优先直接 waitForElement + captureElement；只有页面不是扫码登录模式时才先 clickText 切换“扫码登录”。
+- 如果是 account_detect，目标是让页面进入已登录账号主页或可识别账号身份的页面，并通过 readText 读取账号身份相关数据。
 - account_detect 的 resultKey 优先使用 "identityKey"、"platformUid"、"displayName"、"nickname"、"avatarUrl"、"homeUrl"、"profileText" 这些约定名称。
-- 如果账号身份只存在于 Storage/Cookie/IndexedDB 中，可以读取对应 key 或对象仓库；优先读取 profile/user/account/session 相关 key。
 - 不要把 sessionid、token、csrf、passport、ticket、cookie 等会话凭据作为 identityKey 或 platformUid；identityKey 必须是账号稳定标识，例如 uid/userId/secUid/profileUrl 中的账号 ID。
 - account_detect 不需要 captureElement，也不要截取头像或二维码。
 - 如果需要切换扫码登录，优先 clickText 使用页面上已有的“扫码登录/二维码/扫码”等文本。
-- selector 必须来自页面快照中的 selector，不能虚构。
+- elementKey 必须来自页面快照中的 stableKey；selector 必须来自页面快照中的 selector，不能虚构。
 
 页面信息：
 URL: %s
@@ -273,14 +274,60 @@ GenerationReason: %s
 func stripSnapshotImage(raw json.RawMessage) json.RawMessage {
 	var value map[string]any
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return raw
+		return json.RawMessage(`{}`)
 	}
-	delete(value, "screenshotDataUrl")
+	value = sanitizeLoginScriptSnapshot(value)
 	out, err := json.Marshal(value)
 	if err != nil {
-		return raw
+		return json.RawMessage(`{}`)
 	}
 	return out
+}
+
+func sanitizeLoginScriptSnapshot(value map[string]any) map[string]any {
+	blocked := map[string]struct{}{
+		"authorization": {}, "browserpartition": {}, "cookie": {}, "cookies": {},
+		"credential": {}, "credentials": {}, "indexeddb": {}, "localstorage": {},
+		"password": {}, "screenshotdataurl": {}, "secret": {}, "sensitivecontext": {},
+		"sessionid": {}, "sessionstorage": {}, "storage": {}, "token": {}, "tokens": {}, "uidtt": {},
+	}
+	var sanitize func(any, int) any
+	sanitize = func(input any, depth int) any {
+		if depth > 12 {
+			return nil
+		}
+		switch typed := input.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(typed))
+			for key, child := range typed {
+				normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "", ".", "").Replace(strings.TrimSpace(key)))
+				if _, denied := blocked[normalized]; denied || strings.Contains(normalized, "accesstoken") || strings.Contains(normalized, "refreshtoken") {
+					continue
+				}
+				if item := sanitize(child, depth+1); item != nil {
+					out[key] = item
+				}
+			}
+			return out
+		case []any:
+			out := make([]any, 0, len(typed))
+			for _, child := range typed {
+				if item := sanitize(child, depth+1); item != nil {
+					out = append(out, item)
+				}
+			}
+			return out
+		case string, bool, float64, nil:
+			return typed
+		default:
+			return nil
+		}
+	}
+	output, _ := sanitize(value, 0).(map[string]any)
+	if output == nil {
+		return map[string]any{}
+	}
+	return output
 }
 
 func snapshotImageURL(raw json.RawMessage) string {

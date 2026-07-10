@@ -35,8 +35,11 @@ import {
   clearMatrixAccountProfile,
   checkMatrixAccountSession,
   createMatrixAccountWebSpaceLogin,
+  detectMatrixAccountWebSpace,
   drawerWidths,
+  getMatrixAccountCapabilities,
   hasMatrixAccountDesktopCapability,
+  hasMatrixAccountOnboardingDesktopCapability,
   hasMatrixAccountWebSpaceDesktopCapability,
   isAiCrmDesktopClientRuntime,
   openAiExecutorTerminalWindow,
@@ -49,6 +52,7 @@ import {
   useCurrentWorkspace,
   usePermissions,
   useRequestClient,
+  type MatrixAccountCapabilities,
   type MatrixAccountLoginScriptPurpose,
   type RequestClient,
   type MatrixAccountWebSpaceScriptResult,
@@ -94,6 +98,14 @@ import {
   type MatrixAccountWebSpace
 } from "../api";
 import { matrixAccountPermissions } from "../permissions";
+import {
+  createMatrixAccountAutomationService,
+  sanitizeDiagnosticText,
+  sanitizeMatrixAccountSnapshotForAi,
+  type AccountOnboardingEvent,
+  type AccountOnboardingView,
+  type LoginQrCodeView
+} from "../account-onboarding";
 
 const platformLabels: Record<MatrixAccountPlatform, string> = {
   douyin: "抖音",
@@ -141,6 +153,15 @@ interface WebSpaceDetectOptions {
 interface CreateWebSpaceOptions {
   flowId: number;
 }
+
+type NewAccountFlowMode = "automation" | "legacy";
+
+type AccountOnboardingStrategy = "checking" | NewAccountFlowMode;
+
+type AccountOnboardingCapabilities = MatrixAccountCapabilities & {
+  /** Local encrypted snapshot/archive capability required before business binding can complete. */
+  supportsSessionSnapshotVault?: boolean;
+};
 
 type WebSpaceFlowStatus =
   | "idle"
@@ -249,16 +270,37 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
   const [keywordDraft, setKeywordDraft] = useState("");
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [queryState, setQueryState] = useState<QueryState>({ page: 1, pageSize: 20 });
+  const [newAccountFlowMode, setNewAccountFlowMode] = useState<NewAccountFlowMode>("legacy");
+  const [accountOnboarding, setAccountOnboarding] = useState<AccountOnboardingView | null>(null);
   const webSpaceDrawerOpenRef = useRef(false);
   const webSpaceFlowCompletedRef = useRef(false);
   const webSpaceFlowCancelledRef = useRef(false);
   const webSpaceFlowIdRef = useRef(0);
   const webSpaceRepairTaskRef = useRef<AiExecutorTask | null>(null);
   const releasePendingWebSpaceRef = useRef<MatrixAccountWebSpace | null>(null);
+  const onboardingEventCursorRef = useRef(0);
 
   const desktopAvailable = hasMatrixAccountDesktopCapability();
   const webSpaceDesktopAvailable = hasMatrixAccountWebSpaceDesktopCapability();
+  const onboardingDesktopAvailable = hasMatrixAccountOnboardingDesktopCapability();
   const desktopRuntime = isAiCrmDesktopClientRuntime();
+  const accountOnboardingService = useMemo(() => createMatrixAccountAutomationService(client), [client]);
+  const {
+    data: desktopCapabilities,
+    isFetching: desktopCapabilitiesFetching
+  } = useQuery({
+    queryKey: ["matrix-account-desktop-capabilities"],
+    queryFn: getMatrixAccountCapabilities,
+    enabled: desktopRuntime && onboardingDesktopAvailable,
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY
+  });
+  const accountOnboardingStrategy = resolveAccountOnboardingStrategy({
+    desktopRuntime,
+    onboardingDesktopAvailable,
+    capabilitiesFetching: desktopCapabilitiesFetching,
+    capabilities: desktopCapabilities
+  });
   const desktopCapabilityTip = desktopAvailable
     ? undefined
     : desktopRuntime
@@ -269,6 +311,18 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     : desktopRuntime
       ? "当前 AiCRM Desktop 客户端暂不支持新增登录空间，请更新或重启客户端"
       : "新增登录空间需要 AiCRM Desktop 客户端";
+  const newAccountCapabilityTip =
+    accountOnboardingStrategy === "checking"
+      ? "正在确认新增账号业务编排能力"
+      : accountOnboardingStrategy === "automation"
+        ? "使用账号登录业务编排流程"
+        : webSpaceCapabilityTip;
+  const newAccountFlowAvailable =
+    accountOnboardingStrategy === "automation"
+      ? onboardingDesktopAvailable
+      : accountOnboardingStrategy === "legacy"
+        ? webSpaceDesktopAvailable
+        : false;
   const title = `${platformLabels[platform]}账号`;
   const listKey = ["matrix-accounts", platform, queryState] as const;
   const canCreate = permissions.canAny([...matrixAccountPermissions.create]);
@@ -600,8 +654,8 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
           platform,
           purpose,
           triggerReason,
-          snapshot: context.snapshot ? compactSnapshot(context.snapshot) : undefined,
-          scriptResult: context.resultSummary ?? undefined
+          snapshot: context.snapshot ? sanitizeMatrixAccountSnapshotForAi(context.snapshot) : undefined,
+          scriptResult: context.resultSummary ? sanitizeScriptResultSummary(context.resultSummary) : undefined
         }
       });
       setWebSpaceRepairTask(task);
@@ -669,7 +723,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
       const snapshotResult = await captureMatrixAccountWebSpaceSnapshot({
         ...baseInput,
         includeScreenshot: true,
-        includeSensitiveContext: true
+        includeSensitiveContext: false
       });
       if (!snapshotResult.ok || !snapshotResult.data) {
         throw new Error(snapshotResult.error?.message ?? "登录空间快照采集失败");
@@ -776,10 +830,28 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     let retryReason = "";
     const maxAttempts = options?.retryOnFailure === false ? 1 : 2;
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      if (!retryReason) {
+        const nativeDetection = await detectMatrixAccountWebSpace(baseInput);
+        const nativeCandidate = nativeDetection.data?.canDetect
+          ? {
+              identityKey: nativeDetection.data.identityKey,
+              platformUid: nativeDetection.data.platformUid,
+              displayName: nativeDetection.data.displayName,
+              nickname: nativeDetection.data.nickname,
+              avatarUrl: nativeDetection.data.avatarUrl,
+              homeUrl: nativeDetection.data.homeUrl,
+              browserPartition: nativeDetection.data.browserPartition,
+              loginStatus: nativeDetection.data.loginStatus
+            }
+          : undefined;
+        if (isUsableAccountCandidate(nativeCandidate)) {
+          return { pending: false, candidate: nativeCandidate, webSpace };
+        }
+      }
       const snapshotResult = await captureMatrixAccountWebSpaceSnapshot({
         ...baseInput,
         includeScreenshot: true,
-        includeSensitiveContext: true
+        includeSensitiveContext: false
       });
       if (!snapshotResult.ok || !snapshotResult.data) {
         throw new Error(snapshotResult.error?.message ?? "登录空间快照采集失败");
@@ -885,6 +957,55 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     }
     return { pending: true, webSpace, reason: "waiting_scan" };
   }
+
+  const startAccountOnboardingMutation = useMutation({
+    mutationFn: async ({ flowId }: CreateWebSpaceOptions) => {
+      if (!workspace) throw new Error("当前工作区无效");
+      if (accountOnboardingStrategy !== "automation") {
+        throw new Error("账号登录业务编排能力尚未完整启用");
+      }
+      const attempt = await accountOnboardingService.startAccountOnboarding({
+        platform,
+        idempotencyKey: createUiOperationId(`onboarding-${workspace.type}-${workspace.id}-${platform}-${flowId}`),
+        ownerMemberId: currentUser?.id
+      });
+      const qrCode = await accountOnboardingService.getLoginQrCode(
+        attempt.id,
+        attempt.qrRevision > 0 ? attempt.qrRevision : undefined
+      );
+      return { flowId, attempt, qrCode };
+    },
+    onSuccess: ({ flowId, attempt, qrCode }) => {
+      if (flowId !== webSpaceFlowIdRef.current || webSpaceFlowCancelledRef.current || !webSpaceDrawerOpenRef.current) {
+        void accountOnboardingService
+          .cancelAccountOnboarding({
+            attemptId: attempt.id,
+            commandId: createUiOperationId("cancel-stale-onboarding"),
+            reason: "ui_flow_replaced"
+          })
+          .catch(() => undefined);
+        return;
+      }
+      onboardingEventCursorRef.current = attempt.sequence;
+      setAccountOnboarding(attempt);
+      applyAutomationQrCode(qrCode);
+      applyAutomationOnboardingView(attempt, Boolean(qrCode.dataUrl));
+      if (qrCode.dataUrl) void message.success("登录二维码已生成，请扫码登录");
+    },
+    onError: (err, options) => {
+      if (options?.flowId !== webSpaceFlowIdRef.current || webSpaceFlowCancelledRef.current || !webSpaceDrawerOpenRef.current) return;
+      const reason = err instanceof Error ? err.message : "新增账号业务流程启动失败";
+      setWebSpaceFlowStatus("failed");
+      setWebSpaceQrReason(reason);
+      updateWebSpaceProgress({
+        phase: "failed",
+        actor: "system",
+        title: "新增账号业务流程启动失败",
+        description: reason
+      });
+      void message.error(reason);
+    }
+  });
 
   const createWebSpaceMutation = useMutation({
     mutationFn: async ({ flowId }: CreateWebSpaceOptions) => {
@@ -1065,6 +1186,98 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     }
   });
 
+  const refreshAccountOnboardingQrMutation = useMutation({
+    mutationFn: async () => {
+      if (newAccountFlowMode !== "automation" || !accountOnboarding) {
+        throw new Error("当前不是账号登录业务编排流程");
+      }
+      setWebSpaceFlowStatus("refreshing_qr");
+      const attempt = await accountOnboardingService.refreshLoginQrCode({
+        attemptId: accountOnboarding.id,
+        commandId: createUiOperationId("refresh-onboarding-qr"),
+        expectedRevision: accountOnboarding.qrRevision
+      });
+      const qrCode = await accountOnboardingService.getLoginQrCode(
+        attempt.id,
+        attempt.qrRevision > 0 ? attempt.qrRevision : undefined
+      );
+      return { attempt, qrCode };
+    },
+    onSuccess: ({ attempt, qrCode }) => {
+      onboardingEventCursorRef.current = Math.max(onboardingEventCursorRef.current, attempt.sequence);
+      setAccountOnboarding(attempt);
+      applyAutomationQrCode(qrCode);
+      applyAutomationOnboardingView(attempt, Boolean(qrCode.dataUrl));
+      if (qrCode.dataUrl) void message.success("二维码已刷新");
+    },
+    onError: (err) => {
+      const reason = err instanceof Error ? err.message : "二维码刷新失败";
+      setWebSpaceFlowStatus("failed");
+      setWebSpaceQrReason(reason);
+      updateWebSpaceProgress({
+        phase: "failed",
+        actor: "system",
+        title: "二维码刷新失败",
+        description: reason
+      });
+      void message.error(reason);
+    }
+  });
+
+  useEffect(() => {
+    if (
+      newAccountFlowMode !== "automation" ||
+      !webSpaceDrawerOpen ||
+      !accountOnboarding?.id
+    ) {
+      return undefined;
+    }
+    let closed = false;
+    const attemptId = accountOnboarding.id;
+    const subscription = accountOnboardingService.subscribeAccountOnboarding(
+      attemptId,
+      (event: AccountOnboardingEvent) => {
+        if (event.sequence <= onboardingEventCursorRef.current) return;
+        onboardingEventCursorRef.current = event.sequence;
+        void (async () => {
+          const latest = await accountOnboardingService.getAccountOnboarding(attemptId);
+          const shouldReadQr =
+            latest.qrRevision > 0 &&
+            (event.type === "qr.ready" ||
+              event.type === "qr.refreshed" ||
+              event.type === "qr.expired" ||
+              event.data?.qrRevision !== undefined);
+          const qrCode = shouldReadQr
+            ? await accountOnboardingService.getLoginQrCode(attemptId, latest.qrRevision)
+            : null;
+          if (closed || !webSpaceDrawerOpenRef.current) return;
+          setAccountOnboarding(latest);
+          if (qrCode) applyAutomationQrCode(qrCode);
+          applyAutomationOnboardingView(latest, Boolean(qrCode?.dataUrl || webSpaceQrCode));
+          if (event.type === "account.ready" || (latest.status === "completed" && latest.phase === "ready")) {
+            webSpaceFlowCompletedRef.current = true;
+            void queryClient.invalidateQueries({ queryKey: ["matrix-accounts", platform] });
+            void message.success("账号登录业务流程已完成");
+          }
+        })().catch((error) => {
+          if (closed) return;
+          setWebSpaceQrReason(error instanceof Error ? error.message : "登录流程状态同步失败");
+        });
+      },
+      {
+        afterSequence: onboardingEventCursorRef.current,
+        onError: (error) => {
+          if (closed) return;
+          setWebSpaceQrReason(error instanceof Error ? error.message : "登录流程事件订阅失败");
+        }
+      }
+    );
+    return () => {
+      closed = true;
+      subscription.unsubscribe();
+    };
+  }, [accountOnboarding?.id, accountOnboardingService, newAccountFlowMode, platform, queryClient, webSpaceDrawerOpen]);
+
   const detectWebSpaceMutation = useMutation({
     mutationFn: async (options?: WebSpaceDetectOptions) => {
       if (!workspace || !activeWebSpace) throw new Error("当前登录空间无效");
@@ -1181,6 +1394,79 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     workspace?.id
   ]);
 
+  function applyAutomationQrCode(qrCode: LoginQrCodeView) {
+    setWebSpaceQrCode(qrCode.dataUrl);
+    setWebSpaceQrReason(qrCode.dataUrl ? "" : "平台登录页暂未生成可读取的二维码");
+  }
+
+  function applyAutomationOnboardingView(view: AccountOnboardingView, qrAvailable: boolean) {
+    if (view.status === "completed" || view.phase === "ready") {
+      webSpaceFlowCompletedRef.current = true;
+      setWebSpaceFlowStatus("success");
+      updateWebSpaceProgress({
+        phase: "detecting_account",
+        actor: "system",
+        title: "账号登录业务流程已完成",
+        description: "账号识别、登录态快照和业务绑定均已由编排服务确认。"
+      });
+      return;
+    }
+    if (view.status === "failed" || view.status === "expired") {
+      setWebSpaceFlowStatus("failed");
+      setWebSpaceQrReason(view.error?.message || "账号登录业务流程未完成");
+      updateWebSpaceProgress({
+        phase: "failed",
+        actor: view.activity === "repairing_adapter" ? "codex" : "system",
+        title: view.activity === "repairing_adapter" ? "平台适配器修复中" : "账号登录业务流程失败",
+        reasonCode: view.error?.code,
+        reasonText: view.error?.message,
+        description: view.error?.recoverable ? "可按业务流程提示重试。" : "请关闭后重新开始。"
+      });
+      return;
+    }
+    if (view.status === "cancelled") {
+      setWebSpaceFlowStatus("idle");
+      return;
+    }
+    if (view.activity === "repairing_adapter" || view.phase === "blocked_repair") {
+      setWebSpaceFlowStatus("waiting_qr");
+      updateWebSpaceProgress({
+        phase: "generating_script",
+        actor: "codex",
+        title: "平台适配器修复中",
+        description: "修复完成后，业务编排器会从当前步骤继续。"
+      });
+      return;
+    }
+    if (["authenticated", "identifying", "awaiting_confirmation", "snapshot_sealing", "committing"].includes(view.phase)) {
+      setWebSpaceFlowStatus("detecting_account");
+      updateWebSpaceProgress({
+        phase: "detecting_account",
+        actor: "system",
+        title: view.phase === "snapshot_sealing" ? "正在封存登录态" : "正在完成账号识别与业务绑定",
+        description: "请保持当前登录流程打开。"
+      });
+      return;
+    }
+    if (view.phase === "verification_required" || view.phase === "risk_controlled") {
+      setWebSpaceFlowStatus(qrAvailable ? "qr_ready" : "waiting_qr");
+      updateWebSpaceProgress({
+        phase: "waiting_scan",
+        actor: "system",
+        title: view.phase === "risk_controlled" ? "平台触发风险控制" : "需要完成平台验证",
+        description: "请按平台提示完成验证，业务编排器会继续监听状态。"
+      });
+      return;
+    }
+    setWebSpaceFlowStatus(qrAvailable ? "qr_ready" : "waiting_qr");
+    updateWebSpaceProgress({
+      phase: "waiting_scan",
+      actor: "system",
+      title: qrAvailable ? "二维码已生成，等待扫码" : "等待平台生成二维码",
+      description: qrAvailable ? "请使用平台 App 扫码完成登录。" : "业务编排器正在等待可读取的登录二维码。"
+    });
+  }
+
   function applyState(next: Partial<QueryState>) {
     setSelectedRowKeys([]);
     setQueryState((current) => ({ ...current, ...next }));
@@ -1188,6 +1474,8 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
 
   function resetWebSpaceFlow(options?: { keepCancelled?: boolean }) {
     setActiveWebSpace(null);
+    setAccountOnboarding(null);
+    setNewAccountFlowMode("legacy");
     setWebSpaceQrCode("");
     setWebSpaceQrReason("");
     setWebSpaceFlowStatus("idle");
@@ -1204,6 +1492,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     setSensitiveSnapshotDrawerOpen(false);
     setDebugWindow(null);
     setReleasePendingWebSpace(null);
+    onboardingEventCursorRef.current = 0;
     webSpaceFlowCompletedRef.current = false;
     if (!options?.keepCancelled) {
       webSpaceFlowCancelledRef.current = false;
@@ -1253,7 +1542,10 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     webSpaceFlowIdRef.current = flowId;
     webSpaceFlowCompletedRef.current = false;
     webSpaceFlowCancelledRef.current = false;
+    const flowMode: NewAccountFlowMode = accountOnboardingStrategy === "automation" ? "automation" : "legacy";
+    setNewAccountFlowMode(flowMode);
     setActiveWebSpace(null);
+    setAccountOnboarding(null);
     setWebSpaceQrCode("");
     setWebSpaceQrReason("");
     setWebSpaceFlowStatus("initializing");
@@ -1270,8 +1562,13 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     setSensitiveSnapshotDrawerOpen(false);
     setDebugWindow(null);
     setReleasePendingWebSpace(null);
+    onboardingEventCursorRef.current = 0;
     setWebSpaceDrawerOpen(true);
-    createWebSpaceMutation.mutate({ flowId });
+    if (flowMode === "automation") {
+      startAccountOnboardingMutation.mutate({ flowId });
+    } else {
+      createWebSpaceMutation.mutate({ flowId });
+    }
   }
 
   function closeWebSpaceDrawer() {
@@ -1281,6 +1578,20 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     setSensitiveSnapshot(null);
     setSensitiveSnapshotDrawerOpen(false);
     setDebugWindow(null);
+    if (newAccountFlowMode === "automation") {
+      const attempt = accountOnboarding;
+      if (attempt && attempt.status === "active") {
+        void accountOnboardingService.cancelAccountOnboarding({
+          attemptId: attempt.id,
+          commandId: createUiOperationId("cancel-onboarding"),
+          reason: "user_closed_onboarding"
+        }).catch((error) => {
+          void message.error(error instanceof Error ? error.message : "取消新增账号流程失败");
+        });
+      }
+      resetWebSpaceFlow({ keepCancelled: true });
+      return;
+    }
     if (activeWebSpace && !webSpaceFlowCompletedRef.current) {
       const task = webSpaceRepairTaskRef.current;
       if (isExecutorTaskExecuting(task?.status)) {
@@ -1292,6 +1603,14 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
       return;
     }
     resetWebSpaceFlow({ keepCancelled: createWebSpaceMutation.isPending });
+  }
+
+  function refreshNewAccountQr() {
+    if (newAccountFlowMode === "automation") {
+      refreshAccountOnboardingQrMutation.mutate();
+      return;
+    }
+    refreshWebSpaceQrMutation.mutate();
   }
 
   async function openExecutorTerminalWindow(task: AiExecutorTask | null | undefined = webSpaceRepairTaskRef.current) {
@@ -1540,13 +1859,29 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
             <Space wrap style={{ minWidth: 0 }}>
               <Tag color="blue">{platformLabels[platform]}</Tag>
               <Tag>{webSpaceFlowLabel(webSpaceFlowStatus)}</Tag>
+              <Tooltip
+                title={
+                  newAccountFlowMode === "automation"
+                    ? "登录、识别、快照与绑定均由业务编排服务负责"
+                    : "登录成功检测或本地快照能力尚未齐备，本次完整流程继续使用兼容实现"
+                }
+              >
+                <Tag color={newAccountFlowMode === "automation" ? "green" : "orange"}>
+                  {newAccountFlowMode === "automation" ? "业务编排流程" : "兼容登录流程"}
+                </Tag>
+              </Tooltip>
               {webSpaceProgress.actor === "codex" ? <Tag color="purple">AI 自动化</Tag> : null}
             </Space>
-            {activeWebSpace && ["waiting_qr", "qr_ready", "failed"].includes(webSpaceFlowStatus) ? (
+            {(newAccountFlowMode === "automation" ? Boolean(accountOnboarding) : Boolean(activeWebSpace)) &&
+            ["waiting_qr", "qr_ready", "failed"].includes(webSpaceFlowStatus) ? (
               <Button
-                loading={refreshWebSpaceQrMutation.isPending}
-                onClick={() => refreshWebSpaceQrMutation.mutate()}
-                disabled={!activeWebSpace || !webSpaceDesktopAvailable}
+                loading={refreshWebSpaceQrMutation.isPending || refreshAccountOnboardingQrMutation.isPending}
+                onClick={refreshNewAccountQr}
+                disabled={
+                  newAccountFlowMode === "automation"
+                    ? !accountOnboarding || !accountOnboarding.nextActions.includes("refresh_qr")
+                    : !activeWebSpace || !webSpaceDesktopAvailable
+                }
               >
                 刷新二维码
               </Button>
@@ -1708,7 +2043,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     }
   ];
 
-  if (showScriptManagement) {
+  if (showScriptManagement && newAccountFlowMode === "legacy") {
     webSpaceTabItems.push({
       key: "scripts",
       label: "脚本管理",
@@ -1825,7 +2160,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     });
   }
 
-  if (showWebSpaceDebug) {
+  if (showWebSpaceDebug && newAccountFlowMode === "legacy") {
     webSpaceTabItems.push({
       key: "web-space",
       label: "登录空间",
@@ -1955,8 +2290,13 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
               </Popconfirm>
             ) : null}
             {canCreate ? (
-              <Tooltip title={webSpaceCapabilityTip}>
-                <Button type="primary" disabled={!webSpaceDesktopAvailable} loading={createWebSpaceMutation.isPending} onClick={openCreate}>
+              <Tooltip title={newAccountCapabilityTip}>
+                <Button
+                  type="primary"
+                  disabled={!newAccountFlowAvailable}
+                  loading={createWebSpaceMutation.isPending || startAccountOnboardingMutation.isPending || desktopCapabilitiesFetching}
+                  onClick={openCreate}
+                >
                   新增账号
                 </Button>
               </Tooltip>
@@ -2064,7 +2404,12 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
             <Button
               loading={openWebSpaceMutation.isPending}
               onClick={() => openWebSpaceMutation.mutate({ showWindow: true })}
-              disabled={!activeWebSpace || !webSpaceDesktopAvailable || webSpaceFlowStatus === "releasing"}
+              disabled={
+                newAccountFlowMode === "automation" ||
+                !activeWebSpace ||
+                !webSpaceDesktopAvailable ||
+                webSpaceFlowStatus === "releasing"
+              }
             >
               打开窗口
             </Button>
@@ -5002,6 +5347,30 @@ function streamStatusLabel(status: "idle" | "connecting" | "connected" | "fallba
   return labels[status];
 }
 
+function resolveAccountOnboardingStrategy(input: {
+  desktopRuntime: boolean;
+  onboardingDesktopAvailable: boolean;
+  capabilitiesFetching: boolean;
+  capabilities: AccountOnboardingCapabilities | null | undefined;
+}): AccountOnboardingStrategy {
+  if (!input.desktopRuntime || !input.onboardingDesktopAvailable) return "legacy";
+  if (input.capabilitiesFetching && !input.capabilities) return "checking";
+  const capabilities = input.capabilities;
+  if (!capabilities) return "legacy";
+  return capabilities.supportsAccountOnboarding === true &&
+    capabilities.supportsSessionDetection === true &&
+    capabilities.supportsSessionSnapshotVault === true &&
+    capabilities.supportsServerVerifiableSnapshotReceipts === true
+    ? "automation"
+    : "legacy";
+}
+
+function createUiOperationId(prefix: string) {
+  const safePrefix = prefix.replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 96) || "matrix-account";
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${safePrefix}:${suffix}`;
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -5290,14 +5659,11 @@ function sanitizeScriptResultSummary(value: unknown) {
   const sensitiveKeys = Object.keys(record).filter(isSensitiveSummaryKey);
 
   return compactSafeRecord({
-    webSpaceId: record.webSpaceId,
     platform: record.platform,
-    browserPartition: record.browserPartition,
-    scriptVersionId: record.scriptVersionId,
     status: record.status,
     durationMs: record.durationMs,
     errorCode: record.errorCode,
-    errorMessage: record.errorMessage,
+    errorMessage: record.errorMessage ? sanitizeDiagnosticText(record.errorMessage, 1_000) : undefined,
     qrCode: {
       extracted: Boolean(qrCodeDataUrl),
       dataUrlLength: qrCodeDataUrl ? qrCodeDataUrl.length : undefined,
@@ -5408,23 +5774,6 @@ function executorErrorMessage(err: unknown) {
     return "Codex 执行器未启用，请先在 AI 执行器配置中启用后重试。";
   }
   return err instanceof Error ? err.message : "Codex 修复任务创建失败";
-}
-
-function compactSnapshot(snapshot: MatrixAccountWebSpaceSnapshotResult) {
-  return {
-    webSpaceId: snapshot.webSpaceId,
-    platform: snapshot.platform,
-    browserPartition: snapshot.browserPartition,
-    url: snapshot.url,
-    title: snapshot.title,
-    pageFingerprint: snapshot.pageFingerprint,
-    visibleText: snapshot.visibleText?.slice(0, 5000) ?? "",
-    domSummary: snapshot.domSummary,
-    accessibilityTree: snapshot.accessibilityTree,
-    elementRects: snapshot.elementRects?.slice(0, 80) ?? [],
-    screenshotAvailable: Boolean(snapshot.screenshotDataUrl),
-    sensitiveContext: snapshot.sensitiveContext
-  };
 }
 
 function isLikelyLoginCompleted(snapshot: { url: string; title: string; visibleText: string; sensitiveContext?: unknown }) {

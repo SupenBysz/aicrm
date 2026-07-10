@@ -63,7 +63,7 @@ func (s *Store) BindDetectedWebSpace(ctx context.Context, workspaceType, workspa
 	if err != nil {
 		return MatrixAccountBindResult{}, err
 	}
-	if ws.Status == "abandoned" || ws.Status == "cleared" {
+	if ws.Status == "bound" || ws.Status == "abandoned" || ws.Status == "cleared" {
 		return MatrixAccountBindResult{}, ErrValidation
 	}
 
