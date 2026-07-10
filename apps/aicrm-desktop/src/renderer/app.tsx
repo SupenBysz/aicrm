@@ -29,7 +29,7 @@ export function App() {
   }
 
   return (
-    <ConfigProvider theme={{ token: { colorPrimary: "#1677ff", borderRadius: 8 } }}>
+    <ConfigProvider theme={{ token: { colorPrimary: "#d49a3d", colorTextLightSolid: "#34281a", borderRadius: 10 } }}>
       <AntdApp>
         {error ? <div className="desktop-error">{error}</div> : null}
         <HashRouter>

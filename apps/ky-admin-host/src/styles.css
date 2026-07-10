@@ -1180,14 +1180,13 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-shell {
-  --login-accent: #1b67d9;
-  --login-accent-strong: #0d4baa;
-  --login-accent-rgb: 27, 103, 217;
+  --login-accent-rgb: 212, 154, 61;
   background:
-    radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.5) 0, rgba(255, 255, 255, 0) 30%),
-    radial-gradient(circle at 82% 78%, rgba(190, 210, 232, 0.42) 0, rgba(190, 210, 232, 0) 28%),
-    linear-gradient(180deg, #dae4ee 0%, #d5e0eb 100%);
+    radial-gradient(ellipse 58% 76% at 4% 2%, rgba(255, 252, 247, 0.94) 0%, rgba(255, 252, 247, 0) 72%),
+    radial-gradient(ellipse 52% 70% at 98% 96%, rgba(var(--login-accent-rgb), 0.17) 0%, rgba(var(--login-accent-rgb), 0) 76%),
+    linear-gradient(145deg, #fbf7ef 0%, #f1e6d8 48%, #efe1cf 100%);
   display: grid;
+  isolation: isolate;
   overflow: hidden;
   place-items: center;
   position: relative;
@@ -1199,25 +1198,31 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 .login-shell::after {
   border-radius: 999px;
   content: "";
-  filter: blur(10px);
+  filter: blur(24px);
   pointer-events: none;
   position: absolute;
+  will-change: opacity, transform;
+  z-index: -1;
 }
 
 .login-shell::before {
-  background: rgba(var(--login-accent-rgb), 0.12);
-  height: 360px;
-  left: -80px;
-  top: -120px;
-  width: 360px;
+  animation: aicrm-login-drift-primary 24s ease-in-out infinite alternate;
+  background: rgba(var(--login-accent-rgb), 0.2);
+  height: min(52vw, 560px);
+  left: -14vw;
+  top: -20vw;
+  transform: translate3d(0, 0, 0);
+  width: min(52vw, 560px);
 }
 
 .login-shell::after {
-  background: rgba(255, 255, 255, 0.44);
-  bottom: -180px;
-  height: 420px;
-  right: -120px;
-  width: 420px;
+  animation: aicrm-login-drift-secondary 30s ease-in-out infinite alternate;
+  background: rgba(255, 252, 247, 0.76);
+  bottom: -26vw;
+  height: min(58vw, 620px);
+  right: -14vw;
+  transform: translate3d(0, 0, 0);
+  width: min(58vw, 620px);
 }
 
 .login-frame {
@@ -1231,14 +1236,16 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-card {
+  background: var(--admin-surface-solid);
+  border-color: var(--admin-stroke);
   border-radius: 16px;
-  box-shadow: 0 24px 64px rgba(43, 72, 103, 0.16);
+  box-shadow: 0 24px 64px rgba(151, 115, 62, 0.16);
   overflow: hidden;
   width: 100%;
 }
 
 .login-hero {
-  background: #edf4fb;
+  background: linear-gradient(145deg, rgba(255, 252, 247, 0.98), rgba(241, 230, 216, 0.96));
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1247,6 +1254,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-eyebrow {
+  color: var(--admin-accent) !important;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -1261,6 +1269,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-description.ant-typography {
+  color: var(--admin-text-muted);
   line-height: 1.75;
   margin-bottom: 0;
   max-width: 220px;
@@ -1279,9 +1288,9 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .login-panel-icon {
   align-items: center;
-  background: #e6f4ff;
+  background: var(--admin-accent-soft);
   border-radius: 21px;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: flex;
   height: 42px;
   justify-content: center;
@@ -1293,7 +1302,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-form .ant-form-item-label > label {
-  color: #2f4559;
+  color: var(--admin-text);
   font-size: 14px;
   font-weight: 500;
   height: auto;
@@ -1301,8 +1310,8 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .login-form--platform .ant-input-affix-wrapper,
 .login-form--platform .ant-input {
-  background: #fff;
-  border: 1px solid #ccd8e5;
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
   border-radius: 8px;
   box-shadow: none;
 }
@@ -1313,7 +1322,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-form--platform .ant-input {
-  color: #152a41;
+  color: var(--admin-text);
   font-size: 14px;
   line-height: 1;
   min-height: auto;
@@ -1330,7 +1339,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 .login-form--platform .ant-input:hover,
 .login-form--platform .ant-input-affix-wrapper:focus,
 .login-form--platform .ant-input:focus {
-  border-color: #aac2dd;
+  border-color: color-mix(in srgb, var(--admin-accent) 58%, var(--admin-stroke));
 }
 
 .login-form--platform .ant-input-affix-wrapper-focused,
@@ -1340,29 +1349,118 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-form--platform .ant-input-prefix {
-  color: #3d7fe7;
+  color: var(--admin-accent);
   font-size: 16px;
   margin-inline-end: 4px;
 }
 
 .login-form--platform .ant-input-password-icon {
-  color: #8f96a1;
+  color: var(--admin-text-muted);
   font-size: 16px;
 }
 
 .login-submit.ant-btn {
-  background: #1677ff;
+  background: var(--admin-accent);
   border: 0;
   border-radius: 6px;
   box-shadow: none;
   font-size: 14px;
-  font-weight: 400;
+  color: #34281a;
+  font-weight: 600;
   height: 40px;
 }
 
 .login-submit.ant-btn:hover,
 .login-submit.ant-btn:focus {
-  background: #4096ff;
+  background: color-mix(in srgb, var(--admin-accent) 86%, #ffffff);
+  color: #34281a;
+}
+
+:root[data-admin-theme="dark"] .login-shell {
+  --login-accent-rgb: 255, 212, 125;
+  background:
+    radial-gradient(ellipse 58% 76% at 4% 2%, rgba(255, 212, 125, 0.14) 0%, rgba(255, 212, 125, 0) 72%),
+    radial-gradient(ellipse 52% 70% at 98% 96%, rgba(255, 212, 125, 0.12) 0%, rgba(255, 212, 125, 0) 76%),
+    linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
+}
+
+:root[data-admin-theme="dark"] .login-hero {
+  background: linear-gradient(145deg, rgba(28, 27, 23, 0.98), rgba(15, 14, 12, 0.96));
+}
+
+:root[data-admin-theme="dark"] .login-shell::after {
+  background: rgba(255, 212, 125, 0.1);
+}
+
+:root[data-admin-theme="dark"] .workspace-selection-shell {
+  background:
+    radial-gradient(circle at 12% 14%, rgba(255, 212, 125, 0.12), transparent 30%),
+    radial-gradient(circle at 88% 10%, rgba(255, 255, 255, 0.05), transparent 26%),
+    linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
+}
+
+:root[data-admin-theme="dark"] .workspace-selection-shell::after {
+  background: rgba(255, 212, 125, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-admin-theme="light"]) .login-shell {
+    --login-accent-rgb: 255, 212, 125;
+    background:
+      radial-gradient(ellipse 58% 76% at 4% 2%, rgba(255, 212, 125, 0.14) 0%, rgba(255, 212, 125, 0) 72%),
+      radial-gradient(ellipse 52% 70% at 98% 96%, rgba(255, 212, 125, 0.12) 0%, rgba(255, 212, 125, 0) 76%),
+      linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
+  }
+
+  :root:not([data-admin-theme="light"]) .login-hero {
+    background: linear-gradient(145deg, rgba(28, 27, 23, 0.98), rgba(15, 14, 12, 0.96));
+  }
+
+  :root:not([data-admin-theme="light"]) .login-shell::after {
+    background: rgba(255, 212, 125, 0.1);
+  }
+
+  :root:not([data-admin-theme="light"]) .workspace-selection-shell {
+    background:
+      radial-gradient(circle at 12% 14%, rgba(255, 212, 125, 0.12), transparent 30%),
+      radial-gradient(circle at 88% 10%, rgba(255, 255, 255, 0.05), transparent 26%),
+      linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
+  }
+
+  :root:not([data-admin-theme="light"]) .workspace-selection-shell::after {
+    background: rgba(255, 212, 125, 0.08);
+  }
+}
+
+@keyframes aicrm-login-drift-primary {
+  0% {
+    opacity: 0.72;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(9vw, 7vh, 0) scale(1.08);
+  }
+}
+
+@keyframes aicrm-login-drift-secondary {
+  0% {
+    opacity: 0.66;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0.94;
+    transform: translate3d(-8vw, -6vh, 0) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-shell::before,
+  .login-shell::after {
+    animation: none;
+  }
 }
 
 .login-footer {
@@ -1387,9 +1485,9 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .workspace-selection-shell {
   background:
-    radial-gradient(circle at 12% 14%, rgba(22, 119, 255, 0.12), transparent 28%),
-    radial-gradient(circle at 88% 10%, rgba(255, 255, 255, 0.72), transparent 24%),
-    linear-gradient(180deg, #edf4fb 0%, #f5f7fa 46%, #eef3f9 100%);
+    radial-gradient(circle at 12% 14%, var(--admin-accent-soft), transparent 30%),
+    radial-gradient(circle at 88% 10%, rgba(255, 252, 247, 0.72), transparent 26%),
+    linear-gradient(180deg, #fbf7ef 0%, var(--admin-content-bg) 46%, #efe1cf 100%);
   min-height: 100vh;
   overflow: hidden;
   padding: 28px 24px;
@@ -1405,7 +1503,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-shell::before {
-  background: rgba(22, 119, 255, 0.08);
+  background: var(--admin-accent-soft);
   height: 360px;
   left: -130px;
   top: -130px;
@@ -1413,7 +1511,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-shell::after {
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 252, 247, 0.65);
   bottom: -180px;
   height: 420px;
   right: -140px;
@@ -1434,11 +1532,11 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 .workspace-selection-header {
   align-items: center;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.92)),
-    radial-gradient(circle at 92% 18%, rgba(22, 119, 255, 0.13), transparent 24%);
-  border: 1px solid rgba(22, 119, 255, 0.08);
+    linear-gradient(135deg, var(--admin-surface-solid), rgba(241, 230, 216, 0.92)),
+    radial-gradient(circle at 92% 18%, var(--admin-accent-soft), transparent 24%);
+  border: 1px solid var(--admin-stroke);
   border-radius: 16px;
-  box-shadow: 0 18px 48px rgba(43, 72, 103, 0.08);
+  box-shadow: var(--admin-shadow-soft);
   display: flex;
   gap: 18px;
   justify-content: space-between;
@@ -1456,14 +1554,14 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-header .ant-typography:last-child {
-  color: #475569;
+  color: var(--admin-text-muted);
   max-width: 720px;
 }
 
 .workspace-selection-user-chip {
   align-items: center;
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px solid #edf1f7;
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
   border-radius: 14px;
   display: inline-flex;
   flex: 0 0 auto;
@@ -1473,7 +1571,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-eyebrow {
-  color: #1677ff;
+  color: var(--admin-accent);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -1489,10 +1587,10 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .workspace-selection-aside,
 .workspace-selection-panel {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid #e8eef6;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-stroke);
   border-radius: 16px;
-  box-shadow: 0 18px 48px rgba(43, 72, 103, 0.08);
+  box-shadow: var(--admin-shadow-soft);
 }
 
 .workspace-selection-aside {
@@ -1510,17 +1608,17 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-account-panel {
-  background: #fbfdff;
-  border: 1px solid #edf1f7;
+  background: var(--admin-surface-soft);
+  border: 1px solid var(--admin-stroke);
   border-radius: 14px;
   padding: 14px;
 }
 
 .workspace-selection-avatar {
   align-items: center;
-  background: #e8f2ff;
+  background: var(--admin-accent-soft);
   border-radius: 999px;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: inline-flex;
   height: 36px;
   justify-content: center;
@@ -1550,7 +1648,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 .workspace-selection-summary-row,
 .workspace-selection-type-row {
   align-items: center;
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--admin-stroke);
   border-radius: 12px;
   display: flex;
   justify-content: space-between;
@@ -1559,19 +1657,19 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-summary-row {
-  background: #f5f8fc;
-  color: #475569;
+  background: var(--admin-surface-soft);
+  color: var(--admin-text-muted);
 }
 
 .workspace-selection-summary-row strong {
-  color: #152a41;
+  color: var(--admin-text);
   font-size: 20px;
   line-height: 1;
 }
 
 .workspace-selection-type-row {
   background: transparent;
-  color: #334155;
+  color: var(--admin-text-muted);
   cursor: pointer;
   font: inherit;
   gap: 10px;
@@ -1581,8 +1679,8 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .workspace-selection-type-row:hover,
 .workspace-selection-type-row--active {
-  background: #f5f9ff;
-  border-color: #b8d6ff;
+  background: var(--admin-accent-soft);
+  border-color: var(--admin-accent);
 }
 
 .workspace-selection-type-row > span:nth-child(2) {
@@ -1591,15 +1689,15 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-type-row strong {
-  color: #152a41;
+  color: var(--admin-text);
 }
 
 .workspace-selection-type-icon {
   align-items: center;
-  background: #fff;
-  border: 1px solid #e4ebf5;
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
   border-radius: 10px;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: inline-flex;
   flex: 0 0 auto;
   height: 34px;
@@ -1612,7 +1710,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-selection-type-icon--agency {
-  color: #1677ff;
+  color: var(--admin-accent);
 }
 
 .workspace-selection-type-icon--enterprise {
@@ -1621,7 +1719,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .workspace-selection-toolbar {
   align-items: center;
-  border-bottom: 1px solid #edf1f7;
+  border-bottom: 1px solid var(--admin-stroke);
   display: flex;
   gap: 20px;
   justify-content: space-between;
@@ -1784,14 +1882,14 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-select-group {
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--admin-stroke);
   border-radius: 14px;
   overflow: hidden;
 }
 
 .workspace-select-group-header {
   align-items: center;
-  border-bottom: 1px solid #edf1f7;
+  border-bottom: 1px solid var(--admin-stroke);
   display: grid;
   gap: 12px;
   grid-template-columns: 34px minmax(0, 1fr) auto;
@@ -1799,15 +1897,15 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-select-group-header--platform {
-  background: linear-gradient(90deg, rgba(114, 46, 209, 0.08), #fbfdff);
+  background: linear-gradient(90deg, rgba(114, 46, 209, 0.08), var(--admin-surface-soft));
 }
 
 .workspace-select-group-header--agency {
-  background: linear-gradient(90deg, rgba(22, 119, 255, 0.08), #fbfdff);
+  background: linear-gradient(90deg, var(--admin-accent-soft), var(--admin-surface-soft));
 }
 
 .workspace-select-group-header--enterprise {
-  background: linear-gradient(90deg, rgba(19, 194, 194, 0.08), #fbfdff);
+  background: linear-gradient(90deg, rgba(19, 194, 194, 0.08), var(--admin-surface-soft));
 }
 
 .workspace-select-group-header h5.ant-typography {
@@ -1819,14 +1917,14 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-select-rows {
-  background: #fff;
+  background: var(--admin-surface-solid);
 }
 
 .workspace-select-row {
   align-items: center;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid #f2f5f9;
+  border-bottom: 1px solid var(--admin-stroke);
   color: inherit;
   cursor: pointer;
   display: grid;
@@ -1844,7 +1942,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-select-row:hover {
-  background: #f7fbff;
+  background: var(--admin-accent-soft);
 }
 
 .workspace-select-row-main {
@@ -1882,7 +1980,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .workspace-select-row-action {
   align-items: center;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: inline-flex;
   font-weight: 600;
   gap: 6px;
@@ -1891,11 +1989,11 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-tree-list {
-  background: #fff;
+  background: var(--admin-surface-solid);
 }
 
 .workspace-tree-group {
-  border-bottom: 1px solid #edf1f7;
+  border-bottom: 1px solid var(--admin-stroke);
 }
 
 .workspace-tree-group:last-child {
@@ -1904,31 +2002,31 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .workspace-tree-group-row {
   align-items: center;
-  background: #fbfdff;
-  border-bottom: 1px solid #f0f3f8;
+  background: var(--admin-surface-soft);
+  border-bottom: 1px solid var(--admin-stroke);
   display: flex;
   gap: 12px;
   padding: 12px 18px;
 }
 
 .workspace-tree-group-row--platform {
-  background: linear-gradient(90deg, rgba(114, 46, 209, 0.08), #fbfdff);
+  background: linear-gradient(90deg, rgba(114, 46, 209, 0.08), var(--admin-surface-soft));
 }
 
 .workspace-tree-group-row--agency {
-  background: linear-gradient(90deg, rgba(22, 119, 255, 0.08), #fbfdff);
+  background: linear-gradient(90deg, var(--admin-accent-soft), var(--admin-surface-soft));
 }
 
 .workspace-tree-group-row--enterprise {
-  background: linear-gradient(90deg, rgba(19, 194, 194, 0.08), #fbfdff);
+  background: linear-gradient(90deg, rgba(19, 194, 194, 0.08), var(--admin-surface-soft));
 }
 
 .workspace-tree-node-icon {
   align-items: center;
-  background: #fff;
-  border: 1px solid #e4ebf5;
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
   border-radius: 10px;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: inline-flex;
   height: 32px;
   justify-content: center;
@@ -1951,7 +2049,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   align-items: center;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid #f2f5f9;
+  border-bottom: 1px solid var(--admin-stroke);
   color: inherit;
   cursor: pointer;
   display: grid;
@@ -1968,7 +2066,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-tree-row:hover {
-  background: #f5f9ff;
+  background: var(--admin-accent-soft);
 }
 
 .workspace-tree-row:disabled {

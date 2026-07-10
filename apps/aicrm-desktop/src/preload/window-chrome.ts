@@ -11,45 +11,13 @@ const WINDOW_CHROME_CSS = `
 :root {
   --aicrm-desktop-topbar-height: 60px;
   --aicrm-window-controls-width: 138px;
-  --aicrm-window-accent: #d49a3d;
-  --aicrm-window-border: rgba(221, 182, 113, 0.24);
-  --aicrm-window-content-bg: #f7efe4;
-  --aicrm-window-control-hover: #fcf6ed;
-  --aicrm-window-control-active: #f1e6d8;
-  --aicrm-window-text: #34281a;
-  --aicrm-window-text-muted: rgba(79, 59, 36, 0.72);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --aicrm-window-accent: #ffd47d;
-    --aicrm-window-border: rgba(255, 212, 125, 0.16);
-    --aicrm-window-content-bg: #050505;
-    --aicrm-window-control-hover: rgba(255, 255, 255, 0.12);
-    --aicrm-window-control-active: rgba(255, 255, 255, 0.18);
-    --aicrm-window-text: #ffffff;
-    --aicrm-window-text-muted: rgba(255, 255, 255, 0.66);
-  }
-}
-
-:root[data-admin-theme="light"] {
-  --aicrm-window-accent: #d49a3d;
-  --aicrm-window-border: rgba(221, 182, 113, 0.24);
-  --aicrm-window-content-bg: #f7efe4;
-  --aicrm-window-control-hover: #fcf6ed;
-  --aicrm-window-control-active: #f1e6d8;
-  --aicrm-window-text: #34281a;
-  --aicrm-window-text-muted: rgba(79, 59, 36, 0.72);
-}
-
-:root[data-admin-theme="dark"] {
-  --aicrm-window-accent: #ffd47d;
-  --aicrm-window-border: rgba(255, 212, 125, 0.16);
-  --aicrm-window-content-bg: #050505;
-  --aicrm-window-control-hover: rgba(255, 255, 255, 0.12);
-  --aicrm-window-control-active: rgba(255, 255, 255, 0.18);
-  --aicrm-window-text: #ffffff;
-  --aicrm-window-text-muted: rgba(255, 255, 255, 0.66);
+  --aicrm-window-accent: var(--admin-accent, #d49a3d);
+  --aicrm-window-border: var(--admin-stroke, rgba(221, 182, 113, 0.24));
+  --aicrm-window-content-bg: var(--admin-content-bg, #f7efe4);
+  --aicrm-window-control-hover: var(--admin-surface-soft, #fcf6ed);
+  --aicrm-window-control-active: var(--admin-header-bg, #f1e6d8);
+  --aicrm-window-text: var(--admin-text, #34281a);
+  --aicrm-window-text-muted: var(--admin-text-muted, rgba(79, 59, 36, 0.72));
 }
 
 html.aicrm-desktop-window-root,
@@ -61,7 +29,8 @@ body.aicrm-desktop-window-chrome-enabled {
 
 body.aicrm-desktop-window-chrome-enabled .app-header,
 body.aicrm-desktop-window-chrome-enabled .global-account-header,
-body.aicrm-desktop-window-chrome-enabled .workspace-selection-header {
+body.aicrm-desktop-window-chrome-enabled .workspace-selection-header,
+body.aicrm-desktop-window-chrome-enabled .desktop-title-bar {
   -webkit-app-region: drag;
 }
 
@@ -199,6 +168,11 @@ body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions {
 .app-header .aicrm-window-controls {
   height: var(--aicrm-desktop-topbar-height);
   margin-right: -22px;
+}
+
+.desktop-title-bar .aicrm-window-controls {
+  height: var(--aicrm-desktop-topbar-height);
+  margin: 0 -20px 0 8px;
 }
 
 .global-account-header .aicrm-window-controls,
@@ -386,7 +360,8 @@ body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions {
 
 #${FLOATING_CHROME_ID} .aicrm-window-controls {
   align-self: stretch;
-  background: rgba(255, 249, 236, 0.82);
+  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--aicrm-window-content-bg) 82%, transparent);
   border: 1px solid var(--aicrm-window-border);
   border-radius: 0 0 0 10px;
   border-right: 0;
@@ -403,13 +378,6 @@ body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions {
   border-radius: 0;
   box-shadow: none;
   height: var(--aicrm-desktop-topbar-height);
-}
-
-@media (prefers-color-scheme: dark) {
-  #${FLOATING_CHROME_ID} .aicrm-window-controls {
-    background: rgba(23, 23, 23, 0.86);
-    box-shadow: none;
-  }
 }
 `;
 
@@ -447,7 +415,7 @@ function updateChromeState(controls: HTMLElement, state: DesktopWindowState): vo
   controls.classList.toggle("is-maximized", state.isMaximized);
   const toggleButton = controls.querySelector<HTMLButtonElement>('button[data-window-action="toggle-maximize"]');
   if (!toggleButton) return;
-  const label = state.isMaximized ? "Restore window" : "Maximize window";
+  const label = state.isMaximized ? "还原窗口" : "最大化窗口";
   toggleButton.setAttribute("aria-label", label);
   toggleButton.title = label;
 }
@@ -507,13 +475,13 @@ function createWindowControls(): HTMLElement {
   controls.className = "aicrm-window-controls";
   controls.style.setProperty("-webkit-app-region", "no-drag");
   controls.innerHTML = `
-    <button class="aicrm-window-control" type="button" aria-label="Minimize window" title="Minimize window" data-window-action="minimize">
+    <button class="aicrm-window-control" type="button" aria-label="最小化窗口" title="最小化窗口" data-window-action="minimize">
       <span class="aicrm-window-icon aicrm-window-icon-minimize" aria-hidden="true"></span>
     </button>
-    <button class="aicrm-window-control" type="button" aria-label="Maximize window" title="Maximize window" data-window-action="toggle-maximize">
+    <button class="aicrm-window-control" type="button" aria-label="最大化窗口" title="最大化窗口" data-window-action="toggle-maximize">
       <span class="aicrm-window-icon aicrm-window-icon-maximize" aria-hidden="true"></span>
     </button>
-    <button class="aicrm-window-control aicrm-window-control-close" type="button" aria-label="Close window" title="Close window" data-window-action="close">
+    <button class="aicrm-window-control aicrm-window-control-close" type="button" aria-label="关闭窗口" title="关闭窗口" data-window-action="close">
       <span class="aicrm-window-icon aicrm-window-icon-close" aria-hidden="true"></span>
     </button>
   `;
@@ -737,7 +705,7 @@ function bindDoubleClickToToggle(host: HTMLElement): void {
 function resolveManualWindowDragHost(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof HTMLElement)) return null;
   return target.closest<HTMLElement>(
-    ".app-header, .global-account-header, .workspace-selection-header, .ant-drawer.ant-drawer-open .ant-drawer-header"
+    ".app-header, .global-account-header, .workspace-selection-header, .desktop-title-bar, .ant-drawer.ant-drawer-open .ant-drawer-header"
   );
 }
 
@@ -791,6 +759,11 @@ function resolveIntegratedTarget(): ChromeTarget | null {
   const workspaceHeader = document.querySelector<HTMLElement>(".workspace-selection-header");
   if (workspaceHeader) {
     return { host: workspaceHeader, mount: workspaceHeader };
+  }
+
+  const desktopTitleBar = document.querySelector<HTMLElement>(".desktop-title-bar");
+  if (desktopTitleBar) {
+    return { host: desktopTitleBar, mount: desktopTitleBar };
   }
 
   return null;

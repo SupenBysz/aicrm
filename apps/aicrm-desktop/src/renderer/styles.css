@@ -1,7 +1,18 @@
 :root {
-  background: #f5f7fa;
-  color: #172033;
-  font-family: "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --admin-accent: #d49a3d;
+  --admin-accent-soft: rgba(212, 154, 61, 0.14);
+  --admin-divider: rgba(210, 168, 95, 0.18);
+  --admin-stroke: rgba(221, 182, 113, 0.24);
+  --admin-header-bg: linear-gradient(180deg, #f7efe4 0%, #f1e6d8 100%);
+  --admin-surface: rgba(255, 250, 243, 0.96);
+  --admin-surface-solid: rgba(255, 252, 247, 0.98);
+  --admin-surface-soft: rgba(252, 246, 237, 0.96);
+  --admin-content-bg: #f7efe4;
+  --admin-text: #34281a;
+  --admin-text-muted: rgba(79, 59, 36, 0.72);
+  background: var(--admin-content-bg);
+  color: var(--admin-text);
+  font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
 }
 
 * {
@@ -33,17 +44,17 @@ body {
 }
 
 .desktop-shell {
-  background: #f5f7fa;
+  background: var(--admin-content-bg);
   min-height: 100vh;
 }
 
 .desktop-title-bar {
   -webkit-app-region: drag;
   align-items: center;
-  background: #ffffff;
-  border-bottom: 1px solid #e8edf5;
+  background: var(--admin-header-bg);
+  border-bottom: 1px solid var(--admin-divider);
   display: flex;
-  height: 72px;
+  height: 60px;
   justify-content: space-between;
   padding: 0 20px;
 }
@@ -62,9 +73,9 @@ body {
 
 .desktop-title-icon {
   align-items: center;
-  background: #e6f4ff;
+  background: var(--admin-accent-soft);
   border-radius: 8px;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: inline-flex;
   height: 36px;
   justify-content: center;
@@ -77,21 +88,21 @@ body {
 }
 
 .desktop-title {
-  color: #172033;
+  color: var(--admin-text);
   font-size: 16px;
   font-weight: 700;
 }
 
 .desktop-subtitle {
-  color: #64748b;
+  color: var(--admin-text-muted);
   font-size: 12px;
 }
 
 .desktop-user {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
   border-radius: 999px;
-  color: #334155;
+  color: var(--admin-text-muted);
   display: inline-block;
   font-size: 13px;
   max-width: 180px;
@@ -102,9 +113,9 @@ body {
 }
 
 .desktop-sider {
-  background: #ffffff !important;
-  border-right: 1px solid #e8edf5;
-  min-height: calc(100vh - 72px);
+  background: var(--admin-surface-solid) !important;
+  border-right: 1px solid var(--admin-divider);
+  min-height: calc(100vh - 60px);
   padding: 12px 0;
   position: relative;
 }
@@ -121,7 +132,7 @@ body {
 }
 
 .desktop-content {
-  min-height: calc(100vh - 72px);
+  min-height: calc(100vh - 60px);
   padding: 24px;
 }
 
@@ -143,18 +154,53 @@ body {
 .desktop-login {
   align-items: center;
   background:
-    linear-gradient(180deg, rgba(246, 250, 255, 0.96), rgba(232, 239, 248, 0.96)),
-    url("data:image/svg+xml,%3Csvg width='1200' height='800' viewBox='0 0 1200 800' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%23c5d7ef' stroke-width='1'%3E%3Cpath d='M0 120h1200M0 240h1200M0 360h1200M0 480h1200M0 600h1200M0 720h1200'/%3E%3Cpath d='M120 0v800M240 0v800M360 0v800M480 0v800M600 0v800M720 0v800M840 0v800M960 0v800M1080 0v800'/%3E%3C/g%3E%3C/svg%3E");
+    radial-gradient(ellipse 56% 72% at 6% 4%, rgba(255, 252, 247, 0.94) 0%, rgba(255, 252, 247, 0) 72%),
+    radial-gradient(ellipse 48% 64% at 96% 94%, rgba(212, 154, 61, 0.18) 0%, rgba(212, 154, 61, 0) 74%),
+    linear-gradient(145deg, #fbf7ef 0%, #f1e6d8 48%, #efe1cf 100%);
   display: flex;
+  isolation: isolate;
   min-height: 100vh;
+  overflow: hidden;
   padding: 32px;
+  position: relative;
+}
+
+.desktop-login::before,
+.desktop-login::after {
+  border-radius: 999px;
+  content: "";
+  filter: blur(24px);
+  pointer-events: none;
+  position: absolute;
+  will-change: opacity, transform;
+  z-index: -1;
+}
+
+.desktop-login::before {
+  background: rgba(212, 154, 61, 0.2);
+  height: min(52vw, 520px);
+  left: -14vw;
+  top: -20vw;
+  transform: translate3d(0, 0, 0);
+  width: min(52vw, 520px);
+  animation: aicrm-login-drift-primary 24s ease-in-out infinite alternate;
+}
+
+.desktop-login::after {
+  background: rgba(255, 252, 247, 0.8);
+  bottom: -26vw;
+  height: min(58vw, 580px);
+  right: -14vw;
+  transform: translate3d(0, 0, 0);
+  width: min(58vw, 580px);
+  animation: aicrm-login-drift-secondary 30s ease-in-out infinite alternate;
 }
 
 .desktop-login-panel {
-  background: #ffffff;
-  border: 1px solid #e8edf5;
-  border-radius: 10px;
-  box-shadow: 0 24px 64px rgba(31, 45, 61, 0.14);
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(151, 115, 62, 0.16);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   margin: 0 auto;
@@ -164,7 +210,7 @@ body {
 }
 
 .desktop-login-copy {
-  background: #edf4fb;
+  background: linear-gradient(145deg, rgba(255, 252, 247, 0.96), rgba(241, 230, 216, 0.96));
   padding: 42px;
 }
 
@@ -179,7 +225,7 @@ body {
 }
 
 .login-eyebrow {
-  color: #1677ff;
+  color: var(--admin-accent);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -196,8 +242,8 @@ body {
 
 .workspace-card {
   align-items: center;
-  background: #ffffff;
-  border: 1px solid #e8edf5;
+  background: var(--admin-surface-solid);
+  border: 1px solid var(--admin-stroke);
   border-radius: 8px;
   color: inherit;
   cursor: pointer;
@@ -210,15 +256,15 @@ body {
 }
 
 .workspace-card:hover {
-  background: #f7fbff;
-  border-color: #bad9ff;
+  background: var(--admin-surface-soft);
+  border-color: var(--admin-accent);
 }
 
 .workspace-card-icon {
   align-items: center;
-  background: #eef6ff;
+  background: var(--admin-accent-soft);
   border-radius: 8px;
-  color: #1677ff;
+  color: var(--admin-accent);
   display: inline-flex;
   height: 44px;
   justify-content: center;
@@ -230,4 +276,35 @@ body {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+@keyframes aicrm-login-drift-primary {
+  0% {
+    opacity: 0.72;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(9vw, 7vh, 0) scale(1.08);
+  }
+}
+
+@keyframes aicrm-login-drift-secondary {
+  0% {
+    opacity: 0.66;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0.94;
+    transform: translate3d(-8vw, -6vh, 0) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-login::before,
+  .desktop-login::after {
+    animation: none;
+  }
 }
