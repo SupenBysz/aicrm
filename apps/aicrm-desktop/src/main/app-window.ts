@@ -5,12 +5,6 @@ import { loadDesktopConfig } from "./config";
 import { emitWindowState } from "./ipc/window-ipc";
 import { isDesktopDebugMode, isDesktopProductionMode } from "./runtime-mode";
 
-const LOCAL_RENDERER_MODE = "local";
-
-function shouldUseLocalRenderer(): boolean {
-  return process.env.AICRM_DESKTOP_RENDERER_MODE === LOCAL_RENDERER_MODE;
-}
-
 function getUrlOrigin(url: string | undefined): string | null {
   if (!url) return null;
   try {
@@ -79,7 +73,6 @@ function bindWindowStateEvents(window: BrowserWindow): void {
 export function createMainWindow(): BrowserWindow {
   const config = loadDesktopConfig();
   const webOrigin = getUrlOrigin(config.webUrl);
-  const localRendererOrigin = getUrlOrigin(process.env.ELECTRON_RENDERER_URL);
   const window = new BrowserWindow({
     width: 1180,
     height: 760,
@@ -122,19 +115,12 @@ export function createMainWindow(): BrowserWindow {
   });
 
   window.webContents.on("will-navigate", (event, url) => {
-    const allowedOrigin = shouldUseLocalRenderer() ? localRendererOrigin : webOrigin;
-    if (isAllowedNavigation(url, allowedOrigin)) return;
+    if (isAllowedNavigation(url, webOrigin)) return;
     event.preventDefault();
     void shell.openExternal(url);
   });
 
-  if (shouldUseLocalRenderer() && process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL);
-  } else if (shouldUseLocalRenderer()) {
-    void window.loadFile(join(__dirname, "../renderer/index.html"));
-  } else {
-    void window.loadURL(config.webUrl);
-  }
+  void window.loadURL(config.webUrl);
 
   return window;
 }
