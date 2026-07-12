@@ -1,6 +1,7 @@
 go 1.25.0
 
 use (
+	./services/ky-agent-executor-service
 	./services/ky-ai-model-service
 	./services/ky-auth-service
 	./services/ky-matrix-account-service

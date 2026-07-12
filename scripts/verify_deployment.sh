@@ -22,12 +22,22 @@ check_systemd() {
   fi
 }
 
+check_agent_executor_shadow() {
+  local url="$1" body
+  echo "Checking Agent Executor shadow boundary $url"
+  body="$(curl -fsS "$url")"
+  grep -Eq '"mode"[[:space:]]*:[[:space:]]*"shadow_read_only"' <<<"$body"
+  grep -Eq '"writeEnabled"[[:space:]]*:[[:space:]]*false' <<<"$body"
+  grep -Eq '"scriptMaintenanceReady"[[:space:]]*:[[:space:]]*false' <<<"$body"
+}
+
 services=(
   ky-auth-service
   ky-org-service
   ky-membership-service
   ky-ai-model-service
   ky-matrix-account-service
+  ky-agent-executor-service
 )
 
 for service in "${services[@]}"; do
@@ -39,6 +49,7 @@ check_url "${KY_ORG_READYZ_URL:-http://127.0.0.1:18082/readyz}"
 check_url "${KY_MEMBERSHIP_READYZ_URL:-http://127.0.0.1:18083/readyz}"
 check_url "${KY_AI_MODEL_READYZ_URL:-http://127.0.0.1:18086/readyz}"
 check_url "${KY_MATRIX_ACCOUNT_READYZ_URL:-http://127.0.0.1:18085/readyz}"
+check_agent_executor_shadow "${KY_AGENT_EXECUTOR_READYZ_URL:-http://127.0.0.1:18087/readyz}"
 
 if [[ "$READYZ_ONLY" == "1" ]]; then
   echo "Readyz verification passed."

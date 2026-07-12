@@ -11,6 +11,7 @@ services=(
   ky-membership-service
   ky-ai-model-service
   ky-matrix-account-service
+  ky-agent-executor-service
 )
 
 for service in "${services[@]}"; do
