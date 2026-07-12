@@ -9,6 +9,7 @@
     "build": "turbo run build",
     "build:desktop": "pnpm --filter @ky/aicrm-desktop build",
     "lint": "turbo run lint",
+    "test:database-deploy": "bash scripts/test_deploy_database.sh",
     "typecheck": "turbo run typecheck",
     "typecheck:desktop": "pnpm --filter @ky/aicrm-desktop typecheck"
   },
