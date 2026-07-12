@@ -61,11 +61,13 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   body?: unknown;
   skipAuthRedirect?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface RequestClient {
   request<T>(path: string, options?: RequestOptions): Promise<T>;
   stream?(path: string, options?: RequestOptions): Promise<Response>;
+  subscribe?<T>(path: string, options: import("./event-stream").EventStreamOptions<T>): import("./event-stream").EventStreamSubscription;
 }
 
 export interface PluginMenuItem {
@@ -124,3 +126,5 @@ export * from "./user-context";
 export * from "./workspace-context";
 export * from "./request-context";
 export * from "./matrix-account-desktop";
+export * from "./ai-executor-desktop";
+export * from "./event-stream";

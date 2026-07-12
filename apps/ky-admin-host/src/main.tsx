@@ -2,11 +2,12 @@ import "antd/dist/reset.css";
 import "./styles.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { installMatrixAccountDesktopPort } from "@ky/admin-core";
+import { installAiExecutorDesktopPort, installMatrixAccountDesktopPort } from "@ky/admin-core";
 import { App } from "./app";
-import { matrixAccountDesktopPort } from "./desktop-client";
+import { aiExecutorDesktopPort, matrixAccountDesktopPort } from "./desktop-client";
 
 installMatrixAccountDesktopPort(matrixAccountDesktopPort);
+installAiExecutorDesktopPort(aiExecutorDesktopPort);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

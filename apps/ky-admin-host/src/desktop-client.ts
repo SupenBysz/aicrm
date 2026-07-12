@@ -1,5 +1,7 @@
 import type {
+  AiExecutorDesktopPort,
   AiExecutorDesktopBridgeContract,
+  CodexAuthorizationDesktopBridgeContract,
   MatrixAccountDesktopBridgeContract,
   MatrixAccountDesktopPort
 } from "@ky/admin-core";
@@ -25,6 +27,9 @@ export interface DesktopBridgeLike {
   };
   matrixAccount?: MatrixAccountDesktopBridgeContract;
   aiExecutor?: AiExecutorDesktopBridgeContract;
+  codex?: {
+    authorization?: CodexAuthorizationDesktopBridgeContract;
+  };
 }
 
 export interface DesktopWindowState {
@@ -87,6 +92,14 @@ export const matrixAccountDesktopPort: MatrixAccountDesktopPort = {
   },
   getAiExecutorBridge() {
     return getDesktopBridge()?.aiExecutor ?? null;
+  }
+};
+
+/** Host-only resolver for the ticket-bound Bridge v2 authorization surface. */
+export const aiExecutorDesktopPort: AiExecutorDesktopPort = {
+  isDesktopRuntime: isDesktopClientMode,
+  getAuthorizationBridge() {
+    return getDesktopBridge()?.codex?.authorization ?? null;
   }
 };
 
