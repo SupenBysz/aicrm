@@ -56,6 +56,12 @@ func (f *runtimeStoreFake) QuarantineServerCredential(_ context.Context, session
 	}
 	return store.AuthorizationSessionProjection{ID: sessionID, Status: status}, true, nil
 }
+func (f *runtimeStoreFake) ClaimServerCredentialRecovery(_ context.Context, item store.AuthorizationRecoveryItem, owner string) (store.AuthorizationRecoveryItem, error) {
+	item.OwnerInstanceID = owner
+	item.SessionRevision++
+	item.LeaseEpoch++
+	return item, nil
+}
 func (f *runtimeStoreFake) FailAuthorizationSession(_ context.Context, _ string, _ string, _ string, code string) (store.AuthorizationSessionProjection, error) {
 	f.mu.Lock()
 	f.failed = code
@@ -277,6 +283,173 @@ func TestManagerQuarantinesPromotedRevisionWhenCOWAccountChanges(t *testing.T) {
 	}
 	if info, err := os.Lstat(quarantine); err != nil || !info.IsDir() {
 		t.Fatalf("failed revision was not quarantined: %s err=%v", quarantine, err)
+	}
+}
+
+func TestManagerRecoversPreparedStagingThroughCOWVerification(t *testing.T) {
+	credentials, err := credentialfs.New(filepath.Join(t.TempDir(), "executors"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging, err := credentials.CreateStaging("executor_1", "session_recovery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "auth.json"), []byte(`{"credential":"test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := credentialfs.DigestTree(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := "person@example.com"
+	fingerprint, _, _ := safeAccount(&appserver.Account{Type: "chatgpt", Email: &email, PlanType: "plus"})
+	revision := int64(1)
+	runtimeStore := &runtimeStoreFake{done: make(chan struct{})}
+	launcher := &fakeLauncher{complete: make(chan struct{})}
+	manager, err := New(runtimeStore, launcher, credentials, Config{OwnerInstanceID: "owner_after_restart", CodexVersion: "0.144.1", RuntimeBindingID: "server_1", RuntimeBindingRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = manager.Recover(context.Background(), []store.AuthorizationRecoveryItem{{
+		SessionID: "session_recovery", ExecutorID: "executor_1", SessionStatus: "verifying",
+		SessionRevision: 4, OwnerInstanceID: "owner_before_restart",
+		PreparedCredentialRevision: &revision, OperationID: "auth_session_recovery",
+		BindingStatus: "prepared", BindingDigest: digest,
+		DigestAlgorithm:    "aicrm-credential-tree-rfc8785-nfc-v1",
+		AccountFingerprint: fingerprint, PlanType: "plus",
+		RuntimeBindingID: "server_1", RuntimeBindingRevision: 1, LeaseEpoch: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeStore.mu.Lock()
+	activated, failed := runtimeStore.activated, runtimeStore.failed
+	runtimeStore.mu.Unlock()
+	if failed != "" || activated.SessionID != "session_recovery" || activated.Preparation.LeaseEpoch != 2 {
+		t.Fatalf("activated=%#v failed=%q", activated, failed)
+	}
+	launcher.mu.Lock()
+	launches := launcher.launches
+	refreshTokens := append([]bool(nil), launcher.refreshTokens...)
+	launcher.mu.Unlock()
+	if launches != 1 || len(refreshTokens) != 1 || refreshTokens[0] {
+		t.Fatalf("recovery launches=%d refreshTokens=%v", launches, refreshTokens)
+	}
+	revisionPath, err := credentials.RevisionPath("executor_1", revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := credentialfs.ValidateReadOnlyTree(revisionPath); err != nil {
+		t.Fatalf("recovered revision invalid: %v", err)
+	}
+}
+
+func TestManagerRecoveryQuarantinesAmbiguousCandidate(t *testing.T) {
+	credentials, err := credentialfs.New(filepath.Join(t.TempDir(), "executors"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging, err := credentials.CreateStaging("executor_1", "session_ambiguous")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "auth.json"), []byte("candidate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := credentialfs.DigestTree(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := int64(1)
+	revisionPath, err := credentials.RevisionPath("executor_1", revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(revisionPath, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	runtimeStore := &runtimeStoreFake{done: make(chan struct{})}
+	manager, err := New(runtimeStore, &fakeLauncher{complete: make(chan struct{})}, credentials, Config{OwnerInstanceID: "owner_after_restart", CodexVersion: "0.144.1", RuntimeBindingID: "server_1", RuntimeBindingRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = manager.Recover(context.Background(), []store.AuthorizationRecoveryItem{{
+		SessionID: "session_ambiguous", ExecutorID: "executor_1", SessionStatus: "verifying",
+		SessionRevision: 4, OwnerInstanceID: "owner_before_restart",
+		PreparedCredentialRevision: &revision, OperationID: "auth_session_ambiguous",
+		BindingStatus: "committing", BindingDigest: digest,
+		DigestAlgorithm:    "aicrm-credential-tree-rfc8785-nfc-v1",
+		AccountFingerprint: strings.Repeat("a", 64), PlanType: "plus",
+		RuntimeBindingID: "server_1", RuntimeBindingRevision: 1, LeaseEpoch: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeStore.mu.Lock()
+	failed, activated := runtimeStore.failed, runtimeStore.activated
+	runtimeStore.mu.Unlock()
+	if failed != "credential_commit_failed" || activated.SessionID != "" {
+		t.Fatalf("failed=%q activated=%#v", failed, activated)
+	}
+	for _, name := range []string{
+		"failed_staging_1_" + digestString("session_ambiguous")[:24],
+		"failed_revision_1_" + digestString("session_ambiguous")[:24],
+	} {
+		path, err := credentials.QuarantinePath("executor_1", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info, err := os.Lstat(path); err != nil || !info.IsDir() {
+			t.Fatalf("ambiguous candidate was not quarantined: %s err=%v", path, err)
+		}
+	}
+}
+
+func TestManagerRecoversCommittingRevision(t *testing.T) {
+	credentials, err := credentialfs.New(filepath.Join(t.TempDir(), "executors"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging, err := credentials.CreateStaging("executor_1", "session_committing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "auth.json"), []byte(`{"credential":"test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := credentialfs.DigestTree(staging)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := credentials.Promote("executor_1", "session_committing", 1, digest); err != nil {
+		t.Fatal(err)
+	}
+	email := "person@example.com"
+	fingerprint, _, _ := safeAccount(&appserver.Account{Type: "chatgpt", Email: &email, PlanType: "plus"})
+	revision := int64(1)
+	runtimeStore := &runtimeStoreFake{done: make(chan struct{})}
+	manager, err := New(runtimeStore, &fakeLauncher{complete: make(chan struct{})}, credentials, Config{OwnerInstanceID: "owner_after_restart", CodexVersion: "0.144.1", RuntimeBindingID: "server_1", RuntimeBindingRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = manager.Recover(context.Background(), []store.AuthorizationRecoveryItem{{
+		SessionID: "session_committing", ExecutorID: "executor_1", SessionStatus: "verifying",
+		SessionRevision: 4, OwnerInstanceID: "owner_before_restart",
+		PreparedCredentialRevision: &revision, OperationID: "auth_session_committing",
+		BindingStatus: "committing", BindingDigest: digest,
+		DigestAlgorithm:    "aicrm-credential-tree-rfc8785-nfc-v1",
+		AccountFingerprint: fingerprint, PlanType: "plus",
+		RuntimeBindingID: "server_1", RuntimeBindingRevision: 1, LeaseEpoch: 1,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeStore.mu.Lock()
+	activated, failed := runtimeStore.activated, runtimeStore.failed
+	runtimeStore.mu.Unlock()
+	if failed != "" || activated.SessionID != "session_committing" {
+		t.Fatalf("activated=%#v failed=%q", activated, failed)
 	}
 }
 

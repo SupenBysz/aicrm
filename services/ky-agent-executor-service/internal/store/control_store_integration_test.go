@@ -233,12 +233,34 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := control.RecoverInterruptedAuthorizationSessions(ctx, "owner_after_prepared_restart"); !errors.Is(err, ErrCredentialRecoveryRequired) {
-		t.Fatalf("prepared recovery did not fail closed: %v", err)
+	recoveryItems, err := control.RecoverInterruptedAuthorizationSessions(ctx, "owner_after_prepared_restart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var preparedItem AuthorizationRecoveryItem
+	for _, item := range recoveryItems {
+		if item.SessionID == preparedVerifying.ID {
+			preparedItem = item
+			break
+		}
+	}
+	if preparedItem.SessionID == "" || preparedItem.BindingStatus != "prepared" || preparedItem.BindingDigest != preparedCandidate.BindingDigest {
+		t.Fatalf("prepared recovery item=%#v", preparedItem)
+	}
+	if _, err := control.ClaimServerCredentialRecovery(ctx, preparedItem, "owner_after_prepared_restart"); !errors.Is(err, ErrExecutorBusy) {
+		t.Fatalf("unexpired recovery lease was claimed: %v", err)
+	}
+	if _, err := control.db.ExecContext(ctx, `UPDATE ky_ai_executor_operation_lease SET lease_expires_at=now()-interval '1 second' WHERE executor_id=$1`, preparedCandidate.ExecutorID); err != nil {
+		t.Fatal(err)
+	}
+	claimedItem, err := control.ClaimServerCredentialRecovery(ctx, preparedItem, "owner_after_prepared_restart")
+	if err != nil || claimedItem.LeaseEpoch != preparedItem.LeaseEpoch+1 || claimedItem.SessionRevision != preparedItem.SessionRevision+1 {
+		t.Fatalf("claimed=%#v err=%v", claimedItem, err)
 	}
 	stillVerifying, err := control.GetAuthorizationSession(ctx, preparedVerifying.ID)
-	if err != nil || stillVerifying.Status != "verifying" || stillVerifying.PreparedCredentialRev == nil {
-		t.Fatalf("prepared candidate changed during fail-closed recovery: %#v err=%v", stillVerifying, err)
+	if err != nil || stillVerifying.Status != "verifying" || stillVerifying.PreparedCredentialRev == nil ||
+		stillVerifying.Revision != claimedItem.SessionRevision {
+		t.Fatalf("prepared candidate claim mismatch: %#v err=%v", stillVerifying, err)
 	}
 	staleCandidate := preparedCandidate
 	staleCandidate.OwnerInstanceID = "stale_prepared_owner"
@@ -246,7 +268,14 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 		"auth_prepared_operation_"+suffix, "failed", "credential_commit_failed"); !errors.Is(err, ErrExecutorFenced) {
 		t.Fatalf("stale owner quarantined candidate: %v", err)
 	}
-	quarantined, shouldQuarantineFS, err := control.QuarantineServerCredential(ctx, preparedVerifying.ID, preparedCandidate,
+	claimedPreparation := CredentialPreparation{
+		ExecutorID: claimedItem.ExecutorID, OwnerInstanceID: claimedItem.OwnerInstanceID,
+		CredentialRevision: *claimedItem.PreparedCredentialRevision,
+		SessionRevision:    claimedItem.SessionRevision, LeaseEpoch: claimedItem.LeaseEpoch,
+		SourceCredentialRevision: claimedItem.SourceCredentialRevision,
+		RevocationEpoch:          claimedItem.RevocationEpoch, BindingDigest: claimedItem.BindingDigest,
+	}
+	quarantined, shouldQuarantineFS, err := control.QuarantineServerCredential(ctx, preparedVerifying.ID, claimedPreparation,
 		"auth_prepared_operation_"+suffix, "failed", "credential_commit_failed")
 	if err != nil || !shouldQuarantineFS || quarantined.Status != "failed" {
 		t.Fatalf("quarantined=%#v cleanup=%v err=%v", quarantined, shouldQuarantineFS, err)

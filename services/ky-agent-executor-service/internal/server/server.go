@@ -107,6 +107,9 @@ func (s *Server) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if err := runtime.Recover(ctx, recoveryItems); err != nil {
+			return err
+		}
 		s.authRuntime = runtime
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -165,6 +168,9 @@ func recoverAuthorizationCredentialTrees(credentials *credentialfs.Manager, item
 					}
 				}
 			}
+			continue
+		}
+		if item.BindingStatus != "quarantined" {
 			continue
 		}
 		revision, err := credentials.RevisionPath(item.ExecutorID, *item.PreparedCredentialRevision)

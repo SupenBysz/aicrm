@@ -26,8 +26,21 @@ const (
 type AuthorizationRecoveryItem struct {
 	SessionID                  string
 	ExecutorID                 string
+	SessionStatus              string
+	SessionRevision            int64
+	OwnerInstanceID            string
 	PreparedCredentialRevision *int64
 	OperationID                string
+	BindingStatus              string
+	BindingDigest              string
+	DigestAlgorithm            string
+	AccountFingerprint         string
+	PlanType                   string
+	RuntimeBindingID           string
+	RuntimeBindingRevision     int64
+	LeaseEpoch                 int64
+	SourceCredentialRevision   int64
+	RevocationEpoch            int64
 }
 
 type AuthorizationSessionProjection struct {
@@ -887,8 +900,8 @@ func (s *ControlStore) FailAuthorizationSession(ctx context.Context, sessionID, 
 // RecoverInterruptedAuthorizationSessions is called by the single writer
 // before it accepts HTTP traffic. A device-code challenge and its App Server
 // stdio channel cannot survive process loss, so pre-prepare sessions are
-// fenced, audited and made retryable through a new session. Prepared or
-// committing candidates stop startup until the locked recovery matrix runs.
+// fenced, audited and made retryable through a new session. Prepared and
+// committing candidates are returned for the filesystem recovery matrix.
 func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Context, _ string) ([]AuthorizationRecoveryItem, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -896,9 +909,10 @@ func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Conte
 	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id,executor_id,current_sequence,revision,prepared_credential_revision,operation_id
+		SELECT id,executor_id,current_sequence,revision,runtime_owner_instance_id,operation_id
 		FROM ky_ai_executor_authorization_session
 		WHERE runtime_type='server' AND status IN ('starting','waiting_user','verifying')
+		  AND prepared_credential_revision IS NULL
 		ORDER BY created_at FOR UPDATE
 	`)
 	if err != nil {
@@ -912,25 +926,15 @@ func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Conte
 	pending := []pendingRecovery{}
 	for rows.Next() {
 		var current pendingRecovery
-		var prepared sql.NullInt64
 		if err := rows.Scan(&current.item.SessionID, &current.item.ExecutorID, &current.sequence,
-			&current.revision, &prepared, &current.item.OperationID); err != nil {
+			&current.revision, &current.item.OwnerInstanceID, &current.item.OperationID); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		current.item.PreparedCredentialRevision = nullableInt64(prepared)
 		pending = append(pending, current)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
-	}
-	for _, current := range pending {
-		if current.item.PreparedCredentialRevision != nil {
-			// A prepared or committing candidate must follow the locked
-			// filesystem recovery matrix. Until that recovery path completes,
-			// refuse startup without changing the session, binding or lease.
-			return nil, ErrCredentialRecoveryRequired
-		}
 	}
 	for _, current := range pending {
 		result, err := tx.ExecContext(ctx, `
@@ -949,8 +953,8 @@ func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Conte
 		if current.item.OperationID != "" {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE ky_ai_executor_operation_lease SET status='released',updated_at=now()
-				WHERE executor_id=$1 AND operation_id=$2 AND status='active'
-			`, current.item.ExecutorID, current.item.OperationID); err != nil {
+				WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3 AND status='active'
+			`, current.item.ExecutorID, current.item.OperationID, current.item.OwnerInstanceID); err != nil {
 				return nil, err
 			}
 		}
@@ -971,11 +975,12 @@ func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Conte
 		return nil, classifyControlWrite(err)
 	}
 	// Include prior interrupted sessions so a crash between the database
-	// transition and filesystem quarantine is repaired idempotently.
+	// transition and filesystem cleanup is repaired idempotently.
 	rows, err = s.db.QueryContext(ctx, `
-		SELECT id,executor_id,prepared_credential_revision,operation_id
+		SELECT id,executor_id,status,revision,runtime_owner_instance_id,operation_id
 		FROM ky_ai_executor_authorization_session
-		WHERE runtime_type='server' AND status='interrupted' AND failure_code='service_restarted'
+		WHERE runtime_type='server' AND status='interrupted'
+		  AND failure_code='service_restarted' AND prepared_credential_revision IS NULL
 		ORDER BY created_at
 	`)
 	if err != nil {
@@ -985,14 +990,214 @@ func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Conte
 	items := []AuthorizationRecoveryItem{}
 	for rows.Next() {
 		var item AuthorizationRecoveryItem
-		var prepared sql.NullInt64
-		if err := rows.Scan(&item.SessionID, &item.ExecutorID, &prepared, &item.OperationID); err != nil {
+		if err := rows.Scan(&item.SessionID, &item.ExecutorID, &item.SessionStatus,
+			&item.SessionRevision, &item.OwnerInstanceID, &item.OperationID); err != nil {
 			return nil, err
 		}
+		items = append(items, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `
+		SELECT session.id,session.executor_id,session.status,session.revision,
+		       session.runtime_owner_instance_id,session.prepared_credential_revision,
+		       session.operation_id,binding.status,binding.binding_digest,
+		       binding.digest_algorithm,binding.account_fingerprint,binding.plan_type,
+		       binding.runtime_binding_id,binding.runtime_binding_revision,
+		       binding.lease_epoch,binding.source_credential_revision,binding.revocation_epoch
+		FROM ky_ai_executor_authorization_session session
+		LEFT JOIN ky_ai_executor_credential_binding binding
+		  ON binding.executor_id=session.executor_id
+		 AND binding.revision=session.prepared_credential_revision
+		WHERE session.runtime_type='server'
+		  AND session.prepared_credential_revision IS NOT NULL
+		  AND (
+		    session.status='verifying'
+		    OR binding.status IN ('prepared','committing','quarantined')
+		  )
+		ORDER BY session.created_at
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item AuthorizationRecoveryItem
+		var prepared sql.NullInt64
+		var bindingStatus, bindingDigest, digestAlgorithm sql.NullString
+		var accountFingerprint, planType, runtimeBindingID sql.NullString
+		var runtimeBindingRevision, leaseEpoch, sourceRevision, revocationEpoch sql.NullInt64
+		if err := rows.Scan(&item.SessionID, &item.ExecutorID, &item.SessionStatus,
+			&item.SessionRevision, &item.OwnerInstanceID, &prepared, &item.OperationID,
+			&bindingStatus, &bindingDigest, &digestAlgorithm, &accountFingerprint,
+			&planType, &runtimeBindingID, &runtimeBindingRevision, &leaseEpoch,
+			&sourceRevision, &revocationEpoch); err != nil {
+			return nil, err
+		}
+		if !prepared.Valid || !bindingStatus.Valid || !bindingDigest.Valid ||
+			!digestAlgorithm.Valid || !accountFingerprint.Valid || !planType.Valid ||
+			!runtimeBindingID.Valid || !runtimeBindingRevision.Valid || !leaseEpoch.Valid ||
+			!sourceRevision.Valid || !revocationEpoch.Valid {
+			return nil, ErrCredentialRecoveryRequired
+		}
+		if item.SessionStatus == "verifying" && bindingStatus.String != "prepared" && bindingStatus.String != "committing" {
+			return nil, ErrCredentialRecoveryRequired
+		}
+		if terminalAuthorizationSessionStatus(item.SessionStatus) && bindingStatus.String != "quarantined" {
+			return nil, ErrCredentialRecoveryRequired
+		}
+		if digestAlgorithm.String != "aicrm-credential-tree-rfc8785-nfc-v1" {
+			return nil, ErrCredentialRecoveryRequired
+		}
 		item.PreparedCredentialRevision = nullableInt64(prepared)
+		item.BindingStatus = bindingStatus.String
+		item.BindingDigest = bindingDigest.String
+		item.DigestAlgorithm = digestAlgorithm.String
+		item.AccountFingerprint = accountFingerprint.String
+		item.PlanType = planType.String
+		item.RuntimeBindingID = runtimeBindingID.String
+		item.RuntimeBindingRevision = runtimeBindingRevision.Int64
+		item.LeaseEpoch = leaseEpoch.Int64
+		item.SourceCredentialRevision = sourceRevision.Int64
+		item.RevocationEpoch = revocationEpoch.Int64
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func terminalAuthorizationSessionStatus(status string) bool {
+	switch status {
+	case "succeeded", "failed", "cancelled", "expired", "interrupted", "superseded":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *ControlStore) ClaimServerCredentialRecovery(ctx context.Context, item AuthorizationRecoveryItem, newOwnerInstanceID string) (AuthorizationRecoveryItem, error) {
+	if item.PreparedCredentialRevision == nil || item.SessionStatus != "verifying" ||
+		(item.BindingStatus != "prepared" && item.BindingStatus != "committing") ||
+		newOwnerInstanceID == "" {
+		return AuthorizationRecoveryItem{}, ErrConflict
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	defer tx.Rollback()
+	var currentRevision sql.NullInt64
+	var configRevocation int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT current_credential_revision,revocation_epoch
+		FROM ky_ai_executor_config WHERE id=$1 FOR UPDATE
+	`, item.ExecutorID).Scan(&currentRevision, &configRevocation); err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	current := int64(0)
+	if currentRevision.Valid {
+		current = currentRevision.Int64
+	}
+	if current != item.SourceCredentialRevision || configRevocation != item.RevocationEpoch {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	var sessionStatus, sessionOwner, sessionOperation string
+	var sessionRevision, preparedRevision int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT status,revision,runtime_owner_instance_id,prepared_credential_revision,operation_id
+		FROM ky_ai_executor_authorization_session WHERE id=$1 FOR UPDATE
+	`, item.SessionID).Scan(&sessionStatus, &sessionRevision, &sessionOwner, &preparedRevision, &sessionOperation); err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if sessionStatus != "verifying" || sessionRevision != item.SessionRevision ||
+		preparedRevision != *item.PreparedCredentialRevision || sessionOperation != item.OperationID ||
+		sessionOwner != item.OwnerInstanceID {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	var bindingStatus, bindingDigest, digestAlgorithm string
+	var bindingLeaseEpoch, bindingSourceRevision, bindingRevocationEpoch int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT status,binding_digest,digest_algorithm,lease_epoch,
+		       source_credential_revision,revocation_epoch
+		FROM ky_ai_executor_credential_binding
+		WHERE executor_id=$1 AND revision=$2 FOR UPDATE
+	`, item.ExecutorID, *item.PreparedCredentialRevision).Scan(&bindingStatus, &bindingDigest,
+		&digestAlgorithm, &bindingLeaseEpoch, &bindingSourceRevision, &bindingRevocationEpoch); err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if bindingStatus != item.BindingStatus || bindingDigest != item.BindingDigest ||
+		digestAlgorithm != item.DigestAlgorithm || bindingLeaseEpoch != item.LeaseEpoch ||
+		bindingSourceRevision != item.SourceCredentialRevision || bindingRevocationEpoch != item.RevocationEpoch {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	var leaseOperation, leaseOwner, leaseStatus string
+	var leaseEpoch, leaseSourceRevision, leaseRevocationEpoch int64
+	var leaseExpiresAt time.Time
+	if err := tx.QueryRowContext(ctx, `
+		SELECT operation_id,owner_instance_id,status,lease_epoch,lease_expires_at,
+		       source_credential_revision,revocation_epoch
+		FROM ky_ai_executor_operation_lease WHERE executor_id=$1 FOR UPDATE
+	`, item.ExecutorID).Scan(&leaseOperation, &leaseOwner, &leaseStatus, &leaseEpoch,
+		&leaseExpiresAt, &leaseSourceRevision, &leaseRevocationEpoch); err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if leaseOperation != item.OperationID || leaseEpoch != item.LeaseEpoch ||
+		leaseSourceRevision != item.SourceCredentialRevision || leaseRevocationEpoch != item.RevocationEpoch {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	if leaseStatus == "active" && leaseExpiresAt.After(time.Now()) {
+		return AuthorizationRecoveryItem{}, ErrExecutorBusy
+	}
+	newLeaseEpoch := leaseEpoch + 1
+	result, err := tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_operation_lease
+		SET owner_instance_id=$1,lease_epoch=$2,lease_expires_at=now()+interval '30 seconds',
+		    status='active',updated_at=now()
+		WHERE executor_id=$3 AND operation_id=$4 AND owner_instance_id=$5
+		  AND lease_epoch=$6 AND source_credential_revision=$7 AND revocation_epoch=$8
+	`, newOwnerInstanceID, newLeaseEpoch, item.ExecutorID, item.OperationID,
+		leaseOwner, item.LeaseEpoch, item.SourceCredentialRevision, item.RevocationEpoch)
+	if err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_credential_binding SET lease_epoch=$1
+		WHERE executor_id=$2 AND revision=$3 AND status=$4 AND lease_epoch=$5
+		  AND operation_id=$6 AND source_credential_revision=$7 AND revocation_epoch=$8
+	`, newLeaseEpoch, item.ExecutorID, *item.PreparedCredentialRevision, item.BindingStatus,
+		item.LeaseEpoch, item.OperationID, item.SourceCredentialRevision, item.RevocationEpoch)
+	if err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_authorization_session
+		SET runtime_owner_instance_id=$1,revision=revision+1,updated_at=now()
+		WHERE id=$2 AND revision=$3 AND status='verifying'
+		  AND runtime_owner_instance_id=$4 AND prepared_credential_revision=$5 AND operation_id=$6
+	`, newOwnerInstanceID, item.SessionID, item.SessionRevision, item.OwnerInstanceID,
+		*item.PreparedCredentialRevision, item.OperationID)
+	if err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationRecoveryItem{}, ErrExecutorFenced
+	}
+	if err := insertControlOutbox(ctx, tx, "credential_binding", item.ExecutorID+":"+itoa64(*item.PreparedCredentialRevision), newLeaseEpoch, "credential_recovery_claimed", map[string]any{"executorId": item.ExecutorID, "sessionId": item.SessionID}); err != nil {
+		return AuthorizationRecoveryItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthorizationRecoveryItem{}, classifyControlWrite(err)
+	}
+	item.OwnerInstanceID = newOwnerInstanceID
+	item.SessionRevision++
+	item.LeaseEpoch = newLeaseEpoch
+	return item, nil
 }
 
 type CancelAuthorizationInput struct {

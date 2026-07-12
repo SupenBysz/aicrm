@@ -51,6 +51,18 @@ func TestPromotionIsDigestBoundNoReplaceAndReadOnly(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o400 {
 		t.Fatalf("credential file mode=%v err=%v", info.Mode().Perm(), err)
 	}
+	if err := ValidateReadOnlyTree(target); err != nil {
+		t.Fatalf("promoted revision is not read-only: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(target, "auth.json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateReadOnlyTree(target); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("writable revision accepted: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(target, "auth.json"), 0o400); err != nil {
+		t.Fatal(err)
+	}
 
 	second, err := manager.CreateStaging("executor_1", "session_2")
 	if err != nil {

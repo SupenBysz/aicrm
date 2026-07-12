@@ -35,6 +35,7 @@ type RuntimeStore interface {
 	RenewServerCredentialLease(context.Context, store.CredentialPreparation, string) error
 	ActivateServerCredential(context.Context, store.ActivateServerCredentialInput) (store.AuthorizationSessionProjection, error)
 	QuarantineServerCredential(context.Context, string, store.CredentialPreparation, string, string, string) (store.AuthorizationSessionProjection, bool, error)
+	ClaimServerCredentialRecovery(context.Context, store.AuthorizationRecoveryItem, string) (store.AuthorizationRecoveryItem, error)
 	FailAuthorizationSession(context.Context, string, string, string, string) (store.AuthorizationSessionProjection, error)
 }
 
@@ -451,7 +452,7 @@ func (m *Manager) startLeaseRenewal(parent context.Context, prep store.Credentia
 	}
 }
 
-func (m *Manager) failCredentialCandidate(session store.AuthorizationSessionProjection, prep store.CredentialPreparation, operationID, code string, runCtx context.Context) {
+func (m *Manager) failCredentialCandidate(session store.AuthorizationSessionProjection, prep store.CredentialPreparation, operationID, code string, runCtx context.Context) error {
 	status := "failed"
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		status, code = "expired", "session_deadline_exceeded"
@@ -462,7 +463,7 @@ func (m *Manager) failCredentialCandidate(session store.AuthorizationSessionProj
 	defer cancel()
 	_, shouldQuarantine, err := m.store.QuarantineServerCredential(ctx, session.ID, prep, operationID, status, code)
 	if err != nil || !shouldQuarantine {
-		return
+		return err
 	}
 	digestSuffix := digestString(session.ID)[:24]
 	candidates := []struct {
@@ -489,16 +490,11 @@ func (m *Manager) failCredentialCandidate(session store.AuthorizationSessionProj
 		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
-		_, _ = m.credentials.Quarantine(session.ExecutorID, candidate.path, candidate.name)
+		if _, err := m.credentials.Quarantine(session.ExecutorID, candidate.path, candidate.name); err != nil {
+			return err
+		}
 	}
-	operationPath, err := m.credentials.OperationPath(session.ExecutorID, operationID)
-	if err != nil {
-		return
-	}
-	info, err := os.Lstat(operationPath)
-	if err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
-		_ = m.credentials.RemoveEphemeral(operationPath)
-	}
+	return nil
 }
 
 func (m *Manager) fail(sessionID, code string, runCtx context.Context) {

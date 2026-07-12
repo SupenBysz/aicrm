@@ -464,6 +464,24 @@ func DurableBarrier(root string) error {
 	return nil
 }
 
+func ValidateReadOnlyTree(root string) error {
+	root = filepath.Clean(root)
+	return filepath.WalkDir(root, func(path string, item fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		metadata, err := os.Lstat(path)
+		if err != nil || metadata.Mode()&os.ModeSymlink != 0 ||
+			(!metadata.IsDir() && !metadata.Mode().IsRegular()) || metadata.Mode().Perm()&0o222 != 0 {
+			return ErrInvalidPath
+		}
+		if metadata.Mode().IsRegular() && regularFileHasMultipleLinks(metadata) {
+			return ErrInvalidPath
+		}
+		return nil
+	})
+}
+
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {

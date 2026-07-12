@@ -66,6 +66,7 @@ func TestRecoverAuthorizationCredentialTreesQuarantinesPreparedCandidatesIdempot
 	items := []store.AuthorizationRecoveryItem{{
 		SessionID: "session_1", ExecutorID: "aiexec_1",
 		PreparedCredentialRevision: &revisionNumber, OperationID: "auth_session_1",
+		BindingStatus: "quarantined",
 	}}
 	if err := recoverAuthorizationCredentialTrees(manager, items); err != nil {
 		t.Fatal(err)
