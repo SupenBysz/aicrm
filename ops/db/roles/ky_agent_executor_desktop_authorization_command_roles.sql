@@ -5,9 +5,11 @@ GRANT SELECT, INSERT, UPDATE ON TABLE
 TO ky_agent_executor_writer;
 
 GRANT SELECT, INSERT ON TABLE
-  ky_ai_executor_desktop_command_audit
+  ky_ai_executor_desktop_command_audit,
+  ky_ai_executor_credential_activation_audit
 TO ky_agent_executor_writer;
 
 REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE
-  ky_ai_executor_desktop_command_audit
+  ky_ai_executor_desktop_command_audit,
+  ky_ai_executor_credential_activation_audit
 FROM ky_agent_executor_writer;

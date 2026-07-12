@@ -6,11 +6,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
 )
 
 type recoveryStoreStub struct {
 	mu      sync.Mutex
-	results []int
+	results []store.DesktopActivationReconciliationResult
 	err     error
 	calls   chan int
 }
@@ -18,7 +20,7 @@ type recoveryStoreStub struct {
 func (stub *recoveryStoreStub) ReconcileDesktopCredentialActivations(
 	_ context.Context,
 	limit int,
-) (int, error) {
+) (store.DesktopActivationReconciliationResult, error) {
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
 	if stub.calls != nil {
@@ -28,10 +30,10 @@ func (stub *recoveryStoreStub) ReconcileDesktopCredentialActivations(
 		}
 	}
 	if stub.err != nil {
-		return 0, stub.err
+		return store.DesktopActivationReconciliationResult{}, stub.err
 	}
 	if len(stub.results) == 0 {
-		return 0, nil
+		return store.DesktopActivationReconciliationResult{}, nil
 	}
 	result := stub.results[0]
 	stub.results = stub.results[1:]
@@ -60,7 +62,11 @@ func TestRecoveryRunnerUsesLockedDefaultsAndValidatesConfiguration(t *testing.T)
 }
 
 func TestRecoveryRunnerDrainsBoundedBatches(t *testing.T) {
-	stub := &recoveryStoreStub{results: []int{2, 2, 1}, calls: make(chan int, 4)}
+	stub := &recoveryStoreStub{results: []store.DesktopActivationReconciliationResult{
+		{Selected: 2, Reconciled: 2},
+		{Selected: 2, Reconciled: 2},
+		{Selected: 1, Reconciled: 1},
+	}, calls: make(chan int, 4)}
 	runner, err := NewRecoveryRunner(stub, RecoveryConfig{BatchSize: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +81,23 @@ func TestRecoveryRunnerDrainsBoundedBatches(t *testing.T) {
 		if limit := <-stub.calls; limit != 2 {
 			t.Fatalf("batch limit=%d", limit)
 		}
+	}
+}
+
+func TestRecoveryRunnerDrainsSelectedBacklogAfterConcurrentWinner(t *testing.T) {
+	stub := &recoveryStoreStub{results: []store.DesktopActivationReconciliationResult{
+		{Selected: 2, Reconciled: 0},
+		{Selected: 1, Reconciled: 1},
+	}, calls: make(chan int, 3)}
+	runner, err := NewRecoveryRunner(stub, RecoveryConfig{BatchSize: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.calls) != 2 {
+		t.Fatalf("selected backlog calls=%d", len(stub.calls))
 	}
 }
 
@@ -107,6 +130,24 @@ func TestRecoveryRunnerRunsAtInjectedIntervalAndStopsWithContext(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("runner did not stop")
+	}
+}
+
+func TestRecoveryRunnerPeriodicModeDoesNotRepeatStartup(t *testing.T) {
+	stub := &recoveryStoreStub{calls: make(chan int, 1)}
+	runner, err := NewRecoveryRunner(stub, RecoveryConfig{
+		Interval: time.Hour, BatchSize: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := runner.RunPeriodic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.calls) != 0 {
+		t.Fatal("periodic mode repeated startup reconciliation")
 	}
 }
 

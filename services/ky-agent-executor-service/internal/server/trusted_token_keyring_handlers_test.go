@@ -32,6 +32,7 @@ func TestPublicTrustedTokenKeyRingUsesDatabaseTimeAndSafeExactProjection(t *test
 		cfg: config.Config{WriteEnabled: true}, trustedTokenClock: clock,
 		trustedTokenKeyRing: &projection, trustedTokenSigningWindow: trustedTokenSigningWindowFixture(),
 	}
+	server.activationRecoveryHealthy.Store(true)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/ai-executor-trusted-token-keyring", nil)
 	request.Header.Set("X-KY-Request-Id", "req_keyring_1")
 	recorder := httptest.NewRecorder()
@@ -125,14 +126,18 @@ func TestPublicTrustedTokenKeyRingNonGETFailsWithSafeHeaders(t *testing.T) {
 
 func TestPublicTrustedTokenKeyRingFailsClosedWhenNotReady(t *testing.T) {
 	projection := trustedTokenKeyRingProjectionFixture()
-	tests := []Server{
+	tests := []*Server{
 		{cfg: config.Config{WriteEnabled: false}, trustedTokenClock: &fakeTrustedTokenDatabaseClock{}, trustedTokenKeyRing: &projection, trustedTokenSigningWindow: trustedTokenSigningWindowFixture()},
 		{cfg: config.Config{WriteEnabled: true}, trustedTokenKeyRing: &projection, trustedTokenSigningWindow: trustedTokenSigningWindowFixture()},
 		{cfg: config.Config{WriteEnabled: true}, trustedTokenClock: &fakeTrustedTokenDatabaseClock{}, trustedTokenSigningWindow: trustedTokenSigningWindowFixture()},
 		{cfg: config.Config{WriteEnabled: true}, trustedTokenClock: &fakeTrustedTokenDatabaseClock{err: errors.New("database unavailable")}, trustedTokenKeyRing: &projection, trustedTokenSigningWindow: trustedTokenSigningWindowFixture()},
 		{cfg: config.Config{WriteEnabled: true}, trustedTokenClock: &fakeTrustedTokenDatabaseClock{}, trustedTokenKeyRing: &projection},
+		{cfg: config.Config{WriteEnabled: true}, trustedTokenClock: &fakeTrustedTokenDatabaseClock{}, trustedTokenKeyRing: &projection, trustedTokenSigningWindow: trustedTokenSigningWindowFixture()},
 	}
 	for index := range tests {
+		if index != len(tests)-1 {
+			tests[index].activationRecoveryHealthy.Store(true)
+		}
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/public/ai-executor-trusted-token-keyring", nil)
 		recorder := httptest.NewRecorder()
 		tests[index].buildMux().ServeHTTP(recorder, request)

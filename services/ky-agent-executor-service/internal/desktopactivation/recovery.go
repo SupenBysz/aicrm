@@ -3,6 +3,8 @@ package desktopactivation
 import (
 	"context"
 	"time"
+
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
 )
 
 const (
@@ -11,7 +13,7 @@ const (
 )
 
 type RecoveryStore interface {
-	ReconcileDesktopCredentialActivations(context.Context, int) (int, error)
+	ReconcileDesktopCredentialActivations(context.Context, int) (store.DesktopActivationReconciliationResult, error)
 }
 
 type RecoveryConfig struct {
@@ -52,11 +54,11 @@ func (r *RecoveryRunner) Recover(ctx context.Context) error {
 		return ErrInvalidConfiguration
 	}
 	for {
-		reconciled, err := r.store.ReconcileDesktopCredentialActivations(ctx, r.batchSize)
+		result, err := r.store.ReconcileDesktopCredentialActivations(ctx, r.batchSize)
 		if err != nil {
 			return err
 		}
-		if reconciled < r.batchSize {
+		if result.Selected < r.batchSize {
 			return nil
 		}
 	}
@@ -69,6 +71,15 @@ func (r *RecoveryRunner) Recover(ctx context.Context) error {
 func (r *RecoveryRunner) Run(ctx context.Context) error {
 	if err := r.Recover(ctx); err != nil {
 		return err
+	}
+	return r.RunPeriodic(ctx)
+}
+
+// RunPeriodic enters the steady-state loop after the owner has completed and
+// published startup recovery. It intentionally does not repeat startup work.
+func (r *RecoveryRunner) RunPeriodic(ctx context.Context) error {
+	if r == nil || r.store == nil || r.interval <= 0 || r.batchSize <= 0 {
+		return ErrInvalidConfiguration
 	}
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()

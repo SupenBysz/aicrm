@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/accessclient"
@@ -35,6 +36,8 @@ type Server struct {
 	handoffRuntime            desktopHandoffRuntime
 	revocationRuntime         credentialRevocationRuntime
 	activationRuntime         desktopActivationRuntime
+	activationRecovery        desktopActivationRecoveryRuntime
+	activationRecoveryHealthy atomic.Bool
 	desktopCommandRuntime     desktopAuthorizationCommandRuntime
 	trustedTokenClock         trustedTokenDatabaseClock
 	trustedTokenKeyRing       *trustedtoken.PublicKeyRingProjection
@@ -43,6 +46,17 @@ type Server struct {
 
 type trustedTokenDatabaseClock interface {
 	TrustedTokenDatabaseNow(context.Context) (time.Time, error)
+}
+
+type desktopActivationRecoveryRuntime interface {
+	Recover(context.Context) error
+	RunPeriodic(context.Context) error
+}
+
+type httpServerLifecycle interface {
+	ListenAndServe() error
+	Shutdown(context.Context) error
+	Close() error
 }
 
 var _ trustedTokenDatabaseClock = (*store.ControlStore)(nil)
@@ -110,7 +124,11 @@ func newWithReader(cfg config.Config, reader store.Reader) *Server {
 }
 
 func newWithControl(cfg config.Config, reader store.Reader, control controlStore, authorizer accessclient.Authorizer) *Server {
-	return &Server{cfg: cfg, reader: reader, control: control, authorizer: authorizer}
+	server := &Server{cfg: cfg, reader: reader, control: control, authorizer: authorizer}
+	// Injected controls in handler tests represent an already-started control
+	// plane. Production always enters through Run and proves recovery first.
+	server.activationRecoveryHealthy.Store(cfg.WriteEnabled)
+	return server
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -192,6 +210,23 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.activationRuntime = activationManager
+		activationRecovery, err := desktopactivation.NewRecoveryRunner(
+			opened, desktopactivation.RecoveryConfig{},
+		)
+		if err != nil {
+			return err
+		}
+		s.activationRecovery = activationRecovery
+		startupRecovered, err := recoverDesktopActivationsForStartup(
+			ctx, activationRecovery, &s.activationRecoveryHealthy,
+		)
+		if err != nil {
+			return err
+		}
+		if !startupRecovered {
+			return nil
+		}
+		defer s.activationRecoveryHealthy.Store(false)
 		desktopCommandManager, err := desktopcommand.NewWithKeyRing(
 			opened,
 			signer,
@@ -266,20 +301,122 @@ func (s *Server) Run(ctx context.Context) error {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	errCh := make(chan error, 1)
-	go func() { errCh <- httpServer.ListenAndServe() }()
+	return runHTTPServerWithActivationRecovery(
+		ctx, httpServer, s.activationRecovery, &s.activationRecoveryHealthy,
+	)
+}
 
-	select {
-	case <-ctx.Done():
+func runHTTPServerWithActivationRecovery(
+	ctx context.Context,
+	httpServer httpServerLifecycle,
+	recovery desktopActivationRecoveryRuntime,
+	healthy *atomic.Bool,
+) error {
+	if httpServer == nil || healthy == nil {
+		return errors.New("server lifecycle is unavailable")
+	}
+	if recovery != nil && !healthy.Load() {
+		return errors.New("desktop activation startup recovery is incomplete")
+	}
+	if recovery == nil {
+		healthy.Store(false)
+	}
+	defer healthy.Store(false)
+
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+	var recoveryErrCh <-chan error
+	if recovery != nil {
+		channel := make(chan error, 1)
+		recoveryErrCh = channel
+		go func() { channel <- recovery.RunPeriodic(runCtx) }()
+	}
+	httpErrCh := make(chan error, 1)
+	go func() { httpErrCh <- httpServer.ListenAndServe() }()
+
+	shutdownHTTP := func() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		return httpServer.Shutdown(shutdownCtx)
-	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+		err := httpServer.Shutdown(shutdownCtx)
+		if err != nil {
+			_ = httpServer.Close()
 		}
 		return err
 	}
+	waitRecovery := func() error {
+		if recoveryErrCh == nil {
+			return nil
+		}
+		return <-recoveryErrCh
+	}
+
+	select {
+	case <-ctx.Done():
+		cancelRun()
+		healthy.Store(false)
+		shutdownErr := shutdownHTTP()
+		httpErr := <-httpErrCh
+		recoveryErr := waitRecovery()
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+		if httpErr != nil && !errors.Is(httpErr, http.ErrServerClosed) {
+			return httpErr
+		}
+		if recoveryErr != nil && !errors.Is(recoveryErr, context.Canceled) {
+			return recoveryErr
+		}
+		return nil
+	case recoveryErr := <-recoveryErrCh:
+		healthy.Store(false)
+		cancelRun()
+		_ = shutdownHTTP()
+		<-httpErrCh
+		if recoveryErr == nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return errors.New("desktop activation recovery stopped")
+		}
+		return recoveryErr
+	case httpErr := <-httpErrCh:
+		healthy.Store(false)
+		cancelRun()
+		if recoveryErr := waitRecovery(); recoveryErr != nil &&
+			!errors.Is(recoveryErr, context.Canceled) &&
+			(httpErr == nil || errors.Is(httpErr, http.ErrServerClosed)) {
+			return recoveryErr
+		}
+		if errors.Is(httpErr, http.ErrServerClosed) {
+			return nil
+		}
+		if httpErr == nil {
+			return errors.New("HTTP server stopped")
+		}
+		return httpErr
+	}
+}
+
+func recoverDesktopActivationsForStartup(
+	ctx context.Context,
+	recovery desktopActivationRecoveryRuntime,
+	healthy *atomic.Bool,
+) (bool, error) {
+	if recovery == nil || healthy == nil {
+		return false, errors.New("desktop activation startup recovery is unavailable")
+	}
+	healthy.Store(false)
+	if err := recovery.Recover(ctx); err != nil {
+		if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+			return false, nil
+		}
+		return false, err
+	}
+	if ctx.Err() != nil {
+		return false, nil
+	}
+	healthy.Store(true)
+	return true, nil
 }
 
 func recoverAuthorizationCredentialTrees(credentials *credentialfs.Manager, items []store.AuthorizationRecoveryItem) error {
@@ -440,7 +577,8 @@ func (s *Server) public(requiredAll, requiredAny []string, next publicHandler) h
 	return func(w http.ResponseWriter, r *http.Request) {
 		noStore(w)
 		ensureRequestID(r)
-		if !s.cfg.WriteEnabled || s.control == nil || s.authorizer == nil {
+		if !s.cfg.WriteEnabled || s.control == nil || s.authorizer == nil ||
+			!s.activationRecoveryHealthy.Load() {
 			writeError(w, r, http.StatusServiceUnavailable, "control_plane_disabled", "Agent Executor control plane is disabled")
 			return
 		}
@@ -526,6 +664,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 		) == nil
 	}
 	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil &&
+		s.activationRecoveryHealthy.Load() &&
 		trustedTokenSigningReady && s.trustedTokenKeyRing != nil &&
 		operationConfirmationRuntimeReady(s.confirmationRuntime) &&
 		s.handoffRuntime != nil &&

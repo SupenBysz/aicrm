@@ -60,13 +60,13 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 		`, flow.executorID); err != nil {
 			t.Fatal(err)
 		}
-		if count, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || count != 1 {
-			t.Fatalf("reconciled=%d err=%v", count, err)
+		if result, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || result.Reconciled != 1 {
+			t.Fatalf("reconciled=%#v err=%v", result, err)
 		}
 		assertDesktopActivationRecoveryState(t, ctx, db, flow, proof,
 			"expired", "quarantined", "expired", "interrupted", "desktop_disconnected", 4, 6)
-		if count, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || count != 0 {
-			t.Fatalf("replay reconciled=%d err=%v", count, err)
+		if result, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || result != (store.DesktopActivationReconciliationResult{}) {
+			t.Fatalf("replay reconciled=%#v err=%v", result, err)
 		}
 	})
 
@@ -81,8 +81,8 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 		`, flow.session.ID); err != nil {
 			t.Fatal(err)
 		}
-		if count, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || count != 1 {
-			t.Fatalf("reconciled=%d err=%v", count, err)
+		if result, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || result.Reconciled != 1 {
+			t.Fatalf("reconciled=%#v err=%v", result, err)
 		}
 		assertDesktopActivationRecoveryState(t, ctx, db, flow, proof,
 			"expired", "quarantined", "expired", "expired", "session_deadline_exceeded", 4, 6)
@@ -102,8 +102,8 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 		`, flow.executorID, takeoverOperation, takeoverOwner); err != nil {
 			t.Fatal(err)
 		}
-		if count, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || count != 1 {
-			t.Fatalf("reconciled=%d err=%v", count, err)
+		if result, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || result.Reconciled != 1 {
+			t.Fatalf("reconciled=%#v err=%v", result, err)
 		}
 		assertDesktopActivationRecoveryState(t, ctx, db, flow, proof,
 			"fenced", "quarantined", "active", "interrupted", "desktop_disconnected", 4, 6)
@@ -135,8 +135,8 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 		if err != nil || !transitioned || cancelled.Status != "cancelled" {
 			t.Fatalf("cancelled=%#v transitioned=%v err=%v", cancelled, transitioned, err)
 		}
-		if count, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || count != 1 {
-			t.Fatalf("reconciled=%d err=%v", count, err)
+		if result, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || result.Reconciled != 1 {
+			t.Fatalf("reconciled=%#v err=%v", result, err)
 		}
 		assertDesktopActivationRecoveryState(t, ctx, db, flow, proof,
 			"quarantined", "quarantined", "expired", "cancelled", "", 4, 6)
@@ -158,13 +158,13 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 			proof.Activation.ActivationToken, barrier)
 		start := make(chan struct{})
 		var group sync.WaitGroup
-		var reconcileCount int
+		var reconcileResult store.DesktopActivationReconciliationResult
 		var reconcileErr, ackErr error
 		group.Add(2)
 		go func() {
 			defer group.Done()
 			<-start
-			reconcileCount, reconcileErr = control.ReconcileDesktopCredentialActivations(ctx, 64)
+			reconcileResult, reconcileErr = control.ReconcileDesktopCredentialActivations(ctx, 64)
 		}()
 		go func() {
 			defer group.Done()
@@ -173,8 +173,8 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 		}()
 		close(start)
 		group.Wait()
-		if reconcileErr != nil || reconcileCount != 1 {
-			t.Fatalf("reconciled=%d err=%v", reconcileCount, reconcileErr)
+		if reconcileErr != nil || reconcileResult.Reconciled != 1 {
+			t.Fatalf("reconciled=%#v err=%v", reconcileResult, reconcileErr)
 		}
 		if !errors.Is(ackErr, store.ErrExecutorFenced) &&
 			!errors.Is(ackErr, store.ErrRevisionConflict) &&
@@ -202,8 +202,8 @@ func TestDesktopCredentialActivationRecoveryAgainstPostgres(t *testing.T) {
 		)); err != nil {
 			t.Fatal(err)
 		}
-		if count, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || count != 0 {
-			t.Fatalf("late recovery count=%d err=%v", count, err)
+		if result, err := control.ReconcileDesktopCredentialActivations(ctx, 64); err != nil || result != (store.DesktopActivationReconciliationResult{}) {
+			t.Fatalf("late recovery result=%#v err=%v", result, err)
 		}
 	})
 }

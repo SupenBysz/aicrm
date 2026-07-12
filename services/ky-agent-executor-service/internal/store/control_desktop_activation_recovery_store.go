@@ -9,6 +9,11 @@ import (
 
 const maxDesktopActivationRecoveryBatch = 256
 
+type DesktopActivationReconciliationResult struct {
+	Selected   int
+	Reconciled int
+}
+
 type desktopActivationRecoveryCandidate struct {
 	ActivationID string
 	ExecutorID   string
@@ -50,9 +55,12 @@ type desktopActivationRecoveryDecision struct {
 // every candidate is re-read under the same executor -> session -> activation
 // lock order used by activation ACK. The final state changes are full-tuple
 // CAS operations, so an ACK or a newer lease epoch can be the only winner.
-func (s *ControlStore) ReconcileDesktopCredentialActivations(ctx context.Context, limit int) (int, error) {
+func (s *ControlStore) ReconcileDesktopCredentialActivations(
+	ctx context.Context,
+	limit int,
+) (DesktopActivationReconciliationResult, error) {
 	if s == nil || s.db == nil || limit <= 0 || limit > maxDesktopActivationRecoveryBatch {
-		return 0, ErrDesktopActivationInputInvalid
+		return DesktopActivationReconciliationResult{}, ErrDesktopActivationInputInvalid
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT activation.id,activation.executor_id,activation.session_id
@@ -120,35 +128,35 @@ func (s *ControlStore) ReconcileDesktopCredentialActivations(ctx context.Context
 		LIMIT $1
 	`, limit)
 	if err != nil {
-		return 0, err
+		return DesktopActivationReconciliationResult{}, err
 	}
 	candidates := make([]desktopActivationRecoveryCandidate, 0, limit)
 	for rows.Next() {
 		var item desktopActivationRecoveryCandidate
 		if err := rows.Scan(&item.ActivationID, &item.ExecutorID, &item.SessionID); err != nil {
 			_ = rows.Close()
-			return 0, err
+			return DesktopActivationReconciliationResult{}, err
 		}
 		candidates = append(candidates, item)
 	}
 	if err := rows.Close(); err != nil {
-		return 0, err
+		return DesktopActivationReconciliationResult{}, err
 	}
 	if err := rows.Err(); err != nil {
-		return 0, err
+		return DesktopActivationReconciliationResult{}, err
 	}
 
-	reconciled := 0
+	result := DesktopActivationReconciliationResult{Selected: len(candidates)}
 	for _, candidate := range candidates {
 		changed, err := s.reconcileDesktopCredentialActivation(ctx, candidate)
 		if err != nil {
-			return reconciled, err
+			return result, err
 		}
 		if changed {
-			reconciled++
+			result.Reconciled++
 		}
 	}
-	return reconciled, nil
+	return result, nil
 }
 
 func (s *ControlStore) reconcileDesktopCredentialActivation(

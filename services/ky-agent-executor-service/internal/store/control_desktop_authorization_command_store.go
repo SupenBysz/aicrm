@@ -195,6 +195,26 @@ func (s *ControlStore) CreateDesktopAuthorizationCommand(
 	`, input.SessionID).Scan(&boundDeviceID, &prepared, &runtimeOperationID, &runtimeOwner); err != nil {
 		return CreateDesktopAuthorizationCommandResult{}, err
 	}
+	var pendingActivation DesktopCredentialActivationProjection
+	if input.Purpose == "authorization_cancel" {
+		var found bool
+		pendingActivation, found, err = scanDesktopActivation(tx.QueryRowContext(
+			ctx, desktopActivationSelect+` WHERE session_id=$1 AND status='pending' FOR UPDATE`,
+			input.SessionID,
+		))
+		if err != nil {
+			return CreateDesktopAuthorizationCommandResult{}, err
+		}
+		if found != prepared.Valid {
+			return CreateDesktopAuthorizationCommandResult{}, ErrExecutorFenced
+		}
+		if found && (pendingActivation.ExecutorID != session.ExecutorID ||
+			pendingActivation.CredentialRevision != prepared.Int64 ||
+			pendingActivation.OperationID != runtimeOperationID ||
+			pendingActivation.DeviceID != boundDeviceID) {
+			return CreateDesktopAuthorizationCommandResult{}, ErrExecutorFenced
+		}
+	}
 	var deviceID string
 	deviceAvailable := false
 	// The session's bound device is the frozen command target.  In particular,
@@ -288,16 +308,36 @@ func (s *ControlStore) CreateDesktopAuthorizationCommand(
 		if affected, _ := handoffUpdate.RowsAffected(); (session.Status == "waiting_user" || session.Status == "verifying") && affected != 1 {
 			return CreateDesktopAuthorizationCommandResult{}, ErrExecutorFenced
 		}
-		activationUpdate, err := tx.ExecContext(ctx, `
-			UPDATE ky_ai_executor_credential_activation
-			SET status='quarantined',updated_at=$2
-			WHERE session_id=$1 AND status='pending'
-		`, input.SessionID, databaseNow)
-		if err != nil {
-			return CreateDesktopAuthorizationCommandResult{}, err
-		}
-		if affected, _ := activationUpdate.RowsAffected(); (affected == 1) != prepared.Valid {
-			return CreateDesktopAuthorizationCommandResult{}, ErrExecutorFenced
+		if prepared.Valid {
+			activationUpdate, err := tx.ExecContext(ctx, `
+				UPDATE ky_ai_executor_credential_activation
+				SET status='quarantined',updated_at=$2
+				WHERE id=$1 AND session_id=$3 AND executor_id=$4 AND status='pending'
+				  AND operation_id=$5 AND credential_revision=$6 AND lease_epoch=$7
+				  AND source_credential_revision=$8 AND revocation_epoch=$9
+				  AND binding_digest=$10
+			`, pendingActivation.ID, databaseNow, input.SessionID, session.ExecutorID,
+				pendingActivation.OperationID, pendingActivation.CredentialRevision,
+				pendingActivation.LeaseEpoch, pendingActivation.SourceCredentialRevision,
+				pendingActivation.RevocationEpoch, pendingActivation.BindingDigest)
+			if err != nil {
+				return CreateDesktopAuthorizationCommandResult{}, err
+			}
+			if affected, _ := activationUpdate.RowsAffected(); affected != 1 {
+				return CreateDesktopAuthorizationCommandResult{}, ErrExecutorFenced
+			}
+			if err := insertDesktopActivationAudit(ctx, tx, pendingActivation, 2,
+				"quarantined", input.RequestHash, databaseNow); err != nil {
+				return CreateDesktopAuthorizationCommandResult{}, err
+			}
+			if err := insertControlOutbox(ctx, tx, "credential_binding",
+				session.ExecutorID+":"+itoa64(prepared.Int64), 2,
+				"credential_quarantined", map[string]any{
+					"executorId": session.ExecutorID, "sessionId": input.SessionID,
+					"credentialRevision": prepared.Int64, "activationStatus": "quarantined",
+				}); err != nil {
+				return CreateDesktopAuthorizationCommandResult{}, err
+			}
 		}
 		if runtimeOperationID != "" {
 			updated, err := tx.ExecContext(ctx, `

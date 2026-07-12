@@ -45,7 +45,8 @@ func (s *Server) getPublicTrustedTokenKeyRing(w http.ResponseWriter, r *http.Req
 		writeError(w, r, http.StatusBadRequest, "trusted_token_keyring_body_forbidden", "trusted-token keyring does not accept a request body")
 		return
 	}
-	if !s.cfg.WriteEnabled || s.trustedTokenClock == nil || s.trustedTokenKeyRing == nil || s.trustedTokenSigningWindow == nil {
+	if !s.cfg.WriteEnabled || !s.activationRecoveryHealthy.Load() ||
+		s.trustedTokenClock == nil || s.trustedTokenKeyRing == nil || s.trustedTokenSigningWindow == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "trusted_token_keyring_unavailable", "trusted-token keyring is unavailable")
 		return
 	}

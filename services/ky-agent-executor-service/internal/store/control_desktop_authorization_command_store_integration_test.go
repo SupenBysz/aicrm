@@ -264,8 +264,16 @@ func TestDesktopAuthorizationCommandAgainstPostgres(t *testing.T) {
 		}
 		var handoffStatus, bindingStatus, activationStatus, leaseStatus string
 		var claimConsumed sql.NullTime
+		var activationAudit, credentialOutbox int
 		if err := db.QueryRowContext(ctx, `
-			SELECT handoff.status,handoff.claim_consumed_at,binding.status,activation.status,lease.status
+			SELECT handoff.status,handoff.claim_consumed_at,binding.status,activation.status,lease.status,
+			 (SELECT count(*) FROM ky_ai_executor_credential_activation_audit audit
+			  WHERE audit.activation_id=activation.id AND audit.sequence=2
+			    AND audit.event_type='quarantined'),
+			 (SELECT count(*) FROM ky_ai_executor_control_outbox value
+			  WHERE value.aggregate_type='credential_binding'
+			    AND value.aggregate_id=activation.executor_id || ':' || activation.credential_revision::text
+			    AND value.aggregate_revision=2 AND value.event_type='credential_quarantined')
 			FROM ky_ai_executor_desktop_handoff handoff
 			JOIN ky_ai_executor_credential_binding binding
 			  ON binding.executor_id=handoff.executor_id AND binding.revision=1
@@ -276,14 +284,16 @@ func TestDesktopAuthorizationCommandAgainstPostgres(t *testing.T) {
 			WHERE handoff.session_id=$1 AND activation.id=$2 AND lease.operation_id=$3
 		`, fixture.sessionID, activationID, operationID).Scan(
 			&handoffStatus, &claimConsumed, &bindingStatus, &activationStatus, &leaseStatus,
+			&activationAudit, &credentialOutbox,
 		); err != nil {
 			t.Fatal(err)
 		}
 		if handoffStatus != "cancelled" || !claimConsumed.Valid ||
 			bindingStatus != "quarantined" || activationStatus != "quarantined" ||
-			leaseStatus != "fenced" {
-			t.Fatalf("prepared cleanup handoff=%s consumed=%v binding=%s activation=%s lease=%s",
-				handoffStatus, claimConsumed.Valid, bindingStatus, activationStatus, leaseStatus)
+			leaseStatus != "fenced" || activationAudit != 1 || credentialOutbox != 1 {
+			t.Fatalf("prepared cleanup handoff=%s consumed=%v binding=%s activation=%s lease=%s audit=%d outbox=%d",
+				handoffStatus, claimConsumed.Valid, bindingStatus, activationStatus, leaseStatus,
+				activationAudit, credentialOutbox)
 		}
 	})
 
