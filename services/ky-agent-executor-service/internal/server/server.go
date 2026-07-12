@@ -23,6 +23,7 @@ type Server struct {
 	control     controlStore
 	authorizer  accessclient.Authorizer
 	authRuntime authorizationRuntime
+	taskRuntime taskRuntime
 }
 
 type authorizationRuntime interface {
@@ -30,6 +31,10 @@ type authorizationRuntime interface {
 	UserAction(string, string) (authorization.UserAction, error)
 	Cancel(string)
 	Shutdown(context.Context)
+}
+
+type taskRuntime interface {
+	Cancel(string)
 }
 
 type controlStore interface {
@@ -50,6 +55,12 @@ type controlStore interface {
 	RecordAuthorizationReopen(context.Context, string, string, string, string) error
 	FailAuthorizationSession(context.Context, string, string, string, string) (store.AuthorizationSessionProjection, error)
 	RecoverInterruptedAuthorizationSessions(context.Context, string) ([]store.AuthorizationRecoveryItem, error)
+	ListPublicTasks(context.Context, store.PublicTaskFilter) ([]store.PublicTaskProjection, int64, error)
+	GetPublicTask(context.Context, string, string, string) (store.PublicTaskProjection, error)
+	ListPublicTaskEvents(context.Context, string, string, string, int64, int) ([]store.PublicTaskEventProjection, error)
+	ListPublicTaskTerminal(context.Context, string, string, string, int64, int) ([]store.PublicTaskTerminalProjection, error)
+	PublicTaskTerminalClosedSequence(context.Context, string, string, string) (int64, error)
+	CancelPublicTask(context.Context, store.CancelPublicTaskInput) (store.PublicTaskProjection, bool, error)
 }
 
 func New(cfg config.Config) *Server {
@@ -254,6 +265,13 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/ai-executor-authorization-sessions/{sessionId}/cancel", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account", "platform.ai_executors.force_revoke"}, s.cancelAuthorizationSession))
 	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/events", s.public([]string{"platform.ai_executors.view"}, nil, s.listAuthorizationSessionEvents))
 	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/events-stream", s.public([]string{"platform.ai_executors.view"}, nil, s.streamAuthorizationSessionEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.listPublicTasks))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.getPublicTask))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/events", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.listPublicTaskEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/events-stream", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.streamPublicTaskEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/terminal-frames", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.listPublicTaskTerminal))
+	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/terminal-stream", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.streamPublicTaskTerminal))
+	mux.HandleFunc("POST /api/v1/ai-executor-tasks/{taskId}/cancel", s.public([]string{"platform.ai_executor_tasks.cancel"}, nil, s.cancelPublicTask))
 
 	return mux
 }

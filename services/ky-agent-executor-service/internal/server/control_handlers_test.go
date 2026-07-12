@@ -15,15 +15,20 @@ import (
 )
 
 type fakeControl struct {
-	created     store.CreateExecutorInput
-	patched     store.ExecutorPatch
-	authCreated store.CreateAuthorizationSessionInput
-	session     store.AuthorizationSessionProjection
-	events      []store.AuthorizationEventProjection
-	eventAfter  int64
-	eventLimit  int
-	cancelInput store.CancelAuthorizationInput
-	cancelErr   error
+	created       store.CreateExecutorInput
+	patched       store.ExecutorPatch
+	authCreated   store.CreateAuthorizationSessionInput
+	session       store.AuthorizationSessionProjection
+	events        []store.AuthorizationEventProjection
+	eventAfter    int64
+	eventLimit    int
+	cancelInput   store.CancelAuthorizationInput
+	cancelErr     error
+	task          store.PublicTaskProjection
+	taskEvents    []store.PublicTaskEventProjection
+	terminal      []store.PublicTaskTerminalProjection
+	taskCancel    store.CancelPublicTaskInput
+	taskCancelErr error
 }
 
 func (f *fakeControl) Ping(context.Context) error { return nil }
@@ -104,6 +109,63 @@ func (f *fakeControl) FailAuthorizationSession(_ context.Context, id, _ string, 
 func (f *fakeControl) RecoverInterruptedAuthorizationSessions(context.Context, string) ([]store.AuthorizationRecoveryItem, error) {
 	return nil, nil
 }
+func (f *fakeControl) ListPublicTasks(context.Context, store.PublicTaskFilter) ([]store.PublicTaskProjection, int64, error) {
+	if f.task.ID == "" {
+		return []store.PublicTaskProjection{}, 0, nil
+	}
+	return []store.PublicTaskProjection{f.task}, 1, nil
+}
+func (f *fakeControl) GetPublicTask(context.Context, string, string, string) (store.PublicTaskProjection, error) {
+	if f.task.ID == "" {
+		return store.PublicTaskProjection{}, store.ErrNotFound
+	}
+	return f.task, nil
+}
+func (f *fakeControl) ListPublicTaskEvents(_ context.Context, _ string, _, _ string, after int64, limit int) ([]store.PublicTaskEventProjection, error) {
+	items := make([]store.PublicTaskEventProjection, 0, limit)
+	for _, item := range f.taskEvents {
+		if item.Sequence > after {
+			items = append(items, item)
+		}
+		if len(items) == limit {
+			break
+		}
+	}
+	return items, nil
+}
+func (f *fakeControl) ListPublicTaskTerminal(_ context.Context, _ string, _, _ string, after int64, limit int) ([]store.PublicTaskTerminalProjection, error) {
+	items := make([]store.PublicTaskTerminalProjection, 0, limit)
+	for _, item := range f.terminal {
+		if item.Sequence > after {
+			items = append(items, item)
+		}
+		if len(items) == limit {
+			break
+		}
+	}
+	return items, nil
+}
+func (f *fakeControl) PublicTaskTerminalClosedSequence(context.Context, string, string, string) (int64, error) {
+	for index := len(f.terminal) - 1; index >= 0; index-- {
+		if f.terminal[index].Kind == "closed" {
+			return f.terminal[index].Sequence, nil
+		}
+	}
+	return 0, nil
+}
+func (f *fakeControl) CancelPublicTask(_ context.Context, input store.CancelPublicTaskInput) (store.PublicTaskProjection, bool, error) {
+	f.taskCancel = input
+	if f.taskCancelErr != nil {
+		return store.PublicTaskProjection{}, false, f.taskCancelErr
+	}
+	transitioned := !terminalTaskStatus(f.task.Status)
+	if transitioned {
+		f.task.Status = "cancelled"
+		f.task.Revision++
+		f.task.CurrentSequence += 3
+	}
+	return f.task, transitioned, nil
+}
 
 type fakeAuthorizer struct {
 	request accessclient.Request
@@ -131,7 +193,7 @@ func (f *fakeAuthorizer) Evaluate(_ context.Context, _ string, request accesscli
 	}, nil
 }
 
-func controlTestServer(control *fakeControl, authorizer *fakeAuthorizer) *Server {
+func controlTestServer(control *fakeControl, authorizer accessclient.Authorizer) *Server {
 	return newWithControl(config.Config{
 		HTTPAddr: "127.0.0.1:18087", WriteEnabled: true,
 		InternalToken: "internal", AuthTokenSecret: "auth-secret",
