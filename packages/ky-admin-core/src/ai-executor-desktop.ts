@@ -76,16 +76,24 @@ export interface CodexAuthorizationSnapshot {
 }
 
 export interface CodexModelCatalogItem {
+  catalogItemId?: string;
   modelKey: string;
   displayName: string;
+  inputModalities: string[];
+  supportedReasoningEfforts: string[];
   hidden: boolean;
+  upgradeModelKey?: string;
   status: string;
+  codexVersion?: string;
+  lastSeenAt?: string;
 }
 
 export interface CodexModelCatalogSnapshot {
   executorId: string;
+  credentialRevision: number;
   catalogRevision: number;
-  items: CodexModelCatalogItem[];
+  models: CodexModelCatalogItem[];
+  observedAt: string;
 }
 
 export interface CodexAuthorizationEventEnvelope {

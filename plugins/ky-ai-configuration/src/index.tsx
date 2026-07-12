@@ -1,5 +1,6 @@
 import type { AdminPlugin } from "@ky/admin-core";
 import { routes } from "./routes";
+import { AI_CONFIGURATION_MENU_KEY } from "./permissions";
 
 export const aiConfigurationPlugin: AdminPlugin = {
   name: "ky-ai-configuration",
@@ -11,7 +12,7 @@ export const aiConfigurationPlugin: AdminPlugin = {
       label: "AI 供应商",
       path: "/ai-providers",
       icon: "ApiOutlined",
-      menuKey: "ai.providers.view",
+      menuKey: AI_CONFIGURATION_MENU_KEY,
       requiredPermission: "platform.ai_providers.view"
     },
     {
@@ -19,7 +20,7 @@ export const aiConfigurationPlugin: AdminPlugin = {
       label: "AI 模型",
       path: "/ai-models",
       icon: "RobotOutlined",
-      menuKey: "ai.models.view",
+      menuKey: AI_CONFIGURATION_MENU_KEY,
       requiredPermission: "platform.ai_models.view"
     },
     {
@@ -27,7 +28,7 @@ export const aiConfigurationPlugin: AdminPlugin = {
       label: "默认模型",
       path: "/ai-default-models",
       icon: "StarOutlined",
-      menuKey: "ai.settings.view",
+      menuKey: AI_CONFIGURATION_MENU_KEY,
       requiredPermission: "platform.ai_model_settings.view"
     },
     {
@@ -35,7 +36,7 @@ export const aiConfigurationPlugin: AdminPlugin = {
       label: "AI 执行器",
       path: "/ai-executors",
       icon: "RobotOutlined",
-      menuKey: "ai.executors.view",
+      menuKey: AI_CONFIGURATION_MENU_KEY,
       requiredPermission: "platform.ai_executors.view"
     },
     {
@@ -43,7 +44,7 @@ export const aiConfigurationPlugin: AdminPlugin = {
       label: "执行器任务",
       path: "/ai-executor-tasks",
       icon: "FileSearchOutlined",
-      menuKey: "ai.executor_tasks.view",
+      menuKey: AI_CONFIGURATION_MENU_KEY,
       requiredPermission: "platform.ai_executor_tasks.view"
     }
   ],
