@@ -27,6 +27,7 @@
     "test:desktop-executor-device-binding-surface": "node --test src/preload/desktop-executor-device-binding-surface.test.mjs",
     "test:desktop-authorization-transport": "node --test src/main/desktop-authorization-transport-client.test.mjs",
     "test:desktop-activation-lease": "node --test src/main/desktop-activation-lease-controller.test.mjs",
+    "test:desktop-codex-authorization-session-store": "node --test src/main/desktop-codex-authorization-session-store.test.mjs",
     "test:desktop-executor-binding-state": "node --test src/main/desktop-executor-binding-state.test.mjs",
     "test:desktop-device-trust-runtime": "node --test src/main/desktop-device-trust-runtime.test.mjs src/main/desktop-session-store.test.mjs",
     "test:desktop-credential-tree": "node --test src/main/desktop-credential-tree.test.mjs",
