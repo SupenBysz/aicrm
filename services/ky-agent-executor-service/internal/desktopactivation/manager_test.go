@@ -15,6 +15,7 @@ import (
 
 type activationStoreStub struct {
 	submit func(context.Context, store.SubmitDesktopAuthorizationProofInput, store.DesktopClaimTokenVerifier, store.DesktopActivationTokenIssuer) (store.SubmitDesktopAuthorizationProofResult, error)
+	renew  func(context.Context, store.RenewDesktopCredentialActivationLeaseInput, store.DesktopActivationTokenVerifier) (store.RenewDesktopCredentialActivationLeaseResult, error)
 	ack    func(context.Context, store.AcknowledgeDesktopCredentialActivationInput, store.DesktopActivationTokenVerifier) (store.AcknowledgeDesktopCredentialActivationResult, error)
 }
 
@@ -33,6 +34,14 @@ func (stub activationStoreStub) AcknowledgeDesktopCredentialActivation(
 	verifier store.DesktopActivationTokenVerifier,
 ) (store.AcknowledgeDesktopCredentialActivationResult, error) {
 	return stub.ack(ctx, input, verifier)
+}
+
+func (stub activationStoreStub) RenewDesktopCredentialActivationLease(
+	ctx context.Context,
+	input store.RenewDesktopCredentialActivationLeaseInput,
+	verifier store.DesktopActivationTokenVerifier,
+) (store.RenewDesktopCredentialActivationLeaseResult, error) {
+	return stub.renew(ctx, input, verifier)
 }
 
 func TestManagerBindsAndDeterministicallyReconstructsActivationToken(t *testing.T) {
@@ -104,6 +113,29 @@ func TestManagerBindsAndDeterministicallyReconstructsActivationToken(t *testing.
 			CredentialRevision: token.CredentialRevision, SessionRevision: 4,
 		}, nil
 	}
+	stub.renew = func(_ context.Context, input store.RenewDesktopCredentialActivationLeaseInput, verifier store.DesktopActivationTokenVerifier) (store.RenewDesktopCredentialActivationLeaseResult, error) {
+		token, err := verifier(issuedAt.Add(90 * time.Second))
+		if err != nil {
+			return store.RenewDesktopCredentialActivationLeaseResult{}, err
+		}
+		if token.ActivationID != input.ActivationID || token.OperationID != input.OperationID ||
+			token.CredentialRevision != 3 || token.LeaseEpoch != 7 ||
+			token.SourceCredentialRevision != 2 || token.RevocationEpoch != 4 ||
+			token.BindingDigest != bindingDigest || token.TokenHash != trustedtoken.Hash(activationToken) ||
+			input.CredentialRevision != 3 || input.LeaseEpoch != 7 ||
+			input.SourceCredentialRevision != 2 || input.RevocationEpoch != 4 ||
+			input.BindingDigest != bindingDigest {
+			t.Fatalf("unexpected renewal claims: %#v", token)
+		}
+		renewedAt := issuedAt.Add(90 * time.Second)
+		return store.RenewDesktopCredentialActivationLeaseResult{
+			ActivationID: input.ActivationID, ExecutorID: token.ExecutorID,
+			OperationID: token.OperationID, CredentialRevision: token.CredentialRevision,
+			LeaseEpoch: token.LeaseEpoch, SourceCredentialRevision: token.SourceCredentialRevision,
+			RevocationEpoch: token.RevocationEpoch, RenewedAt: renewedAt,
+			LeaseExpiresAt: renewedAt.Add(30 * time.Second), Replayed: true,
+		}, nil
+	}
 
 	manager, err := New(stub, signer, keys, secret)
 	if err != nil {
@@ -123,6 +155,21 @@ func TestManagerBindsAndDeterministicallyReconstructsActivationToken(t *testing.
 	if err != nil || claims.ActivationID != proof.Activation.ActivationID ||
 		claims.BindingDigest != bindingDigest {
 		t.Fatalf("claims=%#v err=%v", claims, err)
+	}
+	renewed, err := manager.RenewLease(context.Background(), RenewLeaseInput{
+		ActivationToken: activationToken, SessionID: "session_1",
+		ActivationID: proof.Activation.ActivationID, TargetDeviceID: deviceID,
+		OperationID:              proof.Activation.OperationID,
+		CredentialRevision:       proof.Activation.CredentialRevision,
+		LeaseEpoch:               proof.Activation.LeaseEpoch,
+		SourceCredentialRevision: proof.Activation.SourceCredentialRevision,
+		RevocationEpoch:          proof.Activation.RevocationEpoch,
+		BindingDigest:            proof.Activation.BindingDigest,
+	})
+	if err != nil || renewed.CredentialRevision != 3 || renewed.LeaseEpoch != 7 ||
+		renewed.RenewedAt != issuedAt.Add(90*time.Second).Format(time.RFC3339Nano) ||
+		renewed.LeaseExpiresAt != issuedAt.Add(2*time.Minute).Format(time.RFC3339Nano) || !renewed.Replayed {
+		t.Fatalf("renewed=%#v err=%v", renewed, err)
 	}
 	ack, err := manager.Acknowledge(context.Background(), AcknowledgeInput{
 		ActivationToken: activationToken, SessionID: "session_1",

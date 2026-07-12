@@ -155,9 +155,112 @@ func TestDesktopAuthorizationProofAndActivationAgainstPostgres(t *testing.T) {
 	}
 	assertAlteredDesktopProofs(t, ctx, activationManager, mainFlow, mainProof, proofTime)
 
+	var initialLeaseExpiresAt time.Time
+	if err := db.QueryRowContext(ctx, `
+		SELECT lease_expires_at FROM ky_ai_executor_operation_lease WHERE executor_id=$1
+	`, mainFlow.executorID).Scan(&initialLeaseExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	renewalTime := time.Now().UTC().Truncate(time.Millisecond)
+	renewalSigned := signedDesktopActivationLeaseRenewal(t, mainFlow.device,
+		prepared.Activation.ActivationToken, mainFlow.session.ID, *prepared.Activation,
+		renewalTime, desktopNonce(70), 3, nil)
+	renewalInput := desktopactivation.RenewLeaseInput{
+		ActivationToken: prepared.Activation.ActivationToken,
+		SessionID:       mainFlow.session.ID, ActivationID: prepared.Activation.ActivationID,
+		TargetDeviceID: mainFlow.device.deviceID, KeyGeneration: 1,
+		OperationID:              prepared.Activation.OperationID,
+		CredentialRevision:       prepared.Activation.CredentialRevision,
+		LeaseEpoch:               prepared.Activation.LeaseEpoch,
+		SourceCredentialRevision: prepared.Activation.SourceCredentialRevision,
+		RevocationEpoch:          prepared.Activation.RevocationEpoch,
+		BindingDigest:            prepared.Activation.BindingDigest, Proof: renewalSigned.verified,
+		LedgerExpiresAt: time.Now().UTC().Add(store.DeviceLedgerAuditRetention + time.Hour),
+	}
+	const renewalWorkers = 12
+	renewalResults := make(chan desktopactivation.RenewLeaseResult, renewalWorkers)
+	renewalErrors := make(chan error, renewalWorkers)
+	var renewalGroup sync.WaitGroup
+	var renewalAccepted, renewalReplayed atomic.Int64
+	for worker := 0; worker < renewalWorkers; worker++ {
+		renewalGroup.Add(1)
+		go func() {
+			defer renewalGroup.Done()
+			result, renewErr := activationManager.RenewLease(ctx, renewalInput)
+			if renewErr != nil {
+				renewalErrors <- renewErr
+				return
+			}
+			if result.Replayed {
+				renewalReplayed.Add(1)
+			} else {
+				renewalAccepted.Add(1)
+			}
+			renewalResults <- result
+		}()
+	}
+	renewalGroup.Wait()
+	close(renewalResults)
+	close(renewalErrors)
+	for renewErr := range renewalErrors {
+		t.Fatal(renewErr)
+	}
+	var renewed desktopactivation.RenewLeaseResult
+	for result := range renewalResults {
+		if renewed.ActivationID == "" {
+			renewed = result
+		}
+		if result.ActivationID != renewed.ActivationID || result.ExecutorID != renewed.ExecutorID ||
+			result.OperationID != renewed.OperationID || result.CredentialRevision != renewed.CredentialRevision ||
+			result.LeaseEpoch != renewed.LeaseEpoch ||
+			result.SourceCredentialRevision != renewed.SourceCredentialRevision ||
+			result.RevocationEpoch != renewed.RevocationEpoch || result.RenewedAt != renewed.RenewedAt ||
+			result.LeaseExpiresAt != renewed.LeaseExpiresAt {
+			t.Fatalf("non-deterministic lease replay: first=%#v next=%#v", renewed, result)
+		}
+	}
+	if renewalAccepted.Load() != 1 || renewalReplayed.Load() != renewalWorkers-1 {
+		t.Fatalf("renewal accepted=%d replayed=%d result=%#v",
+			renewalAccepted.Load(), renewalReplayed.Load(), renewed)
+	}
+	renewedAt, err := time.Parse(time.RFC3339Nano, renewed.RenewedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewedExpiresAt, err := time.Parse(time.RFC3339Nano, renewed.LeaseExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !renewedExpiresAt.Equal(renewedAt.Add(30*time.Second)) || !renewedExpiresAt.After(initialLeaseExpiresAt) {
+		t.Fatalf("lease times initial=%s renewed=%#v", initialLeaseExpiresAt, renewed)
+	}
+	var storedLeaseExpiresAt time.Time
+	var highWater, renewalLedger int64
+	if err := db.QueryRowContext(ctx, `
+		SELECT lease.lease_expires_at,device.last_accepted_sequence,
+		 (SELECT count(*) FROM ky_ai_executor_device_request_ledger
+		  WHERE device_id=$2 AND sequence=3 AND response_reference=$3)
+		FROM ky_ai_executor_operation_lease lease
+		JOIN ky_ai_executor_device device ON device.id=$2
+		WHERE lease.executor_id=$1
+	`, mainFlow.executorID, mainFlow.device.deviceID,
+		"desktop_activation_lease_"+prepared.Activation.ActivationID).Scan(
+		&storedLeaseExpiresAt, &highWater, &renewalLedger); err != nil {
+		t.Fatal(err)
+	}
+	if !storedLeaseExpiresAt.Equal(renewedExpiresAt) || highWater != 3 || renewalLedger != 1 {
+		t.Fatalf("stored renewal expiry=%s highWater=%d ledger=%d result=%#v",
+			storedLeaseExpiresAt, highWater, renewalLedger, renewed)
+	}
+	responseLossReplay, err := activationManager.RenewLease(ctx, renewalInput)
+	if err != nil || !responseLossReplay.Replayed || responseLossReplay.RenewedAt != renewed.RenewedAt ||
+		responseLossReplay.LeaseExpiresAt != renewed.LeaseExpiresAt {
+		t.Fatalf("renewal response-loss replay=%#v err=%v", responseLossReplay, err)
+	}
+
 	barrierAt := time.Now().UTC().Truncate(time.Millisecond)
 	ackSigned := signedDesktopActivationACK(t, mainFlow.device, prepared.Activation.ActivationToken,
-		mainFlow.session.ID, *prepared.Activation, barrierAt, desktopNonce(23), 3, nil)
+		mainFlow.session.ID, *prepared.Activation, barrierAt, desktopNonce(23), 4, nil)
 	ackInput := desktopactivation.AcknowledgeInput{
 		ActivationToken: prepared.Activation.ActivationToken,
 		SessionID:       mainFlow.session.ID, ActivationID: prepared.Activation.ActivationID,
@@ -237,7 +340,7 @@ func TestDesktopAuthorizationProofAndActivationAgainstPostgres(t *testing.T) {
 
 	assertNoDesktopActivationSecrets(t, ctx, db, mainFlow, prepared, []string{
 		mainFlow.claimToken, prepared.Activation.ActivationToken,
-		mainProofSigned.signature, ackSigned.signature,
+		mainProofSigned.signature, renewalSigned.signature, ackSigned.signature,
 		"AiCRM-Claim " + mainFlow.claimToken,
 		"AiCRM-Activation " + prepared.Activation.ActivationToken,
 	})
@@ -376,6 +479,30 @@ func signedDesktopAuthorizationProof(
 		"AiCRM-Claim "+claimToken, "AiCRM-Claim", checkedAt, nonce, sequence)
 }
 
+func signedDesktopActivationLeaseRenewal(
+	t *testing.T,
+	device bindingDeviceFixture,
+	activationToken, sessionID string,
+	activation desktopactivation.ActivationResult,
+	renewedAt time.Time,
+	nonce string,
+	sequence uint64,
+	bodyOverride []byte,
+) signedActivationRequest {
+	t.Helper()
+	body := bodyOverride
+	if body == nil {
+		body = []byte(fmt.Sprintf(`{"operationId":%q,"activationId":%q,"credentialRevision":%d,"leaseEpoch":%d,"sourceCredentialRevision":%d,"revocationEpoch":%d,"bindingDigest":%q}`,
+			activation.OperationID, activation.ActivationID, activation.CredentialRevision,
+			activation.LeaseEpoch, activation.SourceCredentialRevision, activation.RevocationEpoch,
+			activation.BindingDigest))
+	}
+	path := "/api/v1/ai-executor-authorization-sessions/" + sessionID +
+		"/desktop-activations/" + activation.ActivationID + "/lease-renewals"
+	return signedActivationDeviceRequest(t, device, "POST", path, body,
+		"AiCRM-Activation "+activationToken, "AiCRM-Activation", renewedAt, nonce, sequence)
+}
+
 func signedDesktopActivationACK(
 	t *testing.T,
 	device bindingDeviceFixture,
@@ -502,7 +629,7 @@ func assertDesktopActivatedState(t *testing.T, ctx context.Context, db *sql.DB, 
 	if sessionStatus != "succeeded" || sessionRevision != ack.SessionRevision || sessionSequence != 6 ||
 		credentialStatus != "authorized" || currentRevision != ack.CredentialRevision ||
 		bindingStatus != "active" || activationStatus != "active" || leaseStatus != "released" ||
-		auditCount != 2 || ledgerCount != 3 {
+		auditCount != 2 || ledgerCount != 4 {
 		t.Fatalf("activated state session=%s/%d/%d config=%s/%d binding=%s activation=%s lease=%s audit=%d ledger=%d",
 			sessionStatus, sessionRevision, sessionSequence, credentialStatus, currentRevision,
 			bindingStatus, activationStatus, leaseStatus, auditCount, ledgerCount)
@@ -558,14 +685,14 @@ func assertAlteredDesktopACKs(t *testing.T, ctx context.Context, manager *deskto
 		}
 		changed.ActivationToken = token
 		changed.Proof = signedDesktopActivationACK(t, flow.device, token, flow.session.ID,
-			*proof.Activation, at, nonce, 3, body).verified
+			*proof.Activation, at, nonce, 4, body).verified
 		if _, err := manager.Acknowledge(ctx, changed); !errors.Is(err, store.ErrDeviceProofReplayed) {
 			t.Fatalf("altered ACK %s error=%v", alteration, err)
 		}
 	}
 	changedSequence := original
 	changedSequence.Proof = signedDesktopActivationACK(t, flow.device, original.ActivationToken,
-		flow.session.ID, *proof.Activation, at, desktopNonce(69), 4, nil).verified
+		flow.session.ID, *proof.Activation, at, desktopNonce(69), 5, nil).verified
 	if _, err := manager.Acknowledge(ctx, changedSequence); !errors.Is(err, store.ErrDesktopActivationConflict) {
 		t.Fatalf("altered ACK sequence error=%v", err)
 	}

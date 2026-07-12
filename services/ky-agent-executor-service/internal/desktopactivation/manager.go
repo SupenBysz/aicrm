@@ -1,6 +1,7 @@
-// Package desktopactivation owns trusted Desktop account proof submission and
-// durable credential activation acknowledgement. Raw compact JWS values stay
-// in memory; Store callbacks evaluate them against PostgreSQL transaction time.
+// Package desktopactivation owns trusted Desktop account proof submission,
+// fenced lease renewal and durable credential activation acknowledgement. Raw
+// compact JWS values stay in memory; Store callbacks evaluate them against
+// PostgreSQL transaction time.
 package desktopactivation
 
 import (
@@ -29,6 +30,7 @@ var (
 
 type Store interface {
 	SubmitDesktopAuthorizationProof(context.Context, store.SubmitDesktopAuthorizationProofInput, store.DesktopClaimTokenVerifier, store.DesktopActivationTokenIssuer) (store.SubmitDesktopAuthorizationProofResult, error)
+	RenewDesktopCredentialActivationLease(context.Context, store.RenewDesktopCredentialActivationLeaseInput, store.DesktopActivationTokenVerifier) (store.RenewDesktopCredentialActivationLeaseResult, error)
 	AcknowledgeDesktopCredentialActivation(context.Context, store.AcknowledgeDesktopCredentialActivationInput, store.DesktopActivationTokenVerifier) (store.AcknowledgeDesktopCredentialActivationResult, error)
 }
 
@@ -148,6 +150,62 @@ func (m *Manager) SubmitProof(ctx context.Context, input SubmitProofInput) (Subm
 		}
 	}
 	return output, nil
+}
+
+type RenewLeaseInput struct {
+	ActivationToken          string
+	SessionID                string
+	ActivationID             string
+	TargetDeviceID           string
+	KeyGeneration            uint64
+	OperationID              string
+	CredentialRevision       int64
+	LeaseEpoch               int64
+	SourceCredentialRevision int64
+	RevocationEpoch          int64
+	BindingDigest            string
+	Proof                    deviceauth.VerifiedRequest
+	LedgerExpiresAt          time.Time
+}
+
+type RenewLeaseResult struct {
+	ActivationID             string
+	ExecutorID               string
+	OperationID              string
+	CredentialRevision       int64
+	LeaseEpoch               int64
+	SourceCredentialRevision int64
+	RevocationEpoch          int64
+	RenewedAt                string
+	LeaseExpiresAt           string
+	Replayed                 bool
+}
+
+func (m *Manager) RenewLease(ctx context.Context, input RenewLeaseInput) (RenewLeaseResult, error) {
+	if m == nil || m.store == nil || input.ActivationToken == "" || len(input.ActivationToken) > 16<<10 {
+		return RenewLeaseResult{}, ErrInvalidInput
+	}
+	result, err := m.store.RenewDesktopCredentialActivationLease(ctx,
+		store.RenewDesktopCredentialActivationLeaseInput{
+			SessionID: input.SessionID, ActivationID: input.ActivationID,
+			TargetDeviceID: input.TargetDeviceID, KeyGeneration: input.KeyGeneration,
+			OperationID: input.OperationID, CredentialRevision: input.CredentialRevision,
+			LeaseEpoch: input.LeaseEpoch, SourceCredentialRevision: input.SourceCredentialRevision,
+			RevocationEpoch: input.RevocationEpoch, BindingDigest: input.BindingDigest,
+			Proof: input.Proof, LedgerExpiresAt: input.LedgerExpiresAt,
+		}, m.verifyActivationToken(input.ActivationToken))
+	if err != nil {
+		return RenewLeaseResult{}, err
+	}
+	return RenewLeaseResult{
+		ActivationID: result.ActivationID, ExecutorID: result.ExecutorID,
+		OperationID: result.OperationID, CredentialRevision: result.CredentialRevision,
+		LeaseEpoch: result.LeaseEpoch, SourceCredentialRevision: result.SourceCredentialRevision,
+		RevocationEpoch: result.RevocationEpoch,
+		RenewedAt:       result.RenewedAt.UTC().Format(time.RFC3339Nano),
+		LeaseExpiresAt:  result.LeaseExpiresAt.UTC().Format(time.RFC3339Nano),
+		Replayed:        result.Replayed,
+	}, nil
 }
 
 type AcknowledgeInput struct {

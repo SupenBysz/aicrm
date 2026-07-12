@@ -133,6 +133,34 @@ type VerifiedDesktopActivationToken struct {
 
 type DesktopActivationTokenVerifier func(time.Time) (VerifiedDesktopActivationToken, error)
 
+type RenewDesktopCredentialActivationLeaseInput struct {
+	SessionID                string
+	ActivationID             string
+	TargetDeviceID           string
+	KeyGeneration            uint64
+	OperationID              string
+	CredentialRevision       int64
+	LeaseEpoch               int64
+	SourceCredentialRevision int64
+	RevocationEpoch          int64
+	BindingDigest            string
+	Proof                    deviceauth.VerifiedRequest
+	LedgerExpiresAt          time.Time
+}
+
+type RenewDesktopCredentialActivationLeaseResult struct {
+	ActivationID             string
+	ExecutorID               string
+	OperationID              string
+	CredentialRevision       int64
+	LeaseEpoch               int64
+	SourceCredentialRevision int64
+	RevocationEpoch          int64
+	RenewedAt                time.Time
+	LeaseExpiresAt           time.Time
+	Replayed                 bool
+}
+
 type AcknowledgeDesktopCredentialActivationInput struct {
 	SessionID                 string
 	ActivationID              string
@@ -323,6 +351,95 @@ func (s *ControlStore) SubmitDesktopAuthorizationProof(
 	return SubmitDesktopAuthorizationProofResult{
 		Proof: proof, Activation: &activation, ActivationToken: activationToken,
 		SessionRevision: responseRevision,
+	}, nil
+}
+
+func (s *ControlStore) RenewDesktopCredentialActivationLease(
+	ctx context.Context,
+	input RenewDesktopCredentialActivationLeaseInput,
+	verifier DesktopActivationTokenVerifier,
+) (RenewDesktopCredentialActivationLeaseResult, error) {
+	request, err := validateDesktopActivationLeaseRenewalInput(input)
+	if err != nil || verifier == nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, errOrDesktopActivationInputInvalid(err)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	defer tx.Rollback()
+	if result, handled, err := replayDesktopActivationLeaseRenewal(ctx, tx, input, request); handled || err != nil {
+		return commitDesktopActivationLeaseRenewalReplay(tx, result, err)
+	}
+	initial, found, err := loadDesktopActivationByID(ctx, tx, input.ActivationID, false)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	if !found {
+		return RenewDesktopCredentialActivationLeaseResult{}, ErrNotFound
+	}
+	if err := lockBindableExecutor(ctx, tx, initial.ExecutorID); err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	executor, err := loadDesktopActivationExecutor(ctx, tx, initial.ExecutorID)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	session, found, err := loadDesktopActivationSessionForUpdate(ctx, tx, input.SessionID)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	if !found {
+		return RenewDesktopCredentialActivationLeaseResult{}, ErrNotFound
+	}
+	activation, found, err := loadDesktopActivationByID(ctx, tx, input.ActivationID, true)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	if !found {
+		return RenewDesktopCredentialActivationLeaseResult{}, ErrNotFound
+	}
+	binding, bindingFound, err := loadDeviceBindingForUpdate(ctx, tx, activation.ExecutorID)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	device, deviceFound, err := loadDeviceForUpdate(ctx, tx, input.TargetDeviceID)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	if result, handled, err := replayDesktopActivationLeaseRenewal(ctx, tx, input, request); handled || err != nil {
+		return commitDesktopActivationLeaseRenewalReplay(tx, result, err)
+	}
+	now, err := transactionNow(ctx, tx)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	token, err := verifier(now)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	if err := validateNewDesktopActivationLeaseRenewal(
+		ctx, tx, input, request, token, executor, session, activation,
+		binding, bindingFound, device, deviceFound, now,
+	); err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	responseReference := desktopActivationLeaseResponseReference(input.ActivationID)
+	if err := acceptDesktopHandoffClaimProof(ctx, tx, request, device, now, input.LedgerExpiresAt, responseReference); err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	leaseExpiresAt, err := renewDesktopActivationLease(ctx, tx, activation, session, now)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, classifyControlWrite(err)
+	}
+	return RenewDesktopCredentialActivationLeaseResult{
+		ActivationID: activation.ID, ExecutorID: activation.ExecutorID,
+		OperationID: activation.OperationID, CredentialRevision: activation.CredentialRevision,
+		LeaseEpoch: activation.LeaseEpoch, SourceCredentialRevision: activation.SourceCredentialRevision,
+		RevocationEpoch: activation.RevocationEpoch, RenewedAt: now, LeaseExpiresAt: leaseExpiresAt,
 	}, nil
 }
 
@@ -856,6 +973,146 @@ func validateDesktopAccountIntent(
 	return nil
 }
 
+func validateNewDesktopActivationLeaseRenewal(
+	ctx context.Context,
+	tx *sql.Tx,
+	input RenewDesktopCredentialActivationLeaseInput,
+	request deviceauth.LedgerRequest,
+	token VerifiedDesktopActivationToken,
+	executor storedDesktopActivationExecutor,
+	session storedDesktopActivationSession,
+	activation DesktopCredentialActivationProjection,
+	binding storedDeviceBinding,
+	bindingFound bool,
+	device storedDevice,
+	deviceFound bool,
+	now time.Time,
+) error {
+	if activation.Status != "pending" || activation.ID != input.ActivationID ||
+		activation.SessionID != input.SessionID || activation.DeviceID != input.TargetDeviceID ||
+		activation.OperationID != input.OperationID || activation.CredentialRevision != input.CredentialRevision ||
+		activation.LeaseEpoch != input.LeaseEpoch || activation.SourceCredentialRevision != input.SourceCredentialRevision ||
+		activation.RevocationEpoch != input.RevocationEpoch || activation.BindingDigest != input.BindingDigest ||
+		activation.ActivationTokenHash != request.AuthorizationTokenHash {
+		return ErrDesktopActivationConflict
+	}
+	if token.TokenID != activation.ID || token.ActivationID != activation.ID ||
+		token.SessionID != activation.SessionID || token.ExecutorID != activation.ExecutorID ||
+		token.DeviceID != activation.DeviceID || token.OperationID != activation.OperationID ||
+		token.CredentialRevision != activation.CredentialRevision || token.LeaseEpoch != activation.LeaseEpoch ||
+		token.SourceCredentialRevision != activation.SourceCredentialRevision ||
+		token.RevocationEpoch != activation.RevocationEpoch || token.BindingDigest != activation.BindingDigest ||
+		token.TokenHash != request.AuthorizationTokenHash {
+		return ErrDesktopActivationTokenMismatch
+	}
+	if executor.RuntimeType != "desktop" || executor.Status != "enabled" ||
+		executor.RevocationEpoch != activation.RevocationEpoch ||
+		executor.CredentialRevisionCounter != activation.CredentialRevision ||
+		coalesceRevision(executor.CurrentCredentialRevision) != activation.SourceCredentialRevision {
+		return ErrExecutorFenced
+	}
+	if !desktopConfigRuntimeMatches(executor, binding, activation.DeviceID) {
+		return ErrExecutorFenced
+	}
+	if session.RuntimeType != "desktop" || session.FlowType != "browser" ||
+		session.Status != "verifying" || session.ExecutorID != activation.ExecutorID ||
+		session.BoundDeviceID != activation.DeviceID || session.OperationID != activation.OperationID ||
+		!session.PreparedCredentialRevision.Valid ||
+		session.PreparedCredentialRevision.Int64 != activation.CredentialRevision {
+		return ErrRevisionConflict
+	}
+	if !now.Before(activation.ExpiresAt) || !now.Before(session.SessionDeadlineAt) {
+		return ErrDesktopHandoffExpired
+	}
+	if !bindingFound || binding.Status != "active" || binding.ExecutorID != activation.ExecutorID ||
+		binding.DeviceID != activation.DeviceID || binding.Revision != activation.DeviceBindingRevision {
+		return ErrDesktopHandoffTargetMismatch
+	}
+	if !deviceFound || device.Projection.Status != "active" || device.Projection.ID != activation.DeviceID ||
+		device.Projection.WorkspaceType != "platform" || device.Projection.WorkspaceID != "platform_root" {
+		return ErrDesktopHandoffTargetMismatch
+	}
+	if device.Projection.KeyGeneration != input.KeyGeneration {
+		return ErrDeviceKeyGenerationMismatch
+	}
+	if err := deviceauth.ValidateTimestamp(input.Proof.TimestampMilli, now); err != nil {
+		return err
+	}
+	if err := validateLedgerExpiry(input.LedgerExpiresAt, now); err != nil {
+		return err
+	}
+	var leaseOperation, leaseOwner, leaseStatus string
+	var leaseEpoch, sourceRevision, revocationEpoch int64
+	var leaseExpiresAt time.Time
+	if err := tx.QueryRowContext(ctx, `
+		SELECT operation_id,owner_instance_id,lease_epoch,lease_expires_at,
+		       source_credential_revision,revocation_epoch,status
+		FROM ky_ai_executor_operation_lease WHERE executor_id=$1 FOR UPDATE
+	`, activation.ExecutorID).Scan(&leaseOperation, &leaseOwner, &leaseEpoch, &leaseExpiresAt,
+		&sourceRevision, &revocationEpoch, &leaseStatus); err != nil {
+		return ErrExecutorFenced
+	}
+	if leaseOperation != activation.OperationID || leaseOwner != desktopLeaseOwner(activation.DeviceID) ||
+		leaseEpoch != activation.LeaseEpoch || sourceRevision != activation.SourceCredentialRevision ||
+		revocationEpoch != activation.RevocationEpoch || leaseStatus != "active" || !leaseExpiresAt.After(now) {
+		return ErrExecutorFenced
+	}
+	var candidateStatus, candidateDigest, candidateDevice, runtimeBindingID string
+	var candidateLease, candidateSource, candidateRevocation, runtimeBindingRevision int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT status,binding_digest,device_id,runtime_binding_id,runtime_binding_revision,
+		       lease_epoch,source_credential_revision,revocation_epoch
+		FROM ky_ai_executor_credential_binding
+		WHERE executor_id=$1 AND revision=$2 FOR UPDATE
+	`, activation.ExecutorID, activation.CredentialRevision).Scan(&candidateStatus,
+		&candidateDigest, &candidateDevice, &runtimeBindingID, &runtimeBindingRevision,
+		&candidateLease, &candidateSource, &candidateRevocation); err != nil {
+		return ErrExecutorFenced
+	}
+	if candidateStatus != "prepared" || candidateDigest != activation.BindingDigest ||
+		candidateDevice != activation.DeviceID || runtimeBindingID != activation.DeviceID ||
+		runtimeBindingRevision != activation.DeviceBindingRevision || candidateLease != activation.LeaseEpoch ||
+		candidateSource != activation.SourceCredentialRevision || candidateRevocation != activation.RevocationEpoch {
+		return ErrExecutorFenced
+	}
+	return nil
+}
+
+func renewDesktopActivationLease(
+	ctx context.Context,
+	tx *sql.Tx,
+	activation DesktopCredentialActivationProjection,
+	session storedDesktopActivationSession,
+	now time.Time,
+) (time.Time, error) {
+	leaseExpiresAt := now.Add(desktopOperationLeaseTTL)
+	if activation.ExpiresAt.Before(leaseExpiresAt) {
+		leaseExpiresAt = activation.ExpiresAt
+	}
+	if session.SessionDeadlineAt.Before(leaseExpiresAt) {
+		leaseExpiresAt = session.SessionDeadlineAt
+	}
+	if !leaseExpiresAt.After(now) {
+		return time.Time{}, ErrDesktopHandoffExpired
+	}
+	updated, err := tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_operation_lease
+		SET lease_expires_at=$8,updated_at=$7
+		WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3
+		  AND lease_epoch=$4 AND source_credential_revision=$5 AND revocation_epoch=$6
+		  AND status='active' AND lease_expires_at>$7
+	`, activation.ExecutorID, activation.OperationID, desktopLeaseOwner(activation.DeviceID),
+		activation.LeaseEpoch, activation.SourceCredentialRevision, activation.RevocationEpoch,
+		now, leaseExpiresAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if affected, _ := updated.RowsAffected(); affected != 1 {
+		return time.Time{}, ErrExecutorFenced
+	}
+	return leaseExpiresAt, nil
+}
+
 func validateNewDesktopActivationACK(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -995,6 +1252,32 @@ func validateDesktopAuthorizationProofInput(input SubmitDesktopAuthorizationProo
 	return ledgerRequestFromProof(input.Proof, input.KeyGeneration)
 }
 
+func validateDesktopActivationLeaseRenewalInput(input RenewDesktopCredentialActivationLeaseInput) (deviceauth.LedgerRequest, error) {
+	if !validOpaqueValue(input.SessionID) || !validOpaqueValue(input.ActivationID) ||
+		!validOpaqueValue(input.OperationID) || deviceauth.ValidateDeviceID(input.TargetDeviceID) != nil ||
+		input.KeyGeneration == 0 || input.KeyGeneration > math.MaxInt64 ||
+		input.CredentialRevision <= 0 || input.CredentialRevision >= math.MaxInt64 ||
+		input.LeaseEpoch <= 0 || input.LeaseEpoch >= math.MaxInt64 ||
+		input.SourceCredentialRevision < 0 || input.SourceCredentialRevision >= math.MaxInt64 ||
+		input.RevocationEpoch < 0 || input.RevocationEpoch >= math.MaxInt64 ||
+		validateStoreDigest(input.BindingDigest, false) != nil ||
+		input.Proof.DeviceID != input.TargetDeviceID || input.Proof.Sequence == 0 ||
+		input.Proof.Sequence > math.MaxInt64 || input.Proof.TimestampMilli <= 0 ||
+		validateStoreDigest(input.Proof.BodySHA256, false) != nil ||
+		validateStoreDigest(input.Proof.AuthorizationTokenHash, false) != nil {
+		return deviceauth.LedgerRequest{}, ErrDesktopActivationInputInvalid
+	}
+	method, err := deviceauth.CanonicalMethod(input.Proof.CanonicalMethod)
+	if err != nil || method != "POST" {
+		return deviceauth.LedgerRequest{}, ErrDesktopActivationInputInvalid
+	}
+	path, err := deviceauth.CanonicalPath(input.Proof.CanonicalPath)
+	if err != nil || path != desktopActivationLeaseRenewalPath(input.SessionID, input.ActivationID) {
+		return deviceauth.LedgerRequest{}, ErrDesktopHandoffTargetMismatch
+	}
+	return ledgerRequestFromProof(input.Proof, input.KeyGeneration)
+}
+
 func validateDesktopActivationACKInput(input AcknowledgeDesktopCredentialActivationInput) (deviceauth.LedgerRequest, error) {
 	if !validOpaqueValue(input.SessionID) || !validOpaqueValue(input.ActivationID) ||
 		!validOpaqueValue(input.OperationID) || deviceauth.ValidateDeviceID(input.TargetDeviceID) != nil ||
@@ -1076,6 +1359,61 @@ func replayDesktopAuthorizationProof(
 	result.Activation = &activation
 	result.ActivationToken = issued.Token
 	return result, true, nil
+}
+
+func replayDesktopActivationLeaseRenewal(
+	ctx context.Context,
+	tx *sql.Tx,
+	input RenewDesktopCredentialActivationLeaseInput,
+	request deviceauth.LedgerRequest,
+) (RenewDesktopCredentialActivationLeaseResult, bool, error) {
+	existing, err := loadExactDeviceLedger(ctx, tx, request)
+	if err != nil || existing == nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, false, err
+	}
+	decision, err := decideExactDeviceLedger(request, existing)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, err
+	}
+	if decision.Action != deviceauth.LedgerReturnRecorded ||
+		decision.ResponseReference != desktopActivationLeaseResponseReference(input.ActivationID) {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, ErrDeviceProofReplayed
+	}
+	activation, found, err := loadDesktopActivationByID(ctx, tx, input.ActivationID, false)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, err
+	}
+	if !found || activation.SessionID != input.SessionID || activation.DeviceID != input.TargetDeviceID ||
+		activation.OperationID != input.OperationID || activation.CredentialRevision != input.CredentialRevision ||
+		activation.LeaseEpoch != input.LeaseEpoch || activation.SourceCredentialRevision != input.SourceCredentialRevision ||
+		activation.RevocationEpoch != input.RevocationEpoch || activation.BindingDigest != input.BindingDigest ||
+		activation.ActivationTokenHash != request.AuthorizationTokenHash {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, deviceauth.ErrInvalidLedgerState
+	}
+	session, found, err := loadDesktopActivationSession(ctx, tx, activation.SessionID, false)
+	if err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, err
+	}
+	if !found || session.ExecutorID != activation.ExecutorID {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, deviceauth.ErrInvalidLedgerState
+	}
+	leaseExpiresAt := existing.AcceptedAt.Add(desktopOperationLeaseTTL)
+	if activation.ExpiresAt.Before(leaseExpiresAt) {
+		leaseExpiresAt = activation.ExpiresAt
+	}
+	if session.SessionDeadlineAt.Before(leaseExpiresAt) {
+		leaseExpiresAt = session.SessionDeadlineAt
+	}
+	if !leaseExpiresAt.After(existing.AcceptedAt) {
+		return RenewDesktopCredentialActivationLeaseResult{}, true, deviceauth.ErrInvalidLedgerState
+	}
+	return RenewDesktopCredentialActivationLeaseResult{
+		ActivationID: activation.ID, ExecutorID: activation.ExecutorID,
+		OperationID: activation.OperationID, CredentialRevision: activation.CredentialRevision,
+		LeaseEpoch: activation.LeaseEpoch, SourceCredentialRevision: activation.SourceCredentialRevision,
+		RevocationEpoch: activation.RevocationEpoch, RenewedAt: existing.AcceptedAt,
+		LeaseExpiresAt: leaseExpiresAt, Replayed: true,
+	}, true, nil
 }
 
 func replayDesktopActivationACK(
@@ -1296,6 +1634,20 @@ func commitDesktopAuthorizationProofReplay(
 	return result, nil
 }
 
+func commitDesktopActivationLeaseRenewalReplay(
+	tx *sql.Tx,
+	result RenewDesktopCredentialActivationLeaseResult,
+	replayErr error,
+) (RenewDesktopCredentialActivationLeaseResult, error) {
+	if replayErr != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, replayErr
+	}
+	if err := tx.Commit(); err != nil {
+		return RenewDesktopCredentialActivationLeaseResult{}, classifyControlWrite(err)
+	}
+	return result, nil
+}
+
 func commitDesktopActivationACKReplay(
 	tx *sql.Tx,
 	result AcknowledgeDesktopCredentialActivationResult,
@@ -1318,12 +1670,20 @@ func desktopActivationACKPath(sessionID, activationID string) string {
 	return "/api/v1/ai-executor-authorization-sessions/" + sessionID + "/desktop-activations/" + activationID + "/ack"
 }
 
+func desktopActivationLeaseRenewalPath(sessionID, activationID string) string {
+	return "/api/v1/ai-executor-authorization-sessions/" + sessionID + "/desktop-activations/" + activationID + "/lease-renewals"
+}
+
 func desktopProofResponseReference(handoffID string) string {
 	return "desktop_proof_" + handoffID
 }
 
 func desktopActivationResponseReference(activationID string) string {
 	return "desktop_activation_" + activationID
+}
+
+func desktopActivationLeaseResponseReference(activationID string) string {
+	return "desktop_activation_lease_" + activationID
 }
 
 func desktopLeaseOwner(deviceID string) string {

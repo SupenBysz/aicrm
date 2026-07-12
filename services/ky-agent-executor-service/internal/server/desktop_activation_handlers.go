@@ -26,6 +26,7 @@ var desktopActivationDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type desktopActivationRuntime interface {
 	SubmitProof(context.Context, desktopactivation.SubmitProofInput) (desktopactivation.SubmitProofResult, error)
+	RenewLease(context.Context, desktopactivation.RenewLeaseInput) (desktopactivation.RenewLeaseResult, error)
 	Acknowledge(context.Context, desktopactivation.AcknowledgeInput) (desktopactivation.AcknowledgeResult, error)
 }
 
@@ -54,10 +55,24 @@ type desktopActivationACKRawBody struct {
 	BindingDigest             json.RawMessage `json:"bindingDigest"`
 }
 
+type desktopActivationLeaseRenewalRawBody struct {
+	OperationID              json.RawMessage `json:"operationId"`
+	ActivationID             json.RawMessage `json:"activationId"`
+	CredentialRevision       json.RawMessage `json:"credentialRevision"`
+	LeaseEpoch               json.RawMessage `json:"leaseEpoch"`
+	SourceCredentialRevision json.RawMessage `json:"sourceCredentialRevision"`
+	RevocationEpoch          json.RawMessage `json:"revocationEpoch"`
+	BindingDigest            json.RawMessage `json:"bindingDigest"`
+}
+
 func (s *Server) registerDesktopActivationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(
 		"POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-proofs",
 		s.submitDesktopAuthorizationProof,
+	)
+	mux.HandleFunc(
+		"POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-activations/{activationId}/lease-renewals",
+		s.renewDesktopCredentialActivationLease,
 	)
 	mux.HandleFunc(
 		"POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-activations/{activationId}/ack",
@@ -168,6 +183,61 @@ func (s *Server) acknowledgeDesktopCredentialActivation(w http.ResponseWriter, r
 	})
 }
 
+func (s *Server) renewDesktopCredentialActivationLease(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	ensureRequestID(r)
+	if !s.desktopActivationReady() {
+		writeError(w, r, http.StatusServiceUnavailable, desktopActivationUnavailableCode, desktopActivationUnavailableText)
+		return
+	}
+	sessionID, activationID := r.PathValue("sessionId"), r.PathValue("activationId")
+	expectedPath := desktopActivationLeaseRenewalPath(sessionID, activationID)
+	if !validOpaqueID(sessionID) || !validOpaqueID(activationID) {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "Desktop credential activation lease path is invalid")
+		return
+	}
+	if !requireRawDevicePath(w, r, expectedPath) || !rejectDesktopActivationOverrides(w, r) {
+		return
+	}
+	authorization, ok := strictSingleHeader(r.Header, "Authorization")
+	if !ok || !validDesktopActivationAuthorization(authorization, "AiCRM-Activation") {
+		writeError(w, r, http.StatusUnauthorized, "desktop_activation_unauthorized", "Desktop credential activation authentication is required")
+		return
+	}
+	var rawBody desktopActivationLeaseRenewalRawBody
+	raw, ok := decodeDeviceJSON(w, r, desktopActivationRequestLimit, &rawBody)
+	if !ok {
+		return
+	}
+	input, ok := parseDesktopActivationLeaseRenewalBody(rawBody, sessionID, activationID)
+	if !ok {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "Desktop credential activation lease renewal input is invalid")
+		return
+	}
+	key, proof, ok := s.verifyDesktopActivationDeviceRequest(w, r, raw, "AiCRM-Activation")
+	if !ok {
+		return
+	}
+	input.ActivationToken = strings.TrimPrefix(authorization, "AiCRM-Activation ")
+	input.TargetDeviceID = proof.DeviceID
+	input.KeyGeneration = key.KeyGeneration
+	input.Proof = proof
+	input.LedgerExpiresAt = time.Now().UTC().Add(store.DeviceLedgerAuditRetention + deviceLedgerExpiryMargin)
+	result, err := s.activationRuntime.RenewLease(r.Context(), input)
+	if err != nil {
+		s.writeDesktopActivationError(w, r, err, true)
+		return
+	}
+	writeData(w, r, http.StatusOK, map[string]any{
+		"activationId": result.ActivationID, "executorId": result.ExecutorID,
+		"operationId": result.OperationID, "credentialRevision": result.CredentialRevision,
+		"leaseEpoch": result.LeaseEpoch, "sourceCredentialRevision": result.SourceCredentialRevision,
+		"revocationEpoch": result.RevocationEpoch, "renewedAt": result.RenewedAt,
+		"leaseExpiresAt": result.LeaseExpiresAt, "replayed": result.Replayed,
+	})
+}
+
 func (s *Server) desktopActivationReady() bool {
 	return s.cfg.WriteEnabled && s.control != nil && s.activationRuntime != nil
 }
@@ -242,6 +312,30 @@ func parseDesktopProofBody(raw desktopProofRawBody, sessionID string) (desktopac
 		SessionID: sessionID, HandoffID: handoffID, SessionRevision: sessionRevision,
 		LoginIDHash: loginIDHash, Result: result, CheckedAt: checkedAt,
 		AccountFingerprint: accountFingerprint, CandidateBindingDigest: candidateBindingDigest,
+	}, true
+}
+
+func parseDesktopActivationLeaseRenewalBody(
+	raw desktopActivationLeaseRenewalRawBody,
+	sessionID string,
+	activationID string,
+) (desktopactivation.RenewLeaseInput, bool) {
+	var operationID, bodyActivationID, bindingDigest string
+	var credentialRevision, leaseEpoch, sourceRevision, revocationEpoch int64
+	if !decodeRequiredDesktopActivationJSON(raw.OperationID, &operationID) || !validOpaqueID(operationID) ||
+		!decodeRequiredDesktopActivationJSON(raw.ActivationID, &bodyActivationID) || bodyActivationID != activationID ||
+		!decodeRequiredDesktopActivationJSON(raw.CredentialRevision, &credentialRevision) || credentialRevision <= 0 || credentialRevision >= math.MaxInt64 ||
+		!decodeRequiredDesktopActivationJSON(raw.LeaseEpoch, &leaseEpoch) || leaseEpoch <= 0 || leaseEpoch >= math.MaxInt64 ||
+		!decodeRequiredDesktopActivationJSON(raw.SourceCredentialRevision, &sourceRevision) || sourceRevision < 0 || sourceRevision >= math.MaxInt64 ||
+		!decodeRequiredDesktopActivationJSON(raw.RevocationEpoch, &revocationEpoch) || revocationEpoch < 0 || revocationEpoch >= math.MaxInt64 ||
+		!decodeRequiredDesktopActivationJSON(raw.BindingDigest, &bindingDigest) || !desktopActivationDigestPattern.MatchString(bindingDigest) {
+		return desktopactivation.RenewLeaseInput{}, false
+	}
+	return desktopactivation.RenewLeaseInput{
+		SessionID: sessionID, ActivationID: activationID, OperationID: operationID,
+		CredentialRevision: credentialRevision, LeaseEpoch: leaseEpoch,
+		SourceCredentialRevision: sourceRevision, RevocationEpoch: revocationEpoch,
+		BindingDigest: bindingDigest,
 	}, true
 }
 
@@ -381,4 +475,8 @@ func desktopProofPath(sessionID string) string {
 
 func desktopActivationACKPath(sessionID, activationID string) string {
 	return "/api/v1/ai-executor-authorization-sessions/" + sessionID + "/desktop-activations/" + activationID + "/ack"
+}
+
+func desktopActivationLeaseRenewalPath(sessionID, activationID string) string {
+	return "/api/v1/ai-executor-authorization-sessions/" + sessionID + "/desktop-activations/" + activationID + "/lease-renewals"
 }

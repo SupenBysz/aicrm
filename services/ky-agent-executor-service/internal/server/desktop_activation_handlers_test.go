@@ -25,10 +25,23 @@ type fakeDesktopActivationRuntime struct {
 	proofResult desktopactivation.SubmitProofResult
 	proofErr    error
 	proofCalls  int
+	renewInput  desktopactivation.RenewLeaseInput
+	renewResult desktopactivation.RenewLeaseResult
+	renewErr    error
+	renewCalls  int
 	ackInput    desktopactivation.AcknowledgeInput
 	ackResult   desktopactivation.AcknowledgeResult
 	ackErr      error
 	ackCalls    int
+}
+
+func (f *fakeDesktopActivationRuntime) RenewLease(
+	_ context.Context,
+	input desktopactivation.RenewLeaseInput,
+) (desktopactivation.RenewLeaseResult, error) {
+	f.renewCalls++
+	f.renewInput = input
+	return f.renewResult, f.renewErr
 }
 
 func (f *fakeDesktopActivationRuntime) SubmitProof(
@@ -129,6 +142,13 @@ func desktopActivationACKTestBody() string {
 	)
 }
 
+func desktopActivationLeaseRenewalTestBody() string {
+	return fmt.Sprintf(
+		`{"operationId":"desktop_operation_1","activationId":"desktop_activation_1","credentialRevision":7,"leaseEpoch":3,"sourceCredentialRevision":6,"revocationEpoch":2,"bindingDigest":%q}`,
+		strings.Repeat("c", 64),
+	)
+}
+
 func desktopActivationVerificationControl(fixture deviceFixture) *fakeDeviceControl {
 	return &fakeDeviceControl{verificationKey: store.DeviceVerificationKey{
 		DeviceID: fixture.deviceID, PublicKey: fixture.publicKey, KeyGeneration: 2,
@@ -198,6 +218,116 @@ func TestDesktopProofTerminalResultHasNoActivationFields(t *testing.T) {
 				strings.Contains(recorder.Body.String(), "activationToken") ||
 				!strings.Contains(recorder.Body.String(), `"replayed":true`) {
 				t.Fatalf("status=%d input=%#v body=%s", recorder.Code, runtime.proofInput, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestDesktopActivationLeaseRenewalVerifiesTokenAndReturnsDatabaseTimes(t *testing.T) {
+	fixture := newDeviceHandlerFixture(t)
+	runtime := &fakeDesktopActivationRuntime{renewResult: desktopactivation.RenewLeaseResult{
+		ActivationID: "desktop_activation_1", ExecutorID: "executor_1",
+		OperationID: "desktop_operation_1", CredentialRevision: 7, LeaseEpoch: 3,
+		SourceCredentialRevision: 6, RevocationEpoch: 2,
+		RenewedAt:      "2026-07-13T02:00:00.123456Z",
+		LeaseExpiresAt: "2026-07-13T02:00:30.123456Z", Replayed: true,
+	}}
+	path := desktopActivationLeaseRenewalPath("auth_session_1", "desktop_activation_1")
+	body := desktopActivationLeaseRenewalTestBody()
+	request := signedDesktopActivationRequest(
+		t, fixture, path, body, "AiCRM-Activation", "activation.header.signature", 30,
+	)
+	recorder := httptest.NewRecorder()
+	desktopActivationHandlerServer(desktopActivationVerificationControl(fixture), runtime).buildMux().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	input := runtime.renewInput
+	if runtime.renewCalls != 1 || input.ActivationToken != "activation.header.signature" ||
+		input.SessionID != "auth_session_1" || input.ActivationID != "desktop_activation_1" ||
+		input.OperationID != "desktop_operation_1" || input.TargetDeviceID != fixture.deviceID ||
+		input.KeyGeneration != 2 || input.CredentialRevision != 7 || input.LeaseEpoch != 3 ||
+		input.SourceCredentialRevision != 6 || input.RevocationEpoch != 2 ||
+		input.BindingDigest != strings.Repeat("c", 64) || input.Proof.AuthorizationTokenHash == "" ||
+		input.LedgerExpiresAt.Before(time.Now().UTC().Add(store.DeviceLedgerAuditRetention)) {
+		t.Fatalf("renew input=%#v", input)
+	}
+	for _, expected := range []string{
+		`"activationId":"desktop_activation_1"`, `"executorId":"executor_1"`,
+		`"operationId":"desktop_operation_1"`, `"credentialRevision":7`, `"leaseEpoch":3`,
+		`"sourceCredentialRevision":6`, `"revocationEpoch":2`,
+		`"renewedAt":"2026-07-13T02:00:00.123456Z"`,
+		`"leaseExpiresAt":"2026-07-13T02:00:30.123456Z"`, `"replayed":true`,
+	} {
+		if !strings.Contains(recorder.Body.String(), expected) {
+			t.Fatalf("response missing %s: %s", expected, recorder.Body.String())
+		}
+	}
+	if strings.Contains(recorder.Body.String(), "activation.header.signature") ||
+		recorder.Header().Get("Cache-Control") != "no-store" ||
+		recorder.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("unsafe renewal response headers=%v body=%s", recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestDesktopActivationLeaseRenewalRejectsOverridesAndMismatchedBody(t *testing.T) {
+	fixture := newDeviceHandlerFixture(t)
+	path := desktopActivationLeaseRenewalPath("auth_session_1", "desktop_activation_1")
+	valid := desktopActivationLeaseRenewalTestBody()
+	tests := []struct {
+		name   string
+		body   string
+		mutate func(*http.Request)
+		status int
+	}{
+		{"query", valid, func(r *http.Request) { r.URL.RawQuery = "x=1"; r.RequestURI = path + "?x=1" }, http.StatusBadRequest},
+		{"workspace", valid, func(r *http.Request) { r.Header.Set("X-KY-Workspace-Type", "platform") }, http.StatusBadRequest},
+		{"wrong activation", strings.Replace(valid, `"activationId":"desktop_activation_1"`, `"activationId":"desktop_activation_other"`, 1), nil, http.StatusBadRequest},
+		{"unknown", strings.TrimSuffix(valid, "}") + `,"leaseSeconds":30}`, nil, http.StatusBadRequest},
+	}
+	for index, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			runtime := &fakeDesktopActivationRuntime{}
+			request := signedDesktopActivationRequest(
+				t, fixture, path, testCase.body, "AiCRM-Activation", "activation.header.signature", uint64(31+index),
+			)
+			if testCase.mutate != nil {
+				testCase.mutate(request)
+			}
+			recorder := httptest.NewRecorder()
+			desktopActivationHandlerServer(desktopActivationVerificationControl(fixture), runtime).buildMux().ServeHTTP(recorder, request)
+			if recorder.Code != testCase.status || runtime.renewCalls != 0 {
+				t.Fatalf("status=%d body=%s calls=%d", recorder.Code, recorder.Body.String(), runtime.renewCalls)
+			}
+		})
+	}
+}
+
+func TestDesktopActivationLeaseRenewalMapsFenceAndExpiredToken(t *testing.T) {
+	fixture := newDeviceHandlerFixture(t)
+	path := desktopActivationLeaseRenewalPath("auth_session_1", "desktop_activation_1")
+	body := desktopActivationLeaseRenewalTestBody()
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"fenced", store.ErrExecutorFenced, http.StatusConflict, "executor_fenced"},
+		{"expired", trustedtoken.ErrExpired, http.StatusGone, "desktop_authorization_gone"},
+	}
+	for index, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			runtime := &fakeDesktopActivationRuntime{renewErr: testCase.err}
+			request := signedDesktopActivationRequest(
+				t, fixture, path, body, "AiCRM-Activation", "activation.header.signature", uint64(50+index),
+			)
+			recorder := httptest.NewRecorder()
+			desktopActivationHandlerServer(desktopActivationVerificationControl(fixture), runtime).buildMux().ServeHTTP(recorder, request)
+			if recorder.Code != testCase.status || runtime.renewCalls != 1 ||
+				!strings.Contains(recorder.Body.String(), testCase.code) ||
+				strings.Contains(recorder.Body.String(), "activation.header.signature") {
+				t.Fatalf("status=%d calls=%d body=%s", recorder.Code, runtime.renewCalls, recorder.Body.String())
 			}
 		})
 	}
