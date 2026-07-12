@@ -108,6 +108,46 @@ func TestCloneIsWritableCOWAndDoesNotMutateRevision(t *testing.T) {
 	}
 }
 
+func TestOperationPromotionCreatesANewImmutableRevision(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server promotion is Linux-only")
+	}
+	manager, _ := New(filepath.Join(t.TempDir(), "executors"))
+	staging, _ := manager.CreateStaging("executor_1", "session_1")
+	_ = os.WriteFile(filepath.Join(staging, "auth.json"), []byte("original"), 0o600)
+	digest, _ := DigestTree(staging)
+	original, err := manager.Promote("executor_1", "session_1", 1, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, err := manager.CloneRevision("executor_1", 1, "operation_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(operation, "auth.json"), []byte("rotated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rotatedDigest, err := DigestTree(operation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := manager.PromoteOperation("executor_1", "operation_1", 2, rotatedDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(operation); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("operation source survived promotion: %v", err)
+	}
+	if err := ValidateReadOnlyTree(rotated); err != nil {
+		t.Fatalf("rotated revision is not immutable: %v", err)
+	}
+	originalBytes, _ := os.ReadFile(filepath.Join(original, "auth.json"))
+	rotatedBytes, _ := os.ReadFile(filepath.Join(rotated, "auth.json"))
+	if string(originalBytes) != "original" || string(rotatedBytes) != "rotated" {
+		t.Fatalf("original=%q rotated=%q", originalBytes, rotatedBytes)
+	}
+}
+
 func TestPathsRejectTraversalSymlinksAndArbitraryDeletion(t *testing.T) {
 	manager, _ := New(filepath.Join(t.TempDir(), "executors"))
 	for _, value := range []string{"../escape", "with/slash", "", "with:colon"} {

@@ -109,31 +109,43 @@ func (m *Manager) CloneRevision(executorID string, revision int64, operationID s
 }
 
 func (m *Manager) Promote(executorID, sessionID string, revision int64, expectedDigest string) (string, error) {
-	if !isDigest(expectedDigest) {
-		return "", ErrDigestMismatch
-	}
 	staging, err := m.StagingPath(executorID, sessionID)
 	if err != nil {
 		return "", err
+	}
+	return m.promotePath(executorID, staging, revision, expectedDigest)
+}
+
+func (m *Manager) PromoteOperation(executorID, operationID string, revision int64, expectedDigest string) (string, error) {
+	operation, err := m.OperationPath(executorID, operationID)
+	if err != nil {
+		return "", err
+	}
+	return m.promotePath(executorID, operation, revision, expectedDigest)
+}
+
+func (m *Manager) promotePath(executorID, source string, revision int64, expectedDigest string) (string, error) {
+	if !isDigest(expectedDigest) {
+		return "", ErrDigestMismatch
 	}
 	target, err := m.RevisionPath(executorID, revision)
 	if err != nil {
 		return "", err
 	}
-	digest, err := DigestTree(staging)
+	digest, err := DigestTree(source)
 	if err != nil {
 		return "", err
 	}
 	if digest != expectedDigest {
 		return "", ErrDigestMismatch
 	}
-	if err := DurableBarrier(staging); err != nil {
+	if err := DurableBarrier(source); err != nil {
 		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return "", err
 	}
-	if err := renameNoReplace(staging, target); err != nil {
+	if err := renameNoReplace(source, target); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return "", ErrTargetExists
 		}
