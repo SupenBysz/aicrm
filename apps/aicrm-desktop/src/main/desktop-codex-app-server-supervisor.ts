@@ -61,6 +61,13 @@ export interface DesktopCodexAppServerSnapshot extends DesktopCodexAppServerRece
   errorCode: DesktopCodexAppServerSupervisorErrorCode | null;
 }
 
+export interface DesktopCodexAppServerLoginCompletion
+  extends DesktopCodexAppServerSnapshot {
+  state: "login_completed";
+  errorCode: null;
+  loginIdHash: string;
+}
+
 export interface DesktopCodexAppServerStateEvent extends DesktopCodexAppServerSnapshot {
   previousState: DesktopCodexAppServerState | null;
 }
@@ -93,7 +100,7 @@ interface RuntimeInstance {
   loginId: string | null;
   startPromise: Promise<Readonly<DesktopCodexAppServerReceipt>>;
   loginStartPromise: Promise<Readonly<DesktopCodexAppServerSnapshot>> | null;
-  loginWaitPromise: Promise<Readonly<DesktopCodexAppServerSnapshot>> | null;
+  loginWaitPromise: Promise<Readonly<DesktopCodexAppServerLoginCompletion>> | null;
   stopPromise: Promise<Readonly<DesktopCodexAppServerSnapshot>> | null;
   stopCompleted: boolean;
 }
@@ -200,7 +207,7 @@ export class DesktopCodexAppServerSupervisor {
 
   waitForLogin(
     receipt: DesktopCodexAppServerReceipt
-  ): Promise<Readonly<DesktopCodexAppServerSnapshot>> {
+  ): Promise<Readonly<DesktopCodexAppServerLoginCompletion>> {
     const instance = this.resolveReceipt(receipt);
     if (instance.loginWaitPromise) return instance.loginWaitPromise;
     if (instance.state !== "waiting_user" || !instance.client || instance.loginId === null) {
@@ -357,7 +364,7 @@ export class DesktopCodexAppServerSupervisor {
     instance: RuntimeInstance,
     client: DesktopCodexAppServerClient,
     loginId: string
-  ): Promise<Readonly<DesktopCodexAppServerSnapshot>> {
+  ): Promise<Readonly<DesktopCodexAppServerLoginCompletion>> {
     try {
       const completion = validateLoginCompletion(await client.waitForLogin(loginId));
       if (instance.state !== "waiting_user") throw this.stateError(instance);
@@ -369,7 +376,7 @@ export class DesktopCodexAppServerSupervisor {
       }
       instance.loginId = null;
       this.transition(instance, "login_completed");
-      return this.snapshot(instance);
+      return this.loginCompletion(instance, loginId);
     } catch (error) {
       if (instance.state === "stopping" || instance.state === "stopped") {
         throw this.stateError(instance);
@@ -515,6 +522,27 @@ export class DesktopCodexAppServerSupervisor {
       ...instance.receipt,
       state: instance.state,
       errorCode: instance.errorCode
+    });
+  }
+
+  private loginCompletion(
+    instance: RuntimeInstance,
+    loginId: string
+  ): Readonly<DesktopCodexAppServerLoginCompletion> {
+    if (instance.state !== "login_completed" || instance.errorCode !== null ||
+        this.instances.get(instance.binding.executorId) !== instance) {
+      throw this.stateError(instance);
+    }
+    return Object.freeze({
+      version: instance.receipt.version,
+      bootIdHash: instance.receipt.bootIdHash,
+      instanceIdHash: instance.receipt.instanceIdHash,
+      executorId: instance.receipt.executorId,
+      sessionId: instance.receipt.sessionId,
+      stagingOwnershipDigest: instance.receipt.stagingOwnershipDigest,
+      state: "login_completed",
+      errorCode: null,
+      loginIdHash: createHash("sha256").update(loginId, "utf8").digest("hex")
     });
   }
 }
@@ -732,10 +760,18 @@ function staleReceiptError(): DesktopCodexAppServerSupervisorError {
 function normalizedInvalidInput(
   error: unknown
 ): DesktopCodexAppServerSupervisorError | null {
-  return error instanceof DesktopCodexAppServerSupervisorError &&
-    error.code === "desktop_codex_app_server_invalid_input"
-    ? error
-    : null;
+  try {
+    if (!(error instanceof DesktopCodexAppServerSupervisorError)) return null;
+    const descriptor = Reflect.getOwnPropertyDescriptor(error, "code");
+    if (!descriptor || !("value" in descriptor) ||
+        descriptor.value !== "desktop_codex_app_server_invalid_input") return null;
+    return supervisorError(
+      "desktop_codex_app_server_invalid_input",
+      "Codex App Server 数据对象无效"
+    );
+  } catch {
+    return null;
+  }
 }
 
 function supervisorError(

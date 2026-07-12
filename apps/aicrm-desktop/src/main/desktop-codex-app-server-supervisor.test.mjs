@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { DesktopCodexAppServerSupervisor } from "./desktop-codex-app-server-supervisor.ts";
+import {
+  DesktopCodexAppServerSupervisor,
+  DesktopCodexAppServerSupervisorError
+} from "./desktop-codex-app-server-supervisor.ts";
 
 const OWNERSHIP = "a".repeat(64);
 const RAW_LOGIN_ID = "login_secret_canary_123";
 const RAW_URL = "https://chatgpt.com/auth/codex?state=raw-secret-canary";
 const RAW_CANARY = "raw-secret-canary";
+const RAW_LOGIN_ID_HASH = "684e7adf3efbb843d095fcc094406454f19d60a73b1c51ead56a510d3b2e816e";
 
 function deferred() {
   let resolve;
@@ -61,10 +65,10 @@ class FakeClient {
 
   async waitForLogin(loginId) {
     this.calls.waitForLogin += 1;
-    assert.equal(loginId, RAW_LOGIN_ID);
+    assert.equal(loginId, this.options.expectedLoginId ?? RAW_LOGIN_ID);
     if (this.options.waitError) throw this.options.waitError;
     if (this.waiting) return this.waiting.promise;
-    return { loginId, success: true };
+    return this.options.waitCompletion ?? { loginId, success: true };
   }
 
   async readAccount(refreshToken) {
@@ -79,7 +83,7 @@ class FakeClient {
 
   async cancelLogin(loginId) {
     this.calls.cancelLogin += 1;
-    assert.equal(loginId, RAW_LOGIN_ID);
+    assert.equal(loginId, this.options.expectedLoginId ?? RAW_LOGIN_ID);
     if (this.options.cancelError) throw this.options.cancelError;
     this.waiting?.resolve({ loginId, success: false });
     return "canceled";
@@ -136,6 +140,36 @@ function fixture(options = {}) {
 function assertSafe(value, forbidden = [RAW_LOGIN_ID, RAW_URL, RAW_CANARY, process.cwd()]) {
   const serialized = JSON.stringify(value);
   for (const item of forbidden) assert.equal(serialized.includes(item), false, serialized);
+}
+
+function brandedInvalidInput(canary) {
+  const error = new DesktopCodexAppServerSupervisorError(
+    "desktop_codex_app_server_invalid_input",
+    canary
+  );
+  error.stack = `external-stack:${canary}`;
+  error.rawLoginId = RAW_LOGIN_ID;
+  error.loginIdHash = RAW_LOGIN_ID_HASH;
+  error.credentialPath = "/private/codex/credential-home";
+  return error;
+}
+
+async function rejectsRebrandedInvalid(execute, external, forbidden) {
+  await assert.rejects(execute, (error) => {
+    assert.notEqual(error, external);
+    assert.equal(error.code, "desktop_codex_app_server_invalid_input");
+    assert.equal(error.message, "Codex App Server 数据对象无效");
+    const projections = [
+      error.message,
+      String(error),
+      error.stack ?? "",
+      JSON.stringify(error)
+    ];
+    for (const projection of projections) {
+      for (const canary of forbidden) assert.equal(projection.includes(canary), false, projection);
+    }
+    return true;
+  });
 }
 
 test("twenty exact concurrent starts share one factory, start, and immutable safe receipt", async () => {
@@ -199,6 +233,28 @@ test("browser login exposes raw challenge only to Main effects and advances ever
   const completed = await Promise.all(loginWaits);
   assert.equal(completed[0], completed[1]);
   assert.equal(completed[0].state, "login_completed");
+  assert.equal(Object.isFrozen(completed[0]), true);
+  assert.equal(completed[0].loginIdHash, RAW_LOGIN_ID_HASH);
+  assert.deepEqual(Object.keys(completed[0]).sort(), [
+    "bootIdHash",
+    "errorCode",
+    "executorId",
+    "instanceIdHash",
+    "loginIdHash",
+    "sessionId",
+    "stagingOwnershipDigest",
+    "state",
+    "version"
+  ]);
+  for (const key of [
+    "version", "bootIdHash", "instanceIdHash", "executorId", "sessionId",
+    "stagingOwnershipDigest"
+  ]) {
+    assert.equal(completed[0][key], receipt[key]);
+  }
+  const ordinarySnapshot = current.supervisor.getSnapshot(receipt);
+  assert.equal("loginIdHash" in ordinarySnapshot, false);
+  assert.equal(current.events.some((event) => "loginIdHash" in event), false);
   assert.deepEqual(await current.supervisor.readAccount(receipt, true), {
     account: { type: "chatgpt", email: "owner@example.com", planType: "plus" },
     requiresOpenaiAuth: true
@@ -233,10 +289,96 @@ test("cancel wins a pending completion race and stops the exact in-memory client
   assert.equal(current.clients[0].calls.cancelLogin, 1);
   assert.equal(current.clients[0].calls.stop, 1);
   await assert.rejects(pendingWait, { code: "desktop_codex_app_server_stopped" });
+  assert.equal(current.events.some((event) => "loginIdHash" in event), false);
   assert.deepEqual(current.events.map((event) => event.state), [
     "starting", "ready", "waiting_user", "stopping", "stopped"
   ]);
   assertSafe([canceled, current.events]);
+});
+
+test("login completion hashes exact raw ids into instance-bound frozen receipts", async () => {
+  const cases = [
+    {
+      loginId: RAW_LOGIN_ID,
+      hash: RAW_LOGIN_ID_HASH,
+      executorId: "executor_hash_1",
+      sessionId: "session_hash_1",
+      ownership: "d".repeat(64)
+    },
+    {
+      loginId: "login_secret_canary_456",
+      hash: "8326a78765ae9f58d12e951ea7f1194903c83cedef18103428fb36283a07d10f",
+      executorId: "executor_hash_2",
+      sessionId: "session_hash_2",
+      ownership: "e".repeat(64)
+    }
+  ];
+  const completions = [];
+  for (const [index, item] of cases.entries()) {
+    const current = fixture({
+      randomStart: index * 10,
+      clientOptions: {
+        expectedLoginId: item.loginId,
+        challenge: { type: "chatgpt", loginId: item.loginId, authUrl: RAW_URL }
+      }
+    });
+    const receipt = await current.supervisor.start(binding({
+      executorId: item.executorId,
+      sessionId: item.sessionId,
+      stagingOwnershipDigest: item.ownership
+    }));
+    await current.supervisor.startBrowserLogin(receipt);
+    const completion = await current.supervisor.waitForLogin(receipt);
+    completions.push(completion);
+    assert.equal(completion.loginIdHash, item.hash);
+    assert.equal(completion.bootIdHash, receipt.bootIdHash);
+    assert.equal(completion.instanceIdHash, receipt.instanceIdHash);
+    assert.equal(completion.executorId, item.executorId);
+    assert.equal(completion.sessionId, item.sessionId);
+    assert.equal(Object.isFrozen(completion), true);
+    assert.equal("loginIdHash" in current.supervisor.getSnapshot(receipt), false);
+    assert.equal(current.events.some((event) => "loginIdHash" in event), false);
+    assertSafe([completion, current.events], [item.loginId, RAW_URL, process.cwd()]);
+    await current.supervisor.shutdownAll();
+  }
+  assert.notEqual(completions[0].loginIdHash, completions[1].loginIdHash);
+  assert.notEqual(completions[0].instanceIdHash, completions[1].instanceIdHash);
+});
+
+test("completion mismatch and shutdown races return no login hash", async (t) => {
+  await t.test("mismatched completion", async () => {
+    const mismatchId = "login_mismatched_private_canary";
+    const current = fixture({
+      clientOptions: {
+        waitCompletion: { loginId: mismatchId, success: true }
+      }
+    });
+    const receipt = await current.supervisor.start(binding());
+    await current.supervisor.startBrowserLogin(receipt);
+    await assert.rejects(current.supervisor.waitForLogin(receipt), (error) => {
+      assert.equal(error.code, "desktop_codex_app_server_operation_failed");
+      assertSafe({ message: error.message, stack: error.stack }, [
+        RAW_LOGIN_ID, mismatchId, process.cwd()
+      ]);
+      return true;
+    });
+    assert.equal(current.events.some((event) => "loginIdHash" in event), false);
+    assert.equal("loginIdHash" in current.supervisor.getSnapshot(receipt), false);
+    await current.supervisor.shutdownAll();
+  });
+
+  await t.test("shutdown while waiting", async () => {
+    const waiting = deferred();
+    const current = fixture({ clientOptions: { waiting } });
+    const receipt = await current.supervisor.start(binding());
+    await current.supervisor.startBrowserLogin(receipt);
+    const completion = current.supervisor.waitForLogin(receipt);
+    await current.supervisor.shutdownAll();
+    await assert.rejects(completion, { code: "desktop_codex_app_server_stopped" });
+    assert.equal(current.events.some((event) => "loginIdHash" in event), false);
+    assert.equal("loginIdHash" in current.supervisor.getSnapshot(receipt), false);
+    assertSafe(current.events, [RAW_LOGIN_ID, RAW_URL, process.cwd()]);
+  });
 });
 
 test("a browser challenge that returns after shutdown is cancelled without any URL effect", async () => {
@@ -375,12 +517,63 @@ test("factory, client start, Main effect, account, and stop failures use fixed s
   ], [failureCanary, RAW_LOGIN_ID, RAW_URL, RAW_CANARY, process.cwd()]);
 });
 
+test("branded invalid-input dependency errors are re-created locally on all three DTO paths", async (t) => {
+  const privatePath = "/private/codex/credential-home";
+  const canary = `${RAW_LOGIN_ID}:${RAW_LOGIN_ID_HASH}:${privatePath}`;
+  const forbidden = [RAW_LOGIN_ID, RAW_LOGIN_ID_HASH, privatePath, canary, process.cwd()];
+
+  await t.test("readAccount", async () => {
+    const external = brandedInvalidInput(canary);
+    const current = fixture({ clientOptions: { readError: external } });
+    const receipt = await current.supervisor.start(binding());
+    await rejectsRebrandedInvalid(
+      () => current.supervisor.readAccount(receipt, true),
+      external,
+      forbidden
+    );
+    assertSafe(current.events, forbidden);
+    await current.supervisor.shutdownAll();
+  });
+
+  await t.test("startBrowserLogin", async () => {
+    const external = brandedInvalidInput(canary);
+    const current = fixture({ clientOptions: { loginStartError: external } });
+    const receipt = await current.supervisor.start(binding());
+    await rejectsRebrandedInvalid(
+      () => current.supervisor.startBrowserLogin(receipt),
+      external,
+      forbidden
+    );
+    assert.deepEqual(current.effects, []);
+    assertSafe(current.events, forbidden);
+    await current.supervisor.shutdownAll();
+  });
+
+  await t.test("waitForLogin", async () => {
+    const external = brandedInvalidInput(canary);
+    const current = fixture({ clientOptions: { waitError: external } });
+    const receipt = await current.supervisor.start(binding());
+    await current.supervisor.startBrowserLogin(receipt);
+    await rejectsRebrandedInvalid(
+      () => current.supervisor.waitForLogin(receipt),
+      external,
+      forbidden
+    );
+    assertSafe(current.events, forbidden);
+    await current.supervisor.shutdownAll();
+  });
+});
+
 test("old boots, forged instances, and malformed receipts are rejected without touching clients", async () => {
   const oldBoot = fixture({ randomStart: 0 });
   const receipt = await oldBoot.supervisor.start(binding());
   const newBoot = fixture({ randomStart: 20 });
   await assert.rejects(
     Promise.resolve().then(() => newBoot.supervisor.getSnapshot(receipt)),
+    { code: "desktop_codex_app_server_stale_receipt" }
+  );
+  await assert.rejects(
+    Promise.resolve().then(() => newBoot.supervisor.waitForLogin(receipt)),
     { code: "desktop_codex_app_server_stale_receipt" }
   );
   await assert.rejects(
