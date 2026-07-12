@@ -64,7 +64,7 @@ assert_scalar "SELECT has_table_privilege('ky_agent_executor_writer','ky_user','
 
 CONTROL_URL="postgresql://${LOGIN_ROLE}:${LOGIN_PASSWORD}@127.0.0.1:5432/${TEST_DB}?sslmode=disable"
 (cd "$ROOT_DIR/services/ky-agent-executor-service" && \
-  GOFLAGS=-mod=readonly KY_AGENT_EXECUTOR_DEVICE_TEST_DATABASE_URL="$CONTROL_URL" \
+  GOWORK=off GOFLAGS=-mod=readonly KY_AGENT_EXECUTOR_DEVICE_TEST_DATABASE_URL="$CONTROL_URL" \
   go test -race -run '^TestControlDeviceStoreAgainstPostgres$' -v ./internal/store)
 
 echo 'Agent Executor P2A Desktop device store contract passed'
