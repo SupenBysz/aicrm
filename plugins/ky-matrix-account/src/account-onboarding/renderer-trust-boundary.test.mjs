@@ -61,6 +61,7 @@ test("production automation gates stay closed and no Renderer completion facade 
 test("Host is the sole preload bridge reader and Core consumes an injected Desktop Port", async () => {
   for (const relativePath of [
     "packages/ky-admin-core/src/matrix-account-desktop.ts",
+    "plugins/ky-ai-configuration/src/pages/executor-tasks-page.tsx",
     "plugins/ky-matrix-account/src/account-onboarding/service.ts",
     "plugins/ky-matrix-account/src/pages/matrix-accounts-page.tsx"
   ]) {

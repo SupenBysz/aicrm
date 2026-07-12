@@ -7,6 +7,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   ListPageCard,
   drawerWidths,
+  getAiCrmDesktopDebugMode,
   isAiCrmDesktopClientRuntime,
   openAiExecutorTerminalWindow,
   readListQueryState,
@@ -292,14 +293,10 @@ function useClientDebugMode() {
   const [desktopDebugMode, setDesktopDebugMode] = useState(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
     let active = true;
-    const appBridge = (window as unknown as {
-      aicrm?: { app?: { getConfig?: () => Promise<{ debugMode?: boolean }> } };
-    }).aicrm?.app;
-    void appBridge?.getConfig?.()
-      .then((config) => {
-        if (active) setDesktopDebugMode(Boolean(config?.debugMode));
+    void getAiCrmDesktopDebugMode()
+      .then((debugMode) => {
+        if (active) setDesktopDebugMode(debugMode);
       })
       .catch(() => undefined);
     return () => {
