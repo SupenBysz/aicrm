@@ -11,6 +11,7 @@ import (
 
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/accessclient"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/authorization"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktopcommand"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
 )
 
@@ -137,13 +138,26 @@ func (s *Server) getAuthorizationUserAction(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) reopenAuthorizationSession(w http.ResponseWriter, r *http.Request, actor actorContext) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	key, ok := idempotencyKey(r)
+	sessionID := r.PathValue("sessionId")
+	if !validOpaqueID(sessionID) {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "sessionId is invalid")
+		return
+	}
+	if !requireRawDevicePath(w, r, authorizationSessionActionPath(sessionID, "reopen")) ||
+		!requireStrictDesktopHandoffUserHeaders(w, r) || !rejectDeviceProofHeaders(w, r) {
+		return
+	}
+	key, ok := strictIdempotencyKey(r)
 	if !ok {
 		writeError(w, r, http.StatusBadRequest, "idempotency_key_required", "a valid Idempotency-Key is required")
 		return
 	}
 	var body authorizationExpectedRevisionBody
-	if !decodeStrictJSON(w, r, &body) || body.ExpectedSessionRevision < 1 {
+	if _, ok := decodeDeviceJSON(w, r, desktopAuthorizationCommandRequestLimit, &body); !ok {
+		return
+	}
+	if body.ExpectedSessionRevision < 1 {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "reopen request is invalid")
 		return
 	}
 	item, ok := s.authorizationSessionFromPath(w, r)
@@ -154,15 +168,32 @@ func (s *Server) reopenAuthorizationSession(w http.ResponseWriter, r *http.Reque
 		s.writeAuthorizationStoreError(w, r, store.ErrRevisionConflict)
 		return
 	}
-	if item.RuntimeType != "server" || item.FlowType != "device_code" {
-		writeError(w, r, http.StatusConflict, "authorization_user_action_not_server_managed", "authorization is not server managed")
-		return
-	}
 	if item.RequestedBy != actor.ActorID {
 		writeError(w, r, http.StatusForbidden, "permission_denied", "only the authorization requester may reopen the challenge")
 		return
 	}
 	canonical, _ := json.Marshal(body)
+	if item.RuntimeType == "desktop" && item.FlowType == "browser" {
+		if s.desktopCommandRuntime == nil {
+			writeError(w, r, http.StatusServiceUnavailable, "desktop_command_unavailable", "Desktop command is unavailable")
+			return
+		}
+		result, err := s.desktopCommandRuntime.Reopen(r.Context(), desktopcommand.CreateInput{
+			SessionID: item.ID, ActorID: actor.ActorID, ActorSessionID: actor.SessionID,
+			ExpectedSessionRevision: body.ExpectedSessionRevision,
+			IdempotencyKeyHash:      sha256Hex([]byte(key)), RequestHash: sha256Hex(canonical),
+		})
+		if err != nil {
+			s.writeDesktopAuthorizationCommandError(w, r, err, false)
+			return
+		}
+		writeDesktopAuthorizationCommandCreateResult(w, r, result)
+		return
+	}
+	if item.RuntimeType != "server" || item.FlowType != "device_code" {
+		writeError(w, r, http.StatusConflict, "authorization_user_action_not_server_managed", "authorization is not server managed")
+		return
+	}
 	if err := s.control.RecordAuthorizationReopen(r.Context(), item.ID, actor.ActorID, sha256Hex([]byte(key)), sha256Hex(canonical)); err != nil {
 		s.writeAuthorizationStoreError(w, r, err)
 		return
@@ -180,21 +211,52 @@ func (s *Server) reopenAuthorizationSession(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) cancelAuthorizationSession(w http.ResponseWriter, r *http.Request, actor actorContext) {
-	key, ok := idempotencyKey(r)
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	sessionID := r.PathValue("sessionId")
+	if !validOpaqueID(sessionID) {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "sessionId is invalid")
+		return
+	}
+	if !requireRawDevicePath(w, r, authorizationSessionActionPath(sessionID, "cancel")) ||
+		!requireStrictDesktopHandoffUserHeaders(w, r) || !rejectDeviceProofHeaders(w, r) {
+		return
+	}
+	key, ok := strictIdempotencyKey(r)
 	if !ok {
 		writeError(w, r, http.StatusBadRequest, "idempotency_key_required", "a valid Idempotency-Key is required")
 		return
 	}
 	var body authorizationExpectedRevisionBody
-	if !decodeStrictJSON(w, r, &body) {
+	if _, ok := decodeDeviceJSON(w, r, desktopAuthorizationCommandRequestLimit, &body); !ok {
 		return
 	}
-	sessionID := r.PathValue("sessionId")
-	if !validOpaqueID(sessionID) || body.ExpectedSessionRevision < 1 {
+	if body.ExpectedSessionRevision < 1 {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "cancel request is invalid")
 		return
 	}
 	canonical, _ := json.Marshal(body)
+	current, ok := s.authorizationSessionFromPath(w, r)
+	if !ok {
+		return
+	}
+	if current.RuntimeType == "desktop" && current.FlowType == "browser" {
+		if s.desktopCommandRuntime == nil {
+			writeError(w, r, http.StatusServiceUnavailable, "desktop_command_unavailable", "Desktop command is unavailable")
+			return
+		}
+		result, err := s.desktopCommandRuntime.Cancel(r.Context(), desktopcommand.CreateInput{
+			SessionID: sessionID, ActorID: actor.ActorID, ActorSessionID: actor.SessionID,
+			ExpectedSessionRevision: body.ExpectedSessionRevision,
+			IdempotencyKeyHash:      sha256Hex([]byte(key)), RequestHash: sha256Hex(canonical),
+			CanCancelAny: actor.GrantedPermissions["platform.ai_executors.force_revoke"],
+		})
+		if err != nil {
+			s.writeDesktopAuthorizationCommandError(w, r, err, false)
+			return
+		}
+		writeDesktopAuthorizationCommandCreateResult(w, r, result)
+		return
+	}
 	item, transitioned, err := s.control.CancelAuthorizationSession(r.Context(), store.CancelAuthorizationInput{
 		SessionID: sessionID, ActorID: actor.ActorID, ExpectedRevision: body.ExpectedSessionRevision,
 		IdempotencyKeyHash: sha256Hex([]byte(key)), RequestHash: sha256Hex(canonical),
@@ -208,6 +270,10 @@ func (s *Server) cancelAuthorizationSession(w http.ResponseWriter, r *http.Reque
 		s.authRuntime.Cancel(sessionID)
 	}
 	writeData(w, r, http.StatusOK, item)
+}
+
+func authorizationSessionActionPath(sessionID, action string) string {
+	return "/api/v1/ai-executor-authorization-sessions/" + sessionID + "/" + action
 }
 
 func (s *Server) listAuthorizationSessionEvents(w http.ResponseWriter, r *http.Request, _ actorContext) {

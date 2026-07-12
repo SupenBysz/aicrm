@@ -227,6 +227,9 @@ func publicRequest(t *testing.T, method, path, body string) *http.Request {
 	request.Header.Set("X-KY-Workspace-Type", "platform")
 	request.Header.Set("X-KY-Workspace-Id", "platform_root")
 	request.Header.Set("X-KY-Request-Id", "req-control-test")
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	return request
 }
 

@@ -111,6 +111,7 @@ func deviceHandlerServer(control *fakeDeviceControl, authorizer accessclient.Aut
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
 	server.activationRuntime = &fakeDesktopActivationRuntime{}
+	server.desktopCommandRuntime = &fakeDesktopAuthorizationCommandRuntime{}
 	return server
 }
 

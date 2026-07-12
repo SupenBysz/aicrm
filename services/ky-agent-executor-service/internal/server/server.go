@@ -16,6 +16,7 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialfs"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialrevocation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktopactivation"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktopcommand"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktophandoff"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/operationconfirmation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
@@ -24,16 +25,17 @@ import (
 )
 
 type Server struct {
-	cfg                 config.Config
-	reader              store.Reader
-	control             controlStore
-	authorizer          accessclient.Authorizer
-	authRuntime         authorizationRuntime
-	taskRuntime         taskRuntime
-	confirmationRuntime operationConfirmationRuntime
-	handoffRuntime      desktopHandoffRuntime
-	revocationRuntime   credentialRevocationRuntime
-	activationRuntime   desktopActivationRuntime
+	cfg                   config.Config
+	reader                store.Reader
+	control               controlStore
+	authorizer            accessclient.Authorizer
+	authRuntime           authorizationRuntime
+	taskRuntime           taskRuntime
+	confirmationRuntime   operationConfirmationRuntime
+	handoffRuntime        desktopHandoffRuntime
+	revocationRuntime     credentialRevocationRuntime
+	activationRuntime     desktopActivationRuntime
+	desktopCommandRuntime desktopAuthorizationCommandRuntime
 }
 
 type authorizationRuntime interface {
@@ -150,6 +152,16 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.activationRuntime = activationManager
+		desktopCommandManager, err := desktopcommand.New(
+			opened,
+			signer,
+			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			[]byte(s.cfg.TrustedTokenNonceSecret),
+		)
+		if err != nil {
+			return err
+		}
+		s.desktopCommandRuntime = desktopCommandManager
 		revocationManager, err := credentialrevocation.New(
 			opened,
 			confirmationManager,
@@ -358,6 +370,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	s.registerDesktopHandoffRoutes(mux)
 	s.registerDesktopActivationRoutes(mux)
 	s.registerCredentialRevocationRoutes(mux)
+	s.registerDesktopAuthorizationCommandRoutes(mux)
 
 	return mux
 }
@@ -469,6 +482,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 		s.handoffRuntime != nil &&
 		s.activationRuntime != nil &&
 		s.revocationRuntime != nil &&
+		s.desktopCommandRuntime != nil &&
 		s.cfg.AuthTokenSecret != "" && validDeviceChallengeSecret(s.cfg.DeviceChallengeSecret, s.cfg.AuthTokenSecret, s.cfg.InternalToken))
 	status := "ok"
 	httpStatus := http.StatusOK

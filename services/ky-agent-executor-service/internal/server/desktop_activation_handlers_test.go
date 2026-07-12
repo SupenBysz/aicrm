@@ -61,6 +61,7 @@ func desktopActivationHandlerServer(
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
+	server.desktopCommandRuntime = &fakeDesktopAuthorizationCommandRuntime{}
 	if runtime != nil {
 		server.activationRuntime = runtime
 	}
