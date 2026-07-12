@@ -48,6 +48,9 @@ echo "- require private runtime state root: $AGENT_RUNTIME_STATE_ROOT (root:root
 
 echo "Set KY_EXECUTE_SERVICE_DEPLOY=1 to install binaries/units, daemon-reload, enable, restart, and verify."
 if [[ "${KY_EXECUTE_SERVICE_DEPLOY:-}" == "1" ]]; then
+  # Recheck at the mutation boundary as deploy artifacts may have been built
+  # on another host. Never restart the executor against an unverified schema.
+  "$ROOT_DIR/scripts/verify_codex_appserver_protocol.sh"
   test -f "$AGENT_EXECUTOR_ENV"
   command -v systemd-sysusers >/dev/null
   install -d "$SYSUSERS_DIR"

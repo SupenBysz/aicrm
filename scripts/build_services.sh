@@ -5,6 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$ROOT_DIR/dist/services"
 mkdir -p "$OUT_DIR"
 
+# The executor embeds a client for one pinned Codex App Server protocol. A
+# release build must prove the installed CLI still generates the locked schema
+# before producing any deployable service artifact.
+"$ROOT_DIR/scripts/verify_codex_appserver_protocol.sh"
+
 services=(
   ky-auth-service
   ky-org-service
