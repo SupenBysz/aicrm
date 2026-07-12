@@ -35,7 +35,8 @@ const bridge: AiCrmDesktopBridge = {
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.networkLogClear)
   },
   aiExecutor: {
-    openTerminalWindow: (input) => ipcRenderer.invoke(IPC_CHANNELS.aiExecutorOpenTerminalWindow, input)
+    openTerminalWindow: (input) => ipcRenderer.invoke(IPC_CHANNELS.aiExecutorOpenTerminalWindow, input),
+    bindDevice: (input) => ipcRenderer.invoke(IPC_CHANNELS.aiExecutorBindDevice, input)
   },
   codex: {
     authorize: (...args: unknown[]) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorAuthorize, ...args),

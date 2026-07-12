@@ -1,6 +1,8 @@
 import type {
   DesktopApiRequest,
   DesktopApiResponse,
+  AiExecutorBindDeviceInput,
+  AiExecutorBindDeviceResult,
   AiExecutorTerminalWindowInput,
   AiExecutorTerminalWindowResult,
   CodexAuthorizationCapabilities,
@@ -86,6 +88,9 @@ export interface AiCrmDesktopBridge {
     openTerminalWindow: (
       input: AiExecutorTerminalWindowInput
     ) => Promise<DesktopCommandResult<AiExecutorTerminalWindowResult>>;
+    bindDevice: (
+      input: AiExecutorBindDeviceInput
+    ) => Promise<DesktopCommandResult<AiExecutorBindDeviceResult>>;
   };
   codex: {
     authorize: () => Promise<DesktopCommandResult<never>>;

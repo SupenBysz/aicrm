@@ -1,4 +1,4 @@
-import desktopPackage from "../../package.json";
+import desktopPackage from "../../package.json" with { type: "json" };
 
 export const DESKTOP_APPLICATION_NAME = desktopPackage.productName;
 export const DESKTOP_APPLICATION_ID = desktopPackage.appId;
@@ -47,6 +47,7 @@ export const IPC_CHANNELS = {
   matrixAccountRestoreSessionSnapshot: "matrix-account:restore-session-snapshot",
   matrixAccountCleanupSessionWebSpace: "matrix-account:cleanup-session-web-space",
   aiExecutorOpenTerminalWindow: "ai-executor:open-terminal-window",
+  aiExecutorBindDevice: "ai-executor:bind-device",
   codexExecutorAuthorize: "codex-executor:authorize",
   codexExecutorGetAuthStatus: "codex-executor:get-auth-status",
   codexAuthorizationGetCapabilities: "codex-authorization:get-capabilities",

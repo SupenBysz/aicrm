@@ -212,9 +212,17 @@ test("Main wiring owns one signer and session save triggers registration without
       trustMain.indexOf("new DesktopDeviceHeartbeatClient")
   );
   assert.equal(deviceIpc.includes("new DesktopDeviceIdentityStore"), false);
-  assert.match(main, /const desktopDeviceTrustRuntime = getDesktopDeviceTrustRuntime\(\)/);
+  assert.equal((main.match(/getDesktopDeviceTrustMainServices\(\)/g) ?? []).length, 1);
+  assert.match(
+    main,
+    /const desktopDeviceTrustRuntime = desktopDeviceTrustServices\.runtime/
+  );
   assert.match(main, /registerAuthIpc\(desktopDeviceTrustRuntime\)/);
   assert.match(main, /registerDesktopDeviceIpc\(desktopDeviceTrustRuntime\)/);
+  assert.match(
+    main,
+    /registerDesktopExecutorDeviceBindingIpc\([\s\S]*desktopDeviceTrustServices\.executorDeviceBindingClient/
+  );
   assert.match(main, /resumeAfterStartup\(\)/);
   assert.match(authIpc, /await saveSession\(session\)[\s\S]*trustRuntime\.notifySessionSaved\(\)/);
   assert.match(authIpc, /trustRuntime\.cancelAutomaticRegistration\(\)[\s\S]*await clearSession\(\)/);

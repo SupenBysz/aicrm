@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import {
   DESKTOP_APPLICATION_ID,
   DESKTOP_APPLICATION_NAME,
@@ -14,11 +14,12 @@ import { registerAppIpc } from "./ipc/app-ipc";
 import { registerAuthIpc } from "./ipc/auth-ipc";
 import { registerCodexExecutorIpc } from "./ipc/codex-executor-ipc";
 import { registerDesktopDeviceIpc } from "./ipc/desktop-device-ipc";
+import { registerDesktopExecutorDeviceBindingIpc } from "./ipc/desktop-executor-device-binding-ipc";
 import { registerMatrixAccountIpc } from "./ipc/matrix-account-ipc";
 import { registerNetworkIpc } from "./ipc/network-ipc";
 import { registerWindowIpc } from "./ipc/window-ipc";
 import { installNetworkLogCapture } from "./network-log";
-import { getDesktopDeviceTrustRuntime } from "./desktop-device-trust-main";
+import { getDesktopDeviceTrustMainServices } from "./desktop-device-trust-main";
 
 process.title = DESKTOP_APPLICATION_NAME;
 app.setName(DESKTOP_APPLICATION_NAME);
@@ -35,7 +36,8 @@ if (!singleInstanceLock) {
   app.quit();
 }
 
-const desktopDeviceTrustRuntime = getDesktopDeviceTrustRuntime();
+const desktopDeviceTrustServices = getDesktopDeviceTrustMainServices();
+const desktopDeviceTrustRuntime = desktopDeviceTrustServices.runtime;
 
 registerApiIpc();
 registerAiExecutorWindowIpc();
@@ -43,6 +45,10 @@ registerAppIpc();
 registerAuthIpc(desktopDeviceTrustRuntime);
 registerCodexExecutorIpc();
 registerDesktopDeviceIpc(desktopDeviceTrustRuntime);
+registerDesktopExecutorDeviceBindingIpc(
+  desktopDeviceTrustServices.executorDeviceBindingClient,
+  ipcMain
+);
 registerMatrixAccountIpc();
 registerNetworkIpc();
 registerWindowIpc();

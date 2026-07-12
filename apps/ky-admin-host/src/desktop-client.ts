@@ -1,7 +1,13 @@
 import type {
+  AiExecutorBindDeviceInput,
+  AiExecutorBindDeviceResult,
+  AiExecutorDesktopRegistrationProjection,
   AiExecutorDesktopPort,
-  AiExecutorDesktopBridgeContract,
+  AiExecutorDesktopTrustBridgeContract,
+  AiExecutorTerminalWindowInput,
+  AiExecutorTerminalWindowResult,
   CodexAuthorizationDesktopBridgeContract,
+  DesktopCommandResult,
   MatrixAccountDesktopBridgeContract,
   MatrixAccountDesktopPort
 } from "@ky/admin-core";
@@ -26,7 +32,19 @@ export interface DesktopBridgeLike {
     clear?: () => Promise<DesktopNetworkLogSnapshot>;
   };
   matrixAccount?: MatrixAccountDesktopBridgeContract;
-  aiExecutor?: AiExecutorDesktopBridgeContract;
+  desktopDevice?: {
+    ensureRegistration?: () => Promise<
+      DesktopCommandResult<AiExecutorDesktopRegistrationProjection>
+    >;
+  };
+  aiExecutor?: {
+    openTerminalWindow?: (
+      input: AiExecutorTerminalWindowInput
+    ) => Promise<DesktopCommandResult<AiExecutorTerminalWindowResult>>;
+    bindDevice?: (
+      input: AiExecutorBindDeviceInput
+    ) => Promise<DesktopCommandResult<AiExecutorBindDeviceResult>>;
+  };
   codex?: {
     authorization?: CodexAuthorizationDesktopBridgeContract;
   };
@@ -100,6 +118,20 @@ export const aiExecutorDesktopPort: AiExecutorDesktopPort = {
   isDesktopRuntime: isDesktopClientMode,
   getAuthorizationBridge() {
     return getDesktopBridge()?.codex?.authorization ?? null;
+  },
+  getTrustBridge() {
+    if (!isDesktopClientMode()) return null;
+    const desktopBridge = getDesktopBridge();
+    const ensureRegistration = desktopBridge?.desktopDevice?.ensureRegistration;
+    const bindDevice = desktopBridge?.aiExecutor?.bindDevice;
+    if (typeof ensureRegistration !== "function" || typeof bindDevice !== "function") {
+      return null;
+    }
+    const trustBridge: AiExecutorDesktopTrustBridgeContract = {
+      ensureRegistration: () => ensureRegistration(),
+      bindExecutorDevice: (input) => bindDevice(input)
+    };
+    return trustBridge;
   }
 };
 

@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "test:ai-executor-desktop": "node --test src/ai-executor-desktop.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "peerDependencies": {

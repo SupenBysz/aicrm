@@ -266,6 +266,25 @@ export interface DesktopDeviceRegistrationResetInput {
   confirm: true;
 }
 
+export interface AiExecutorBindDeviceInput {
+  executorId: string;
+  expectedRevision: number;
+}
+
+export interface AiExecutorDeviceBindingProjection {
+  executorId: string;
+  deviceId: string;
+  status: "active";
+  revision: number;
+  force: false;
+  updatedAt: string;
+}
+
+export interface AiExecutorBindDeviceResult {
+  binding: AiExecutorDeviceBindingProjection;
+  replayed: boolean;
+}
+
 export type MatrixAccountPlatform = "douyin" | "kuaishou" | "xiaohongshu";
 
 export type MatrixAccountLoginStatus =

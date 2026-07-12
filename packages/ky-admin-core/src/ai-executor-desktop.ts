@@ -121,9 +121,57 @@ export interface CodexAuthorizationDesktopBridgeContract {
   onChanged: (listener: (event: CodexAuthorizationEventEnvelope) => void) => () => void;
 }
 
+export type AiExecutorDesktopRegistrationStatus =
+  | "idle"
+  | "registering"
+  | "registered"
+  | "failed"
+  | "recovery_required"
+  | "cancelled";
+
+export interface AiExecutorDesktopRegistrationProjection {
+  status: AiExecutorDesktopRegistrationStatus;
+  deviceId: string | null;
+  registrationStatus: "unregistered" | "registered" | "revoked" | null;
+  errorCode: string | null;
+  updatedAt: string;
+  backendRebindRequired: boolean;
+  message: string;
+}
+
+export interface AiExecutorBindDeviceInput {
+  executorId: string;
+  expectedRevision: number;
+}
+
+export interface AiExecutorDeviceBindingProjection {
+  executorId: string;
+  deviceId: string;
+  status: "active";
+  revision: number;
+  force: false;
+  updatedAt: string;
+}
+
+export interface AiExecutorBindDeviceResult {
+  binding: AiExecutorDeviceBindingProjection;
+  replayed: boolean;
+}
+
+/** Safe Core surface composed by Host from two separate preload namespaces. */
+export interface AiExecutorDesktopTrustBridgeContract {
+  ensureRegistration: () => Promise<
+    DesktopCommandResult<AiExecutorDesktopRegistrationProjection>
+  >;
+  bindExecutorDevice: (
+    input: AiExecutorBindDeviceInput
+  ) => Promise<DesktopCommandResult<AiExecutorBindDeviceResult>>;
+}
+
 export interface AiExecutorDesktopPort {
   isDesktopRuntime(): boolean;
   getAuthorizationBridge(): CodexAuthorizationDesktopBridgeContract | null;
+  getTrustBridge(): AiExecutorDesktopTrustBridgeContract | null;
 }
 
 let installedDesktopPort: AiExecutorDesktopPort | null = null;
@@ -145,6 +193,11 @@ export function isAiExecutorDesktopRuntime(): boolean {
 
 export function getAiExecutorAuthorizationBridge(): CodexAuthorizationDesktopBridgeContract | null {
   return installedDesktopPort?.getAuthorizationBridge() ?? null;
+}
+
+export function getAiExecutorDesktopTrustBridge(): AiExecutorDesktopTrustBridgeContract | null {
+  if (!installedDesktopPort?.isDesktopRuntime()) return null;
+  return installedDesktopPort.getTrustBridge();
 }
 
 export async function getCodexAuthorizationCapabilities(): Promise<CodexAuthorizationCapabilities | null> {
