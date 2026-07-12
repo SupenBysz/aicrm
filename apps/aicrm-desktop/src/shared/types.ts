@@ -155,6 +155,8 @@ export interface MatrixAccountCapabilities {
   supportsSessionSnapshotVault?: boolean;
   /** True only when snapshot receipts can be verified by the backend trust domain. */
   supportsServerVerifiableSnapshotReceipts?: boolean;
+  /** Detect keeps the controlled window alive until business binding has settled. */
+  supportsDeferredWindowRelease?: boolean;
 }
 
 export type MatrixAccountOnboardingStatus = "active" | "completed" | "failed" | "cancelled" | "expired";
@@ -413,6 +415,7 @@ export interface MatrixAccountWebSpaceInput {
   browserPartition?: string;
   url?: string;
   showWindow?: boolean;
+  releaseWindowOnDetect?: boolean;
 }
 
 export interface MatrixAccountWebSpaceBrowserResult {
@@ -435,6 +438,7 @@ export interface MatrixAccountWebSpaceDetectResult {
   browserPartition: string;
   loginStatus: MatrixAccountLoginStatus;
   canDetect: boolean;
+  windowReleased?: boolean;
   identityKey?: string;
   platformUid?: string;
   displayName?: string;

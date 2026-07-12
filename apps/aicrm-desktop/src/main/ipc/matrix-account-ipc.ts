@@ -13,6 +13,7 @@ import {
   type Session
 } from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
+import { closeControlledWindow, controlledWindowReleaseMode } from "../controlled-window-release";
 import { MatrixAccountOnboardingCoordinator } from "../matrix-account-onboarding-coordinator";
 import { resolveMatrixAccountScriptExecutionDecision } from "../matrix-account-script-policy";
 import {
@@ -79,7 +80,8 @@ const capabilities: MatrixAccountCapabilities = {
   supportsCloudSessionVault: false,
   supportsAccountOnboarding: true,
   supportsSessionSnapshotVault: true,
-  supportsServerVerifiableSnapshotReceipts: false
+  supportsServerVerifiableSnapshotReceipts: false,
+  supportsDeferredWindowRelease: true
 };
 
 const onboardingCoordinator = new MatrixAccountOnboardingCoordinator({
@@ -200,9 +202,28 @@ export function registerMatrixAccountIpc(): void {
         reason: "受控浏览器窗口未打开，请先重新打开登录空间"
       });
     }
+    if (controlledWindowReleaseMode({ releaseWindowOnDetect: input.releaseWindowOnDetect, hasDetectedIdentity: false }) === "before_detect") {
+      const released = await releaseControlledWindow(browserPartition);
+      if (!released) return fail("web_space_window_release_failed", "受控浏览器窗口关闭失败");
+      return ok<MatrixAccountWebSpaceDetectResult>({
+        webSpaceId: input.webSpaceId,
+        platform: input.platform,
+        browserPartition,
+        loginStatus: "unknown",
+        canDetect: false,
+        windowReleased: true,
+        reason: "controlled_window_released"
+      });
+    }
     const candidate = await detectAccountCandidate(browser, input.platform);
-    if (candidate.identityKey) {
-      releaseControlledWindow(browserPartition);
+    if (
+      controlledWindowReleaseMode({
+        releaseWindowOnDetect: input.releaseWindowOnDetect,
+        hasDetectedIdentity: Boolean(candidate.identityKey)
+      }) === "after_detect"
+    ) {
+      const released = await releaseControlledWindow(browserPartition);
+      if (!released) return fail("web_space_window_release_failed", "受控浏览器窗口关闭失败");
     }
     return ok<MatrixAccountWebSpaceDetectResult>({
       webSpaceId: input.webSpaceId,
@@ -2042,15 +2063,22 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function releaseControlledWindow(browserPartition: string): void {
+async function releaseControlledWindow(browserPartition: string): Promise<boolean> {
   const existing = controlledWindows.get(browserPartition);
-  if (existing && !existing.isDestroyed()) {
-    releasingWindowPartitions.add(browserPartition);
-    existing.close();
+  if (!existing || existing.isDestroyed()) {
+    controlledWindows.delete(browserPartition);
+    webSpaceWindowPartitions.delete(browserPartition);
+    releasingWindowPartitions.delete(browserPartition);
+    return false;
   }
-  controlledWindows.delete(browserPartition);
-  webSpaceWindowPartitions.delete(browserPartition);
+  releasingWindowPartitions.add(browserPartition);
+  const released = await closeControlledWindow(existing);
+  if (released) {
+    controlledWindows.delete(browserPartition);
+    webSpaceWindowPartitions.delete(browserPartition);
+  }
   releasingWindowPartitions.delete(browserPartition);
+  return released;
 }
 
 async function suspendControlledWebSpace(browserPartition: string): Promise<void> {
