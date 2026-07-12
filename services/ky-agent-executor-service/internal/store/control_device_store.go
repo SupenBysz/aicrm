@@ -17,9 +17,15 @@ import (
 )
 
 const (
-	DeviceRegistrationPath  = "/api/v1/ai-executor-devices"
+	DeviceRegistrationPath = "/api/v1/ai-executor-devices"
+
+	// DeviceLedgerAuditRetention is the minimum immutable replay-ledger
+	// lifetime for device trust requests. It deliberately outlives short-lived
+	// tickets and the five-minute clock window so an exact request remains
+	// auditable and replayable across process restarts.
+	DeviceLedgerAuditRetention = 90 * 24 * time.Hour
+
 	deviceChallengeLifetime = 120 * time.Second
-	minimumLedgerRetention  = deviceauth.ClockWindow
 )
 
 var (
@@ -94,6 +100,15 @@ type DeviceProjection struct {
 	UpdatedAt            string  `json:"updatedAt"`
 }
 
+// DeviceVerificationKey is the minimal internal projection needed to verify a
+// signed device request. It is never part of a public response.
+type DeviceVerificationKey struct {
+	DeviceID      string
+	PublicKey     string
+	Status        string
+	KeyGeneration uint64
+}
+
 type RegisterDeviceResult struct {
 	Device            DeviceProjection `json:"device"`
 	ResponseReference string           `json:"responseReference"`
@@ -138,6 +153,30 @@ type storedLedger struct {
 	Record     deviceauth.LedgerRecord
 	AcceptedAt time.Time
 	ExpiresAt  time.Time
+}
+
+func (s *ControlStore) GetDeviceVerificationKey(ctx context.Context, deviceID string) (DeviceVerificationKey, error) {
+	if deviceauth.ValidateDeviceID(deviceID) != nil {
+		return DeviceVerificationKey{}, ErrDeviceStoreInputInvalid
+	}
+	var item DeviceVerificationKey
+	var keyGeneration int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id,public_key,status,key_generation
+		FROM ky_ai_executor_device WHERE id=$1
+	`, deviceID).Scan(&item.DeviceID, &item.PublicKey, &item.Status, &keyGeneration)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeviceVerificationKey{}, ErrNotFound
+	}
+	if err != nil {
+		return DeviceVerificationKey{}, err
+	}
+	publicKey, err := deviceauth.ParsePublicKey(item.PublicKey)
+	if err != nil || deviceauth.MatchDeviceID(publicKey, item.DeviceID) != nil || keyGeneration <= 0 {
+		return DeviceVerificationKey{}, deviceauth.ErrInvalidLedgerState
+	}
+	item.KeyGeneration = uint64(keyGeneration)
+	return item, nil
 }
 
 func (s *ControlStore) CreateDeviceRegistrationChallenge(
@@ -192,7 +231,6 @@ func (s *ControlStore) CreateDeviceRegistrationChallenge(
 		return CreateDeviceRegistrationChallengeResult{}, classifyControlWrite(scanErr)
 	}
 	if !created && (challenge.RequestHash != input.RequestHash ||
-		challenge.ChallengeHash != input.ChallengeHash ||
 		challenge.Projection.WorkspaceType != input.WorkspaceType ||
 		challenge.Projection.WorkspaceID != input.WorkspaceID ||
 		challenge.Projection.DeviceLabel != input.DeviceLabel ||
@@ -225,7 +263,44 @@ func (s *ControlStore) RegisterDevice(ctx context.Context, input RegisterDeviceI
 	}
 	defer tx.Rollback()
 
-	challenge, dbNow, err := loadChallengeForUpdate(ctx, tx, input.ChallengeID)
+	ledgerRequest, err := ledgerRequestFromProof(input.Proof, 1)
+	if err != nil {
+		return RegisterDeviceResult{}, err
+	}
+	if result, handled, err := replayRegisteredDevice(ctx, tx, ledgerRequest, deviceID); handled || err != nil {
+		if err != nil {
+			return RegisterDeviceResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return RegisterDeviceResult{}, classifyControlWrite(err)
+		}
+		return result, nil
+	}
+
+	challenge, err := loadChallengeForUpdate(ctx, tx, input.ChallengeID)
+	if err != nil {
+		return RegisterDeviceResult{}, err
+	}
+	device, deviceExists, err := loadDeviceForUpdate(ctx, tx, deviceID)
+	if err != nil {
+		return RegisterDeviceResult{}, err
+	}
+	// A concurrent first registration can commit while the fast replay lookup
+	// is waiting for the challenge/device lock. Recheck the exact ledger row
+	// before any clock, expiry, consumed-state, or device-status decision.
+	if result, handled, err := replayRegisteredDevice(ctx, tx, ledgerRequest, deviceID); handled || err != nil {
+		if err != nil {
+			return RegisterDeviceResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return RegisterDeviceResult{}, classifyControlWrite(err)
+		}
+		return result, nil
+	}
+	if deviceExists {
+		return RegisterDeviceResult{}, ErrDeviceAlreadyRegistered
+	}
+	dbNow, err := transactionNow(ctx, tx)
 	if err != nil {
 		return RegisterDeviceResult{}, err
 	}
@@ -238,34 +313,6 @@ func (s *ControlStore) RegisterDevice(ctx context.Context, input RegisterDeviceI
 		challenge.Projection.PublicKeyDigest != deviceID ||
 		challenge.ChallengeHash != input.ChallengeHash {
 		return RegisterDeviceResult{}, ErrDeviceChallengeMismatch
-	}
-
-	device, deviceExists, err := loadDeviceForUpdate(ctx, tx, deviceID)
-	if err != nil {
-		return RegisterDeviceResult{}, err
-	}
-	ledgerRequest, err := ledgerRequestFromProof(input.Proof, 1)
-	if err != nil {
-		return RegisterDeviceResult{}, err
-	}
-	decision, existing, err := decideStoredLedger(ctx, tx, ledgerRequest, sequenceOf(device, deviceExists))
-	if err != nil {
-		return RegisterDeviceResult{}, err
-	}
-	if decision.Action == deviceauth.LedgerReturnRecorded {
-		if !deviceExists || existing == nil || decision.ResponseReference != deviceID {
-			return RegisterDeviceResult{}, deviceauth.ErrInvalidLedgerState
-		}
-		if err := tx.Commit(); err != nil {
-			return RegisterDeviceResult{}, classifyControlWrite(err)
-		}
-		return RegisterDeviceResult{Device: device.Projection, ResponseReference: decision.ResponseReference, Replayed: true}, nil
-	}
-	if decision.Action == deviceauth.LedgerRejectReplay {
-		return RegisterDeviceResult{}, ErrDeviceProofReplayed
-	}
-	if deviceExists {
-		return RegisterDeviceResult{}, ErrDeviceAlreadyRegistered
 	}
 	if challenge.ConsumedAt.Valid {
 		return RegisterDeviceResult{}, ErrDeviceChallengeConsumed
@@ -319,16 +366,35 @@ func (s *ControlStore) RecordDeviceHeartbeat(
 		return DeviceHeartbeatResult{}, err
 	}
 	defer tx.Rollback()
-	var dbNow time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT transaction_timestamp()`).Scan(&dbNow); err != nil {
+	ledgerRequest, err := ledgerRequestFromProof(input.Proof, input.KeyGeneration)
+	if err != nil {
 		return DeviceHeartbeatResult{}, err
 	}
-	if err := deviceauth.ValidateTimestamp(input.Proof.TimestampMilli, dbNow); err != nil {
-		return DeviceHeartbeatResult{}, err
+	responseReference := heartbeatResponseReference(input.TargetDeviceID, input.Proof.Sequence)
+	if result, handled, err := replayDeviceHeartbeat(ctx, tx, ledgerRequest, responseReference); handled || err != nil {
+		if err != nil {
+			return DeviceHeartbeatResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return DeviceHeartbeatResult{}, classifyControlWrite(err)
+		}
+		return result, nil
 	}
+
 	device, exists, err := loadDeviceForUpdate(ctx, tx, input.TargetDeviceID)
 	if err != nil {
 		return DeviceHeartbeatResult{}, err
+	}
+	// Recheck after the per-device row lock so a concurrent first acceptance
+	// resolves to the recorded response instead of being treated as replay.
+	if result, handled, err := replayDeviceHeartbeat(ctx, tx, ledgerRequest, responseReference); handled || err != nil {
+		if err != nil {
+			return DeviceHeartbeatResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return DeviceHeartbeatResult{}, classifyControlWrite(err)
+		}
+		return result, nil
 	}
 	if !exists {
 		return DeviceHeartbeatResult{}, ErrNotFound
@@ -339,16 +405,17 @@ func (s *ControlStore) RecordDeviceHeartbeat(
 	if device.Projection.KeyGeneration != input.KeyGeneration {
 		return DeviceHeartbeatResult{}, ErrDeviceKeyGenerationMismatch
 	}
-
-	ledgerRequest, err := ledgerRequestFromProof(input.Proof, input.KeyGeneration)
+	dbNow, err := transactionNow(ctx, tx)
 	if err != nil {
+		return DeviceHeartbeatResult{}, err
+	}
+	if err := deviceauth.ValidateTimestamp(input.Proof.TimestampMilli, dbNow); err != nil {
 		return DeviceHeartbeatResult{}, err
 	}
 	decision, existing, err := decideStoredLedger(ctx, tx, ledgerRequest, device.Projection.LastAcceptedSequence)
 	if err != nil {
 		return DeviceHeartbeatResult{}, err
 	}
-	responseReference := heartbeatResponseReference(input.TargetDeviceID, input.Proof.Sequence)
 	if decision.Action == deviceauth.LedgerReturnRecorded {
 		if existing == nil || decision.ResponseReference != responseReference {
 			return DeviceHeartbeatResult{}, deviceauth.ErrInvalidLedgerState
@@ -493,14 +560,13 @@ func ledgerRequestFromProof(proof deviceauth.VerifiedRequest, keyGeneration uint
 
 func validateLedgerExpiry(expiresAt, now time.Time) error {
 	retention := expiresAt.Sub(now)
-	if expiresAt.IsZero() || retention < minimumLedgerRetention {
+	if expiresAt.IsZero() || retention < DeviceLedgerAuditRetention {
 		return ErrDeviceLedgerRetentionInvalid
 	}
 	return nil
 }
 
-func loadChallengeForUpdate(ctx context.Context, tx *sql.Tx, challengeID string) (storedChallenge, time.Time, error) {
-	var dbNow time.Time
+func loadChallengeForUpdate(ctx context.Context, tx *sql.Tx, challengeID string) (storedChallenge, error) {
 	challenge, err := scanStoredChallenge(tx.QueryRowContext(ctx, `
 		SELECT id,public_key_digest,actor_id,workspace_type,workspace_id,
 		       device_label,app_version,expires_at,consumed_at,created_at,
@@ -510,15 +576,12 @@ func loadChallengeForUpdate(ctx context.Context, tx *sql.Tx, challengeID string)
 		FOR UPDATE
 	`, challengeID))
 	if errors.Is(err, sql.ErrNoRows) {
-		return storedChallenge{}, time.Time{}, ErrNotFound
+		return storedChallenge{}, ErrNotFound
 	}
 	if err != nil {
-		return storedChallenge{}, time.Time{}, err
+		return storedChallenge{}, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT transaction_timestamp()`).Scan(&dbNow); err != nil {
-		return storedChallenge{}, time.Time{}, err
-	}
-	return challenge, dbNow, nil
+	return challenge, nil
 }
 
 func scanStoredChallenge(row rowScanner) (storedChallenge, error) {
@@ -611,6 +674,94 @@ func scanStoredDevice(row rowScanner) (storedDevice, error) {
 	return item, nil
 }
 
+func replayRegisteredDevice(
+	ctx context.Context,
+	tx *sql.Tx,
+	request deviceauth.LedgerRequest,
+	deviceID string,
+) (RegisterDeviceResult, bool, error) {
+	existing, err := loadExactDeviceLedger(ctx, tx, request)
+	if err != nil || existing == nil {
+		return RegisterDeviceResult{}, false, err
+	}
+	decision, err := decideExactDeviceLedger(request, existing)
+	if err != nil {
+		return RegisterDeviceResult{}, true, err
+	}
+	if decision.Action != deviceauth.LedgerReturnRecorded || decision.ResponseReference != deviceID {
+		return RegisterDeviceResult{}, true, ErrDeviceProofReplayed
+	}
+	device, exists, err := loadDeviceForUpdate(ctx, tx, deviceID)
+	if err != nil {
+		return RegisterDeviceResult{}, true, err
+	}
+	if !exists {
+		return RegisterDeviceResult{}, true, deviceauth.ErrInvalidLedgerState
+	}
+	return RegisterDeviceResult{
+		Device: device.Projection, ResponseReference: decision.ResponseReference, Replayed: true,
+	}, true, nil
+}
+
+func replayDeviceHeartbeat(
+	ctx context.Context,
+	tx *sql.Tx,
+	request deviceauth.LedgerRequest,
+	responseReference string,
+) (DeviceHeartbeatResult, bool, error) {
+	existing, err := loadExactDeviceLedger(ctx, tx, request)
+	if err != nil || existing == nil {
+		return DeviceHeartbeatResult{}, false, err
+	}
+	decision, err := decideExactDeviceLedger(request, existing)
+	if err != nil {
+		return DeviceHeartbeatResult{}, true, err
+	}
+	if decision.Action != deviceauth.LedgerReturnRecorded || decision.ResponseReference != responseReference {
+		return DeviceHeartbeatResult{}, true, ErrDeviceProofReplayed
+	}
+	return DeviceHeartbeatResult{
+		Sequence: request.Sequence, AcceptedAt: existing.AcceptedAt.UTC().Format(time.RFC3339Nano),
+		ResponseReference: decision.ResponseReference, Replayed: true,
+	}, true, nil
+}
+
+func loadExactDeviceLedger(
+	ctx context.Context,
+	tx *sql.Tx,
+	request deviceauth.LedgerRequest,
+) (*storedLedger, error) {
+	var existing storedLedger
+	err := tx.QueryRowContext(ctx, `
+		SELECT nonce,request_hash,authorization_token_hash,response_reference,accepted_at,expires_at
+		FROM ky_ai_executor_device_request_ledger
+		WHERE device_id=$1 AND key_generation=$2 AND sequence=$3
+	`, request.DeviceID, int64(request.KeyGeneration), int64(request.Sequence)).Scan(
+		&existing.Record.Nonce, &existing.Record.RequestHash, &existing.Record.AuthorizationTokenHash,
+		&existing.Record.ResponseReference, &existing.AcceptedAt, &existing.ExpiresAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	existing.Record.DeviceID = request.DeviceID
+	existing.Record.KeyGeneration = request.KeyGeneration
+	existing.Record.Sequence = request.Sequence
+	return &existing, nil
+}
+
+func decideExactDeviceLedger(
+	request deviceauth.LedgerRequest,
+	existing *storedLedger,
+) (deviceauth.LedgerDecision, error) {
+	if existing == nil {
+		return deviceauth.LedgerDecision{}, deviceauth.ErrInvalidLedgerState
+	}
+	return deviceauth.DecideLedgerRequest(request, deviceauth.LedgerState{Existing: &existing.Record})
+}
+
 func decideStoredLedger(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -652,6 +803,14 @@ func decideStoredLedger(
 	}
 	decision, err := deviceauth.DecideLedgerRequest(request, state)
 	return decision, existingPointer, err
+}
+
+func transactionNow(ctx context.Context, tx *sql.Tx) (time.Time, error) {
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT transaction_timestamp()`).Scan(&now); err != nil {
+		return time.Time{}, err
+	}
+	return now, nil
 }
 
 func insertDeviceLedger(

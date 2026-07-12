@@ -48,6 +48,14 @@ func TestControlDeviceStoreAgainstPostgres(t *testing.T) {
 	if expiresAt.Sub(createdAt) != deviceChallengeLifetime {
 		t.Fatalf("challenge lifetime=%s want=%s", expiresAt.Sub(createdAt), deviceChallengeLifetime)
 	}
+	reconstructedChallenge := challengeInput
+	reconstructedChallenge.ID += "_retry"
+	reconstructedChallenge.ChallengeHash = digestText("fresh-handler-candidate")
+	reconstructed, err := control.CreateDeviceRegistrationChallenge(ctx, reconstructedChallenge)
+	if err != nil || reconstructed.Created || reconstructed.Challenge.ID != created.Challenge.ID ||
+		reconstructed.Challenge.ExpiresAt != created.Challenge.ExpiresAt {
+		t.Fatalf("challenge deterministic replay=%#v err=%v", reconstructed, err)
+	}
 	changedChallenge := challengeInput
 	changedChallenge.RequestHash = digestText("different-registration-request")
 	if _, err := control.CreateDeviceRegistrationChallenge(ctx, changedChallenge); !errors.Is(err, ErrIdempotencyReuse) {
@@ -102,6 +110,16 @@ func TestControlDeviceStoreAgainstPostgres(t *testing.T) {
 	if consumedCount != 1 || deviceCount != 1 || registrationLedgerCount != 1 {
 		t.Fatalf("registration atomicity consumed=%d device=%d ledger=%d", consumedCount, deviceCount, registrationLedgerCount)
 	}
+	if _, err := control.db.ExecContext(ctx, `
+		UPDATE ky_ai_executor_device_registration_challenge
+		SET expires_at=transaction_timestamp()-interval '1 second'
+		WHERE id=$1
+	`, challengeInput.ID); err != nil {
+		t.Fatal(err)
+	}
+	if replay, err := control.RegisterDevice(ctx, registerInput); err != nil || !replay.Replayed || replay.ResponseReference != first.deviceID {
+		t.Fatalf("registration exact replay after challenge expiry=%#v err=%v", replay, err)
+	}
 
 	changedRegistration := registerInput
 	changedRegistration.Proof = signedDeviceProof(t, first, "POST", DeviceRegistrationPath,
@@ -144,7 +162,7 @@ func TestControlDeviceStoreAgainstPostgres(t *testing.T) {
 		KeyGeneration:   1,
 		Proof:           heartbeatProof,
 		AppVersion:      "2.0.1",
-		LedgerExpiresAt: time.Now().Add(24 * time.Hour),
+		LedgerExpiresAt: time.Now().Add(DeviceLedgerAuditRetention + time.Hour),
 	}
 
 	const heartbeatWorkers = 20
@@ -282,6 +300,9 @@ func TestControlDeviceStoreAgainstPostgres(t *testing.T) {
 	if _, err := control.db.ExecContext(ctx, `UPDATE ky_ai_executor_device SET status='disabled' WHERE id=$1`, first.deviceID); err != nil {
 		t.Fatal(err)
 	}
+	if replay, err := control.RecordDeviceHeartbeat(ctx, heartbeatSix); err != nil || !replay.Replayed || replay.Sequence != 6 {
+		t.Fatalf("disabled device exact replay=%#v err=%v", replay, err)
+	}
 	heartbeatSeven := heartbeatInput
 	heartbeatSeven.Proof = signedDeviceProof(t, first, "POST", heartbeatPath(first.deviceID),
 		[]byte(`{"bridgeVersion":2,"appVersion":"2.0.7"}`), "", nil,
@@ -374,7 +395,7 @@ func prepareDeviceRegistration(
 		ChallengeID: challengeID, ActorID: actorID,
 		WorkspaceType: "platform", WorkspaceID: "platform_root",
 		PublicKey: fixture.publicKey, ChallengeHash: challengeHash, Proof: proof,
-		LedgerExpiresAt: time.Now().Add(24 * time.Hour),
+		LedgerExpiresAt: time.Now().Add(DeviceLedgerAuditRetention + time.Hour),
 	}
 }
 
