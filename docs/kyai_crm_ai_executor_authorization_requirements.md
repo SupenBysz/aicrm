@@ -677,6 +677,8 @@ Binding 元数据必须包含 `runtimeType`、`runtimeBindingId`、`deviceId`（
 
 `bindingDigest`/`quarantineDigest` 固定为 SHA-256 lowercase hex：递归枚举目录内普通文件，拒绝 symlink、hardlink、device/socket/FIFO；relative path 统一为 NFC UTF-8 与 `/` 分隔，禁止 `..`，按 path 的 UTF-8 bytes 升序；每项记录 `{path,size,sha256}`，对该数组的 RFC 8785 canonical JSON UTF-8 bytes 求 SHA-256。mtime、所有者和平台 ACL 不进入摘要。Desktop 与 Server 必须使用同一测试向量，proof、prepared binding、durable ACK 和 quarantine ACK 均使用此算法。
 
+`accountFingerprint` 固定为 `SHA-256(UTF-8(trim(account.type) + "\n" + lowercase(trim(account.email))))` 的 64 位 lowercase hex；`planType` 明确不参与，套餐变化不得被识别成另一个账号。缺失/空 email、控制字符或超长字段必须使成功 proof fail-closed；账号 type/email 原文只存在于受信 Main 的瞬时内存，不进入 Renderer、HTTP body、数据库、日志或审计。Desktop 与 Go 必须共同消费 `docs/testdata/aicrm_account_fingerprint_vectors.json`。
+
 服务端提交：
 
 1. Runtime 先刷新 staging 全部凭据文件与目录并计算 bindingDigest；DB CAS 创建携带该 digest 和当前 revocationEpoch 的 `prepared` binding。
@@ -770,6 +772,7 @@ Desktop 授权提交：
 POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-handoffs
 POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-handoffs/{handoffId}/claim
 POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-proofs
+POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-activations/{activationId}/lease-renewals
 POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-activations/{activationId}/ack
 POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-commands/{operationId}/ack
 ```
@@ -778,12 +781,23 @@ POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-commands/{op
 - Claim 使用 `Authorization: AiCRM-Handoff <handoffTicket>` 加设备签名，body 为 `{handoffId, claimedAt}`；只允许成功一次，相同设备相同请求幂等，其他 claim 返回 409。成功响应固定为 `{handoffId, executorId, claimToken, expiresAt, sessionRevision, replayed}`，其中 `executorId` 只能来自服务端已冻结并完成票据校验的 handoff/session 事实，不接受 Desktop 输入或推断；5 分钟 `claimToken` 只允许在受信 Desktop 内存及加密恢复 journal 中短暂保留。
 - Proof 使用 `Authorization: AiCRM-Claim <claimToken>` 加设备签名，body 固定为 `{handoffId, sessionRevision, loginIdHash, result, checkedAt, accountFingerprint, candidateBindingDigest}`；不得包含凭据、路径、URL或账号原文。
 - 成功 proof 在取得 executor operation lease 后返回 `{operationId, activationId, credentialRevision, leaseEpoch, sourceCredentialRevision, revocationEpoch, activationToken}`；ACK 后服务端才激活。
+- Lease renewal 使用同一 `Authorization: AiCRM-Activation <activationToken>` 加设备签名，body 固定为 `{operationId, activationId, credentialRevision, leaseEpoch, sourceCredentialRevision, revocationEpoch, bindingDigest}`；成功响应固定为 `{activationId, executorId, operationId, credentialRevision, leaseEpoch, sourceCredentialRevision, revocationEpoch, renewedAt, leaseExpiresAt, replayed}`。服务端只允许未过期的 exact active lease 用完整冻结元组 CAS 延长到 `min(DB now + 30s, activation.expiresAt, session.deadlineAt)`，不得复活过期 epoch；相同签名重放返回第一次 ledger `acceptedAt` 可确定性重建的原时间，不再次延长。
 - ACK 使用 `Authorization: AiCRM-Activation <activationToken>` 加设备签名，body 固定为 `{operationId, activationId, credentialRevision, leaseEpoch, sourceCredentialRevision, revocationEpoch, durableBarrierCompletedAt, bindingDigest}`，并执行 §20.2 fencing CAS。
 - 同一 proof/ACK 的完全相同重试按持久 ledger 返回原结果；相同幂等键不同 body 返回 `idempotency_key_reused`，相同 sequence 不同请求返回 `device_proof_replayed`。
+
+Desktop proof 成功后必须先持久化 activation fence，立即完成一次 fresh renewal，随后固定每 10 秒续租，请求超时 5 秒且 singleflight；续租响应先写加密 journal 和本地 operation lease fence，再清理 outbound request journal。服务端 `replayed:true` 或本地 journal 恢复只完成旧请求解歧，必须再用新 sequence 成功 fresh renewal 才允许继续文件 promotion。ACK 前停止 ticker、等待在途续租并完成最后一次 fresh renewal；ACK 一旦结果不明，只能精确重放同一 ACK，禁止再签发 heartbeat、renew 或其他请求。
+
+所有设备签名请求共享一个 Main-only sequence lane。任何已持久化但尚无确定响应的 exact request 必须把 lane 锁定到其 semantic reference；心跳和其他请求不得越过它消耗更高 sequence，只有同一引用完成精确恢复并持久化响应后才可解锁。进程启动必须先扫描加密 outbound journal、恢复唯一 pending head，再启动 heartbeat；发现多个不相容 pending head、journal 损坏或安全存储不可用一律 fail-closed。
 
 `desktop-commands/{operationId}/ack` 只用于 authorization cancel/reopen 的本地执行回执，使用 `Authorization: AiCRM-Command <commandTicket>` 加设备签名，body 固定为 `{operationId, purpose, expectedSessionRevision, result, completedAt, failureCode?}`，其中 purpose 为 `authorization_cancel | authorization_reopen`，result 为 `succeeded | failed | stale_target`。Cancel API 在签发 ticket 的同一事务先把 session 置为终态 cancelled 并禁止迟到 proof/promotion；ACK 只确认本地 App Server/staging 已清理，不得复活或再次迁移 session。Reopen ACK 只写审计和 operation 终态，不改变 session 状态。Verify/catalog/readiness/logout 分别使用其专用 proof/ACK 端点，不复用本端点。
 
 上述 ticket/token 均设置精确 audience、session/executor/device、purpose、nonce、issuedAt、expiresAt 和 server key id；服务端只保存 token hash、消费状态和 request hash。响应使用 `Cache-Control: no-store`，代理、前端日志和持久缓存不得记录 token。Heartbeat、claim、proof、activation/revocation/desktop-command ACK、catalog、readiness 和 credential-verification 端点不使用用户 Bearer，也不接受 workspace Header 覆盖，workspace 从 session 与 binding 派生；registration、bind、rebind 和普通 unbind 按本节前述合同同时校验用户 Bearer、权限和设备 PoP，`force:true` unbind 是唯一无需设备签名的例外，但必须 owner + fresh-login + 二次确认 token + 高危审计。
+
+Trusted-token key rotation 使用独立公钥环。`KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID` 与 `KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY` 只表示当前 active signer；`KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEYRING_FILE` 只保存最多 8 把 raw32 Ed25519 公钥、单调 revision、activeKid 及每把 key 的半开签名窗口。旧私钥不得保留；retired key 的 `verifyUntil` 必须精确等于 `signingNotAfter + 600s`。active 私钥派生公钥必须等于 keyring activeKid；签发时 `iat` 必须属于 active signing window，验签时还要校验 token `iat` 属于该 key 的窗口且当前时间早于 verifyUntil。重复 kid、未知字段、非 canonical base64url/UTC 秒、重叠窗口、revision 非正安全整数或公私钥不匹配均拒绝启动写平面。
+
+公钥只通过独立只读接口 `GET /api/v1/public/ai-executor-trusted-token-keyring` 发布，不混入 platform-profile。响应固定包含 `schemaVersion=1`、issuer、revision、activeKid、DB 时钟 generatedAt、`refreshAfterSeconds=30`、`maxTokenLifetimeSeconds=600`、固定 Desktop audiences、按 kid 排序的 OKP/Ed25519 JWK 投影和覆盖上述安全字段的 keyringDigest；不得返回私钥、nonce secret、内部路径或配置。接口必须 `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`，拒绝 query、Cookie、Authorization 和 workspace Header；keyring 未完整时返回 503。
+
+Desktop Main 只能从后台 `webUrl` 的 HTTPS origin 获取 keyring；生产禁止把默认 loopback HTTP 当作根信任，禁止 redirect、Bearer、Cookie 和 workspace Header，并限制 5 秒/64 KiB。Main 用 safeStorage 加密持久化 `(origin,revision,keyringDigest)` 双高水位：revision 回退、同 revision 内容变化或 origin 静默切换均拒绝；unknown kid 最多强制刷新一次。compact JWS 必须本地执行 canonical base64url/JSON、精确 header、Ed25519、issuer/audience/purpose/TTL、key window、jti、registered device 和当前 target CAS 验证；`aicrm-operation-confirmation` 即使签名正确也不得进入 Desktop Bridge。Renderer 提供的 ticket 只作为待验密文，不能成为 executor/device/revision 真相。
 
 Desktop 本地 logout 只能由服务端签发 audience=`aicrm-desktop-command`、purpose=`credential_logout`、绑定 executor/device/revocationId/credentialRevision/revocationEpoch/operationId、120 秒单次 compact JWS command ticket 触发。Bridge 先 CAS 校验 ticket 目标仍是本机 current revision 和 epoch；若已变化则不得触碰任何 revision，并以 stale-target 结果 ACK。匹配时先把只读 `revisions/<credentialRevision>` no-replace rename 到 quarantine 并完成 durable barrier，再从 quarantine 创建一次性 COW 副本执行 `account/logout`，最后销毁副本和 quarantine；绝不把 revision 目录挂载为可写。随后以 `Authorization: AiCRM-Command <ticket>` 加设备签名提交固定 body `{operationId, revocationId, credentialRevision, revocationEpoch, completedAt, quarantineDigest, result}`；服务端再次 CAS revision/epoch。任意 renderer 仅凭 executorId 不得删除凭据。Force revoke 在设备离线时先使服务端 binding 无效，并在设备下次 heartbeat 强制本地 quarantine。
 
