@@ -25,6 +25,17 @@ func TestValidateExecutableLoginScriptDSLAllowsPublicActions(t *testing.T) {
 	}
 }
 
+func TestValidateExecutableLoginScriptDSLDoesNotClaimFutureElementKeyActions(t *testing.T) {
+	for _, action := range []string{"clickElementKey", "waitForElementKey", "captureElementKey", "readElementKey"} {
+		t.Run(action, func(t *testing.T) {
+			raw := json.RawMessage(`{"version":1,"purpose":"account_detect","steps":[{"action":"` + action + `"}]}`)
+			if err := validateExecutableLoginScriptDSL(raw, "account_detect"); err != ErrValidation {
+				t.Fatalf("active runtime must not claim unsupported action %s, got %v", action, err)
+			}
+		})
+	}
+}
+
 func TestValidateExecutableLoginScriptDSLRejectsSensitiveAndUnknownActions(t *testing.T) {
 	for _, action := range []string{"readStorage", "readIndexedDB", "executeJavaScript"} {
 		t.Run(action, func(t *testing.T) {

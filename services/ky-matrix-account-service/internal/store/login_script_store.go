@@ -183,7 +183,7 @@ func (s *Store) CreateGeneratedLoginScriptCandidate(ctx context.Context, workspa
 	if purpose == "" {
 		purpose = "qr_login_prepare"
 	}
-	if err := validateExecutableLoginScriptDSL(generated.DSL, purpose); err != nil {
+	if err := validateLoginScriptCandidateForPersistence(generated.DSL, purpose); err != nil {
 		return LoginScriptResolveResult{}, err
 	}
 	pageFingerprint := strings.TrimSpace(in.PageFingerprint)
