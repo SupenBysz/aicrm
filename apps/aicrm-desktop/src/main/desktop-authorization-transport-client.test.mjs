@@ -113,6 +113,98 @@ function claimData(overrides = {}) {
   };
 }
 
+function proofInput(overrides = {}) {
+  return {
+    sessionId: "session_1",
+    claimToken: CLAIM_TOKEN,
+    handoffId: "handoff_1",
+    sessionRevision: 2,
+    loginIdHash: LOGIN_HASH,
+    result: "succeeded",
+    checkedAt: NOW,
+    accountFingerprint: ACCOUNT_FINGERPRINT,
+    candidateBindingDigest: BINDING_DIGEST,
+    ...overrides
+  };
+}
+
+function proofData(overrides = {}) {
+  return {
+    proofId: "proof_1",
+    result: "succeeded",
+    sessionRevision: 3,
+    replayed: false,
+    operationId: "operation_1",
+    activationId: "activation_1",
+    credentialRevision: 4,
+    leaseEpoch: 2,
+    sourceCredentialRevision: 0,
+    revocationEpoch: 0,
+    bindingDigest: BINDING_DIGEST,
+    activationToken: ACTIVATION_TOKEN,
+    expiresAt: "2026-07-13T09:02:00.123Z",
+    ...overrides
+  };
+}
+
+function acknowledgementInput(overrides = {}) {
+  return {
+    sessionId: "session_1",
+    activationToken: ACTIVATION_TOKEN,
+    operationId: "operation_1",
+    activationId: "activation_1",
+    credentialRevision: 4,
+    leaseEpoch: 2,
+    sourceCredentialRevision: 0,
+    revocationEpoch: 0,
+    durableBarrierCompletedAt: NOW,
+    bindingDigest: BINDING_DIGEST,
+    ...overrides
+  };
+}
+
+function acknowledgementData(overrides = {}) {
+  return {
+    activationId: "activation_1",
+    executorId: "executor_1",
+    credentialRevision: 4,
+    sessionRevision: 4,
+    replayed: false,
+    ...overrides
+  };
+}
+
+function proofRecoveryInput(prepared, overrides = {}) {
+  return {
+    sessionId: "session_1",
+    handoffId: "handoff_1",
+    sessionRevision: 2,
+    loginIdHash: LOGIN_HASH,
+    result: "succeeded",
+    accountFingerprint: ACCOUNT_FINGERPRINT,
+    candidateBindingDigest: BINDING_DIGEST,
+    expectedRequestReference: prepared.requestReference,
+    expectedRequestHash: prepared.requestHash,
+    ...overrides
+  };
+}
+
+function acknowledgementRecoveryInput(prepared, overrides = {}) {
+  return {
+    sessionId: "session_1",
+    operationId: "operation_1",
+    activationId: "activation_1",
+    credentialRevision: 4,
+    leaseEpoch: 2,
+    sourceCredentialRevision: 0,
+    revocationEpoch: 0,
+    bindingDigest: BINDING_DIGEST,
+    expectedRequestReference: prepared.requestReference,
+    expectedRequestHash: prepared.requestHash,
+    ...overrides
+  };
+}
+
 function response(data, { status = 200, requestId = "req_server_1", envelope = {} } = {}) {
   const encoded = Buffer.from(JSON.stringify({ data, requestId, ...envelope }), "utf8");
   return {
@@ -520,6 +612,352 @@ test("ticket-free claim recovery rejects every mismatched fence without signing 
   assert.equal(current.signCount(), 1);
   assert.equal(networkCalls, 1);
   await assert.rejects(current.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+});
+
+test("claim-token-free proof recovery replays the exact old signed body and durable success", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const requests = [];
+  let prepared;
+  await assert.rejects(
+    current.client({
+      fetch: async (url, init) => {
+        requests.push(requestProjection(url, init));
+        throw new Error("offline");
+      }
+    }).submitAuthorizationProof(proofInput(), {
+      onPrepared: async (value) => {
+        prepared = value;
+      }
+    }),
+    { code: "desktop_authorization_transport_failed" }
+  );
+  assert.ok(prepared);
+  assert.equal(current.signCount(), 1);
+  const exact = proofRecoveryInput(prepared);
+  let recoveryProjection;
+  const recovered = await current.client({
+    now: () => new Date("2026-08-13T09:00:00.000Z"),
+    fetch: async (url, init) => {
+      requests.push(requestProjection(url, init));
+      return response(proofData());
+    }
+  }).recoverAuthorizationProof(exact, {
+    onPrepared: async (value) => {
+      recoveryProjection = value;
+    }
+  });
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.equal(recovered.recovered, true);
+  assert.deepEqual(recovered.data, proofData());
+  assert.deepEqual(recoveryProjection, {
+    requestReference: prepared.requestReference,
+    requestHash: prepared.requestHash,
+    recovered: true,
+    responseAvailable: false
+  });
+  assert.equal("claimToken" in exact, false);
+  assert.equal("checkedAt" in exact, false);
+
+  let networkCalls = 0;
+  const durable = await current.client({
+    now: () => new Date("2026-09-13T09:00:00.000Z"),
+    fetch: async () => {
+      networkCalls += 1;
+      throw new Error("must not send durable proof");
+    }
+  }).recoverAuthorizationProof(exact);
+  assert.equal(networkCalls, 0);
+  assert.deepEqual(durable.data, proofData());
+  await current.client().completeRequest(prepared.requestReference, prepared.requestHash);
+});
+
+test("activation-token-free ACK recovery replays the exact old barrier body and durable success", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const requests = [];
+  let prepared;
+  await assert.rejects(
+    current.client({
+      fetch: async (url, init) => {
+        requests.push(requestProjection(url, init));
+        throw new Error("offline");
+      }
+    }).acknowledgeCredentialActivation(acknowledgementInput(), {
+      onPrepared: async (value) => {
+        prepared = value;
+      }
+    }),
+    { code: "desktop_authorization_transport_failed" }
+  );
+  assert.ok(prepared);
+  assert.equal(current.signCount(), 1);
+  const exact = acknowledgementRecoveryInput(prepared);
+  const recovered = await current.client({
+    now: () => new Date("2026-08-13T09:00:00.000Z"),
+    fetch: async (url, init) => {
+      requests.push(requestProjection(url, init));
+      return response(acknowledgementData());
+    }
+  }).recoverCredentialActivationAck(exact);
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.equal(recovered.recovered, true);
+  assert.deepEqual(recovered.data, acknowledgementData());
+  assert.equal("activationToken" in exact, false);
+  assert.equal("durableBarrierCompletedAt" in exact, false);
+
+  let networkCalls = 0;
+  const durable = await current.client({
+    now: () => new Date("2026-09-13T09:00:00.000Z"),
+    fetch: async () => {
+      networkCalls += 1;
+      throw new Error("must not send durable ACK");
+    }
+  }).recoverCredentialActivationAck(exact);
+  assert.equal(networkCalls, 0);
+  assert.deepEqual(durable.data, acknowledgementData());
+  await current.client().completeRequest(prepared.requestReference, prepared.requestHash);
+});
+
+test("proof and ACK exact recovery return durable 4xx without network", async (t) => {
+  for (const [label, createPending, recover] of [
+    [
+      "proof",
+      (client, hooks) => client.submitAuthorizationProof(proofInput(), hooks),
+      (client, prepared, hooks) =>
+        client.recoverAuthorizationProof(proofRecoveryInput(prepared), hooks)
+    ],
+    [
+      "ACK",
+      (client, hooks) => client.acknowledgeCredentialActivation(acknowledgementInput(), hooks),
+      (client, prepared, hooks) =>
+        client.recoverCredentialActivationAck(acknowledgementRecoveryInput(prepared), hooks)
+    ]
+  ]) {
+    await t.test(label, async (st) => {
+      const current = await fixture();
+      st.after(() => rm(current.base, { recursive: true, force: true }));
+      let prepared;
+      const first = await createPending(
+        current.client({
+          fetch: async () => rejectionResponse(409, "revision_conflict")
+        }),
+        {
+          onPrepared: async (value) => {
+            prepared = value;
+          }
+        }
+      ).then(
+        () => assert.fail("expected durable rejection"),
+        (error) => error
+      );
+      assert.ok(prepared);
+      assert.equal(first.code, "desktop_authorization_transport_rejected");
+      assert.equal(first.status, 409);
+      assert.equal(current.signCount(), 1);
+
+      let networkCalls = 0;
+      const replayed = await recover(
+        current.client({
+          fetch: async () => {
+            networkCalls += 1;
+            throw new Error("must not send durable rejection");
+          }
+        }),
+        prepared
+      ).then(
+        () => assert.fail("expected recovered durable rejection"),
+        (error) => error
+      );
+      assert.equal(networkCalls, 0);
+      assert.equal(current.signCount(), 1);
+      assert.deepEqual(
+        { code: replayed.code, status: replayed.status, serverCode: replayed.serverCode },
+        { code: first.code, status: first.status, serverCode: first.serverCode }
+      );
+    });
+  }
+});
+
+test("proof and ACK exact recovery reject mismatched tuples and raw-token extras without effects", async (t) => {
+  const cases = [
+    {
+      label: "proof",
+      create: (client, hooks) => client.submitAuthorizationProof(proofInput(), hooks),
+      exact: proofRecoveryInput,
+      recover: (client, input) => client.recoverAuthorizationProof(input),
+      mismatches: [
+        { sessionId: "session_other" },
+        { handoffId: "handoff_other" },
+        { sessionRevision: 9 },
+        { loginIdHash: "9".repeat(64) },
+        { result: "failed", accountFingerprint: "", candidateBindingDigest: "" },
+        { accountFingerprint: "8".repeat(64) },
+        { candidateBindingDigest: "7".repeat(64) },
+        { expectedRequestReference: "6".repeat(64) },
+        { expectedRequestHash: "5".repeat(64) },
+        { claimToken: CLAIM_TOKEN },
+        { checkedAt: NOW }
+      ]
+    },
+    {
+      label: "ACK",
+      create: (client, hooks) => client.acknowledgeCredentialActivation(acknowledgementInput(), hooks),
+      exact: acknowledgementRecoveryInput,
+      recover: (client, input) => client.recoverCredentialActivationAck(input),
+      mismatches: [
+        { sessionId: "session_other" },
+        { operationId: "operation_other" },
+        { activationId: "activation_other" },
+        { credentialRevision: 5 },
+        { leaseEpoch: 3 },
+        { sourceCredentialRevision: 1 },
+        { revocationEpoch: 1 },
+        { bindingDigest: "7".repeat(64) },
+        { expectedRequestReference: "6".repeat(64) },
+        { expectedRequestHash: "5".repeat(64) },
+        { activationToken: ACTIVATION_TOKEN },
+        { durableBarrierCompletedAt: NOW }
+      ]
+    }
+  ];
+  for (const currentCase of cases) {
+    await t.test(currentCase.label, async (st) => {
+      const current = await fixture();
+      st.after(() => rm(current.base, { recursive: true, force: true }));
+      let prepared;
+      let networkCalls = 0;
+      await assert.rejects(
+        currentCase.create(
+          current.client({
+            fetch: async () => {
+              networkCalls += 1;
+              throw new Error("offline");
+            }
+          }),
+          {
+            onPrepared: async (value) => {
+              prepared = value;
+            }
+          }
+        )
+      );
+      const exact = currentCase.exact(prepared);
+      assert.equal(networkCalls, 1);
+      assert.equal(current.signCount(), 1);
+      for (const mismatch of currentCase.mismatches) {
+        await assert.rejects(async () =>
+          currentCase.recover(current.client({
+            fetch: async () => {
+              networkCalls += 1;
+              throw new Error("mismatch must not reach network");
+            }
+          }), { ...exact, ...mismatch })
+        );
+      }
+      await assert.rejects(
+        async () => currentCase.recover(
+          current.client({
+            loadTrustedApiBaseUrl: () => "https://other.example.test",
+            fetch: async () => {
+              networkCalls += 1;
+              throw new Error("origin mismatch must not reach network");
+            }
+          }),
+          exact
+        ),
+        { code: "desktop_authorization_transport_recovery_conflict" }
+      );
+      const identity = await current.identityFacade.getIdentity();
+      await assert.rejects(
+        currentCase.recover(
+          current.client({
+            identityStore: {
+              getIdentity: async () => ({ ...identity, keyGeneration: identity.keyGeneration + 1 }),
+              signRequest: async () => {
+                throw new Error("recovery must not sign");
+              }
+            },
+            fetch: async () => {
+              networkCalls += 1;
+              throw new Error("identity mismatch must not reach network");
+            }
+          }),
+          exact
+        ),
+        { code: "desktop_authorization_transport_recovery_conflict" }
+      );
+      assert.equal(networkCalls, 1);
+      assert.equal(current.signCount(), 1);
+    });
+  }
+});
+
+test("proof recovery hook failure and ACK recovery cancellation keep the exact lane pinned", async (t) => {
+  const proof = await fixture();
+  t.after(() => rm(proof.base, { recursive: true, force: true }));
+  let proofPrepared;
+  await assert.rejects(
+    proof.client({ fetch: async () => { throw new Error("offline"); } })
+      .submitAuthorizationProof(proofInput(), {
+        onPrepared: async (value) => {
+          proofPrepared = value;
+        }
+      })
+  );
+  let proofNetworkCalls = 0;
+  await assert.rejects(
+    proof.client({
+      fetch: async () => {
+        proofNetworkCalls += 1;
+        return response(proofData());
+      }
+    }).recoverAuthorizationProof(proofRecoveryInput(proofPrepared), {
+      onPrepared: async () => {
+        throw new Error("business fence unavailable");
+      }
+    }),
+    /business fence unavailable/
+  );
+  assert.equal(proofNetworkCalls, 0);
+  await assert.rejects(proof.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+
+  const ack = await fixture();
+  t.after(() => rm(ack.base, { recursive: true, force: true }));
+  let ackPrepared;
+  await assert.rejects(
+    ack.client({ fetch: async () => { throw new Error("offline"); } })
+      .acknowledgeCredentialActivation(acknowledgementInput(), {
+        onPrepared: async (value) => {
+          ackPrepared = value;
+        }
+      })
+  );
+  let fetchStarted;
+  const started = new Promise((resolve) => {
+    fetchStarted = resolve;
+  });
+  const cancellable = ack.client({
+    fetch: async (_url, init) => {
+      fetchStarted();
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
+  });
+  const pending = cancellable.recoverCredentialActivationAck(
+    acknowledgementRecoveryInput(ackPrepared)
+  );
+  await started;
+  cancellable.cancel();
+  await assert.rejects(pending, { code: "desktop_authorization_transport_cancelled" });
+  await assert.rejects(ack.lane.run(async () => undefined), {
     code: "desktop_device_request_lane_pinned"
   });
 });

@@ -122,6 +122,19 @@ export interface SubmitDesktopAuthorizationProofInput {
   candidateBindingDigest: string;
 }
 
+/** Main-only exact proof recovery fence. Raw claim tokens and checkedAt stay journal-only. */
+export interface RecoverDesktopAuthorizationProofInput {
+  sessionId: string;
+  handoffId: string;
+  sessionRevision: number;
+  loginIdHash: string;
+  result: DesktopAuthorizationProofResult;
+  accountFingerprint: string;
+  candidateBindingDigest: string;
+  expectedRequestReference: string;
+  expectedRequestHash: string;
+}
+
 export interface SubmitDesktopAuthorizationProofBaseResponse {
   proofId: string;
   result: DesktopAuthorizationProofResult;
@@ -185,6 +198,20 @@ export interface AcknowledgeDesktopCredentialActivationInput {
   bindingDigest: string;
 }
 
+/** Main-only exact ACK recovery fence. Raw activation tokens and barrier time stay journal-only. */
+export interface RecoverDesktopCredentialActivationAckInput {
+  sessionId: string;
+  operationId: string;
+  activationId: string;
+  credentialRevision: number;
+  leaseEpoch: number;
+  sourceCredentialRevision: number;
+  revocationEpoch: number;
+  bindingDigest: string;
+  expectedRequestReference: string;
+  expectedRequestHash: string;
+}
+
 export interface AcknowledgeDesktopCredentialActivationResponse {
   activationId: string;
   executorId: string;
@@ -227,8 +254,20 @@ interface TrustedRequestDefinition<T> {
   kind: DesktopTrustedRequestKind;
   path: string;
   authorization: string;
-  authorizationScheme: "AiCRM-Handoff" | "AiCRM-Claim" | "AiCRM-Activation";
+  authorizationScheme: DesktopAuthorizationScheme;
   createBody: () => Uint8Array;
+  validateRecoveredBody: (body: Uint8Array) => void;
+  validateResponse: (value: unknown) => T;
+}
+
+type DesktopAuthorizationScheme = "AiCRM-Handoff" | "AiCRM-Claim" | "AiCRM-Activation";
+
+interface RecoveredTrustedRequestDefinition<T> {
+  kind: DesktopTrustedRequestKind;
+  path: string;
+  authorizationScheme: DesktopAuthorizationScheme;
+  expectedRequestReference: string;
+  expectedRequestHash: string;
   validateRecoveredBody: (body: Uint8Array) => void;
   validateResponse: (value: unknown) => T;
 }
@@ -330,28 +369,33 @@ export class DesktopAuthorizationTransportClient {
       throw recoveryConflict("Desktop 认领恢复引用不匹配");
     }
 
-    const epoch = this.cancellationEpoch;
-    let preparedHookFailed = false;
-    return this.requestLane.runPinned(
-      reference,
-      () =>
-        this.submitRecoveredHandoffClaim(
-          { handoffId, path, expectedRequestReference, expectedRequestHash },
-          epoch,
-          hooks,
-          () => {
-            preparedHookFailed = true;
+    return this.runRecoveredTrusted(
+      {
+        kind: "handoff_claim",
+        path,
+        authorizationScheme: "AiCRM-Handoff",
+        expectedRequestReference,
+        expectedRequestHash,
+        validateRecoveredBody: (body) => {
+          const value = parseJson(body, "认领恢复 body 无效");
+          if (!exactObject(value, ["handoffId", "claimedAt"])) {
+            throw recoveryConflict("认领恢复 body 结构不匹配");
           }
-        ),
-      async () => {
-        if (preparedHookFailed) return true;
-        try {
-          const pending = await this.requestJournal.load(reference);
-          return pending !== null && pending.response === null;
-        } catch {
-          return true;
-        }
-      }
+          const recovered = value as { handoffId: unknown; claimedAt: unknown };
+          if (
+            recovered.handoffId !== handoffId ||
+            !canonicalDeviceTime(recovered.claimedAt)
+          ) {
+            throw recoveryConflict("认领恢复 body 与当前操作不匹配");
+          }
+          requireCanonicalEncoding(body, {
+            handoffId,
+            claimedAt: recovered.claimedAt
+          });
+        },
+        validateResponse: (value) => validateClaimResponse(value, handoffId)
+      },
+      hooks
     );
   }
 
@@ -400,6 +444,92 @@ export class DesktopAuthorizationTransportClient {
         validateResponse: (value) => validateProofResponse(value, result)
       },
       epoch,
+      hooks
+    );
+  }
+
+  recoverAuthorizationProof(
+    input: RecoverDesktopAuthorizationProofInput,
+    hooks?: DesktopTrustedRequestHooks
+  ): Promise<DesktopTrustedTransportResult<SubmitDesktopAuthorizationProofResponse>> {
+    if (!exactObject(input, [
+      "sessionId",
+      "handoffId",
+      "sessionRevision",
+      "loginIdHash",
+      "result",
+      "accountFingerprint",
+      "candidateBindingDigest",
+      "expectedRequestReference",
+      "expectedRequestHash"
+    ])) {
+      throw contractInvalid("Desktop 登录证明恢复参数结构无效");
+    }
+    const sessionId = validOpaque(input.sessionId, "sessionId");
+    const handoffId = validOpaque(input.handoffId, "handoffId");
+    const sessionRevision = positiveRevision(input.sessionRevision, "sessionRevision");
+    const loginIdHash = validDigest(input.loginIdHash, "loginIdHash");
+    const result = validProofResult(input.result);
+    const accountFingerprint = result === "succeeded"
+      ? validDigest(input.accountFingerprint, "accountFingerprint")
+      : emptyString(input.accountFingerprint, "accountFingerprint");
+    const candidateBindingDigest = result === "succeeded"
+      ? validDigest(input.candidateBindingDigest, "candidateBindingDigest")
+      : emptyString(input.candidateBindingDigest, "candidateBindingDigest");
+    const expectedRequestReference = validDigest(
+      input.expectedRequestReference,
+      "expectedRequestReference"
+    );
+    const expectedRequestHash = validDigest(input.expectedRequestHash, "expectedRequestHash");
+    const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-proofs`;
+    const reference = desktopTrustedRequestReference("authorization_proof", path);
+    if (reference !== expectedRequestReference) {
+      throw recoveryConflict("Desktop 登录证明恢复引用不匹配");
+    }
+    return this.runRecoveredTrusted(
+      {
+        kind: "authorization_proof",
+        path,
+        authorizationScheme: "AiCRM-Claim",
+        expectedRequestReference,
+        expectedRequestHash,
+        validateRecoveredBody: (body) => {
+          const value = parseJson(body, "登录证明恢复 body 无效");
+          if (!exactObject(value, [
+            "handoffId",
+            "sessionRevision",
+            "loginIdHash",
+            "result",
+            "checkedAt",
+            "accountFingerprint",
+            "candidateBindingDigest"
+          ])) {
+            throw recoveryConflict("登录证明恢复 body 结构不匹配");
+          }
+          const recovered = value as Record<string, unknown>;
+          if (
+            recovered.handoffId !== handoffId ||
+            recovered.sessionRevision !== sessionRevision ||
+            recovered.loginIdHash !== loginIdHash ||
+            recovered.result !== result ||
+            recovered.accountFingerprint !== accountFingerprint ||
+            recovered.candidateBindingDigest !== candidateBindingDigest ||
+            !canonicalDeviceTime(recovered.checkedAt)
+          ) {
+            throw recoveryConflict("登录证明恢复 body 与当前操作不匹配");
+          }
+          requireCanonicalEncoding(body, {
+            handoffId,
+            sessionRevision,
+            loginIdHash,
+            result,
+            checkedAt: recovered.checkedAt,
+            accountFingerprint,
+            candidateBindingDigest
+          });
+        },
+        validateResponse: (value) => validateProofResponse(value, result)
+      },
       hooks
     );
   }
@@ -489,6 +619,103 @@ export class DesktopAuthorizationTransportClient {
     );
   }
 
+  recoverCredentialActivationAck(
+    input: RecoverDesktopCredentialActivationAckInput,
+    hooks?: DesktopTrustedRequestHooks
+  ): Promise<DesktopTrustedTransportResult<AcknowledgeDesktopCredentialActivationResponse>> {
+    if (!exactObject(input, [
+      "sessionId",
+      "operationId",
+      "activationId",
+      "credentialRevision",
+      "leaseEpoch",
+      "sourceCredentialRevision",
+      "revocationEpoch",
+      "bindingDigest",
+      "expectedRequestReference",
+      "expectedRequestHash"
+    ])) {
+      throw contractInvalid("Desktop 激活确认恢复参数结构无效");
+    }
+    const sessionId = validOpaque(input.sessionId, "sessionId");
+    const operationId = validOpaque(input.operationId, "operationId");
+    const activationId = validOpaque(input.activationId, "activationId");
+    const credentialRevision = positiveRevision(
+      input.credentialRevision,
+      "credentialRevision"
+    );
+    const leaseEpoch = positiveRevision(input.leaseEpoch, "leaseEpoch");
+    const sourceCredentialRevision = nonNegativeRevision(
+      input.sourceCredentialRevision,
+      "sourceCredentialRevision"
+    );
+    const revocationEpoch = nonNegativeRevision(input.revocationEpoch, "revocationEpoch");
+    const bindingDigest = validDigest(input.bindingDigest, "bindingDigest");
+    if (sourceCredentialRevision >= credentialRevision) {
+      throw contractInvalid("sourceCredentialRevision 无效");
+    }
+    const expectedRequestReference = validDigest(
+      input.expectedRequestReference,
+      "expectedRequestReference"
+    );
+    const expectedRequestHash = validDigest(input.expectedRequestHash, "expectedRequestHash");
+    const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-activations/${activationId}/ack`;
+    const reference = desktopTrustedRequestReference("credential_activation_ack", path);
+    if (reference !== expectedRequestReference) {
+      throw recoveryConflict("Desktop 激活确认恢复引用不匹配");
+    }
+    return this.runRecoveredTrusted(
+      {
+        kind: "credential_activation_ack",
+        path,
+        authorizationScheme: "AiCRM-Activation",
+        expectedRequestReference,
+        expectedRequestHash,
+        validateRecoveredBody: (body) => {
+          const value = parseJson(body, "激活确认恢复 body 无效");
+          if (!exactObject(value, [
+            "operationId",
+            "activationId",
+            "credentialRevision",
+            "leaseEpoch",
+            "sourceCredentialRevision",
+            "revocationEpoch",
+            "durableBarrierCompletedAt",
+            "bindingDigest"
+          ])) {
+            throw recoveryConflict("激活确认恢复 body 结构不匹配");
+          }
+          const recovered = value as Record<string, unknown>;
+          if (
+            recovered.operationId !== operationId ||
+            recovered.activationId !== activationId ||
+            recovered.credentialRevision !== credentialRevision ||
+            recovered.leaseEpoch !== leaseEpoch ||
+            recovered.sourceCredentialRevision !== sourceCredentialRevision ||
+            recovered.revocationEpoch !== revocationEpoch ||
+            recovered.bindingDigest !== bindingDigest ||
+            !canonicalDeviceTime(recovered.durableBarrierCompletedAt)
+          ) {
+            throw recoveryConflict("激活确认恢复 body 与当前操作不匹配");
+          }
+          requireCanonicalEncoding(body, {
+            operationId,
+            activationId,
+            credentialRevision,
+            leaseEpoch,
+            sourceCredentialRevision,
+            revocationEpoch,
+            durableBarrierCompletedAt: recovered.durableBarrierCompletedAt,
+            bindingDigest
+          });
+        },
+        validateResponse: (value) =>
+          validateActivationResponse(value, activationId, credentialRevision)
+      },
+      hooks
+    );
+  }
+
   completeRequest(requestReference: string, requestHash: string): Promise<void> {
     return this.requestJournal.complete(requestReference, requestHash);
   }
@@ -496,6 +723,39 @@ export class DesktopAuthorizationTransportClient {
   cancel(): void {
     this.cancellationEpoch += 1;
     for (const controller of this.activeControllers) controller.abort();
+  }
+
+  private runRecoveredTrusted<T>(
+    definition: RecoveredTrustedRequestDefinition<T>,
+    hooks?: DesktopTrustedRequestHooks
+  ): Promise<DesktopTrustedTransportResult<T>> {
+    const reference = desktopTrustedRequestReference(definition.kind, definition.path);
+    if (reference !== definition.expectedRequestReference) {
+      throw recoveryConflict("Desktop 受信请求恢复引用不匹配");
+    }
+    const epoch = this.cancellationEpoch;
+    let preparedHookFailed = false;
+    return this.requestLane.runPinned(
+      reference,
+      () =>
+        this.submitRecoveredTrusted(
+          definition,
+          epoch,
+          hooks,
+          () => {
+            preparedHookFailed = true;
+          }
+        ),
+      async () => {
+        if (preparedHookFailed) return true;
+        try {
+          const pending = await this.requestJournal.load(reference);
+          return pending !== null && pending.response === null;
+        } catch {
+          return true;
+        }
+      }
+    );
   }
 
   private runTrusted<T>(
@@ -592,63 +852,45 @@ export class DesktopAuthorizationTransportClient {
     return this.finishPreparedRequest(record, definition, epoch, false);
   }
 
-  private async submitRecoveredHandoffClaim(
-    input: {
-      handoffId: string;
-      path: string;
-      expectedRequestReference: string;
-      expectedRequestHash: string;
-    },
+  private async submitRecoveredTrusted<T>(
+    input: RecoveredTrustedRequestDefinition<T>,
     epoch: number,
     hooks: DesktopTrustedRequestHooks | undefined,
     markPreparedHookFailed: () => void
-  ): Promise<DesktopTrustedTransportResult<ClaimDesktopHandoffResponse>> {
+  ): Promise<DesktopTrustedTransportResult<T>> {
     this.assertActive(epoch);
     const origin = trustedApiOrigin(await this.loadTrustedApiBaseUrl());
     this.assertActive(epoch);
     const record = await this.requestJournal.load(input.expectedRequestReference);
     this.assertActive(epoch);
     if (!record || record.signed.requestHash !== input.expectedRequestHash) {
-      throw recoveryConflict("Desktop 认领恢复栅栏不匹配");
+      throw recoveryConflict("Desktop 受信请求恢复栅栏不匹配");
     }
 
-    const authorizationPrefix = "AiCRM-Handoff ";
+    const authorizationPrefix = `${input.authorizationScheme} `;
     const ticket = record.authorization.startsWith(authorizationPrefix)
       ? record.authorization.slice(authorizationPrefix.length)
       : "";
-    if (!isTicket(ticket) || buildAuthorization("AiCRM-Handoff", ticket) !== record.authorization) {
-      throw recoveryConflict("Desktop 认领恢复授权记录无效");
+    if (
+      !isTicket(ticket) ||
+      buildAuthorization(input.authorizationScheme, ticket) !== record.authorization
+    ) {
+      throw recoveryConflict("Desktop 受信请求恢复授权记录无效");
     }
 
     const identity = await this.identityStore.getIdentity();
     this.assertActive(epoch);
     validateRegisteredIdentity(identity);
-    const definition: TrustedRequestDefinition<ClaimDesktopHandoffResponse> = {
-      kind: "handoff_claim",
+    const definition: TrustedRequestDefinition<T> = {
+      kind: input.kind,
       path: input.path,
       authorization: record.authorization,
-      authorizationScheme: "AiCRM-Handoff",
+      authorizationScheme: input.authorizationScheme,
       createBody: () => {
-        throw recoveryConflict("Desktop 认领恢复禁止创建新请求");
+        throw recoveryConflict("Desktop 受信请求恢复禁止创建新请求");
       },
-      validateRecoveredBody: (body) => {
-        const value = parseJson(body, "认领恢复 body 无效");
-        if (!exactObject(value, ["handoffId", "claimedAt"])) {
-          throw recoveryConflict("认领恢复 body 结构不匹配");
-        }
-        const recovered = value as { handoffId: unknown; claimedAt: unknown };
-        if (
-          recovered.handoffId !== input.handoffId ||
-          !canonicalDeviceTime(recovered.claimedAt)
-        ) {
-          throw recoveryConflict("认领恢复 body 与当前操作不匹配");
-        }
-        requireCanonicalEncoding(body, {
-          handoffId: input.handoffId,
-          claimedAt: recovered.claimedAt
-        });
-      },
-      validateResponse: (value) => validateClaimResponse(value, input.handoffId)
+      validateRecoveredBody: input.validateRecoveredBody,
+      validateResponse: input.validateResponse
     };
     validateRecoveredRecord(record, definition, identity, origin);
 
