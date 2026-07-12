@@ -89,6 +89,12 @@ func (s *Store) RecordLoginScriptRun(ctx context.Context, workspaceType, workspa
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if scriptID != "" && status == "success" {
+		if err := validateLoginScriptRunPromotion(ctx, tx, workspaceType, workspaceID, scriptID, versionID, purpose); err != nil {
+			return LoginScriptResolveResult{}, err
+		}
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO ky_matrix_account_login_script_run (
 		  id, script_id, script_version_id, web_space_id, workspace_type, workspace_id, platform, purpose,
@@ -199,6 +205,9 @@ func (s *Store) CreateGeneratedLoginScriptCandidate(ctx context.Context, workspa
 	purpose := strings.TrimSpace(in.Purpose)
 	if purpose == "" {
 		purpose = "qr_login_prepare"
+	}
+	if err := validateExecutableLoginScriptDSL(generated.DSL, purpose); err != nil {
+		return LoginScriptResolveResult{}, err
 	}
 	pageFingerprint := strings.TrimSpace(in.PageFingerprint)
 	generationReason := firstNonEmpty(strings.TrimSpace(generated.GenerationReason), strings.TrimSpace(in.GenerationReason), missingLoginScriptReason(purpose))
@@ -408,6 +417,24 @@ func (s *Store) ListLoginScriptVersions(ctx context.Context, workspaceType, work
 }
 
 func (s *Store) UpdateLoginScriptStatus(ctx context.Context, workspaceType, workspaceID, scriptID, status, actorUserID string) (LoginScript, error) {
+	if status == "enabled" {
+		var purpose string
+		var dsl json.RawMessage
+		err := s.db.QueryRowContext(ctx, `
+			SELECT s.purpose, v.dsl_json
+			FROM ky_matrix_account_login_script s
+			JOIN ky_matrix_account_login_script_version v ON v.id=s.active_version_id AND v.script_id=s.id
+			WHERE s.workspace_type=$1 AND s.workspace_id=$2 AND s.id=$3 AND s.deleted_at IS NULL
+		`, workspaceType, workspaceID, scriptID).Scan(&purpose, &dsl)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return LoginScript{}, err
+		}
+		if err == nil {
+			if err := validateExecutableLoginScriptDSL(dsl, purpose); err != nil {
+				return LoginScript{}, err
+			}
+		}
+	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE ky_matrix_account_login_script
 		SET status=$4, updated_by=$5, updated_at=now()
@@ -429,17 +456,21 @@ func (s *Store) ActivateLoginScriptVersion(ctx context.Context, workspaceType, w
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var existing int
+	var purpose string
+	var dsl json.RawMessage
 	if err := tx.QueryRowContext(ctx, `
-		SELECT 1
+		SELECT s.purpose, v.dsl_json
 		FROM ky_matrix_account_login_script s
 		JOIN ky_matrix_account_login_script_version v ON v.script_id=s.id
 		WHERE s.workspace_type=$1 AND s.workspace_id=$2 AND s.id=$3 AND v.id=$4 AND s.deleted_at IS NULL
 		LIMIT 1
-	`, workspaceType, workspaceID, scriptID, versionID).Scan(&existing); err != nil {
+	`, workspaceType, workspaceID, scriptID, versionID).Scan(&purpose, &dsl); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return LoginScriptVersion{}, ErrNotFound
 		}
+		return LoginScriptVersion{}, err
+	}
+	if err := validateExecutableLoginScriptDSL(dsl, purpose); err != nil {
 		return LoginScriptVersion{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `

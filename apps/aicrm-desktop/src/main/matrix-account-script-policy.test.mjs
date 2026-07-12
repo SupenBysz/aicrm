@@ -2,25 +2,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getLegacyCredentialAdapterSubstitution,
-  getMatrixAccountScriptPolicyViolation
+  getMatrixAccountScriptPolicyViolation,
+  resolveMatrixAccountScriptExecutionDecision
 } from "./matrix-account-script-policy.ts";
 
-test("account_detect rejects storage and IndexedDB reads", () => {
-  for (const step of [
-    { action: "readStorage", storage: "cookie", key: "sessionid" },
-    { action: "readStorage", storage: "localStorage", key: "uid_tt" },
-    { action: "readIndexedDB", database: "account", store: "session" }
-  ]) {
-    const violation = getMatrixAccountScriptPolicyViolation("account_detect", {
-      version: 1,
-      purpose: "account_detect",
-      steps: [step]
-    });
-    assert.equal(violation?.code, "sensitive_method_forbidden");
+test("every script purpose rejects storage and IndexedDB reads", () => {
+  for (const purpose of ["qr_login_prepare", "qr_login_refresh", "account_detect", "session_check"]) {
+    for (const step of [
+      { action: "readStorage", storage: "cookie", key: "sessionid" },
+      { action: "readStorage", storage: "localStorage", key: "uid_tt" },
+      { action: "readIndexedDB", database: "account", store: "session" }
+    ]) {
+      const violation = getMatrixAccountScriptPolicyViolation(purpose, {
+        version: 1,
+        purpose,
+        steps: [step]
+      });
+      assert.equal(violation?.code, "sensitive_method_forbidden");
+    }
   }
 });
 
-test("account_detect permits public page text and QR flows retain existing DSL compatibility", () => {
+test("public page actions remain allowed for every script purpose", () => {
   assert.equal(
     getMatrixAccountScriptPolicyViolation("account_detect", {
       version: 1,
@@ -33,7 +36,7 @@ test("account_detect permits public page text and QR flows retain existing DSL c
     getMatrixAccountScriptPolicyViolation("qr_login_prepare", {
       version: 1,
       purpose: "qr_login_prepare",
-      steps: [{ action: "readStorage", storage: "sessionStorage", key: "legacy-qr-state" }]
+      steps: [{ action: "captureElement", elementKey: "data-testid:login-qr", resultKey: "qrCodeDataUrl" }]
     }),
     null
   );
@@ -60,4 +63,32 @@ test("known legacy credential adapter is substituted only by exact version, hash
     null
   );
   assert.equal(getLegacyCredentialAdapterSubstitution(versionId, dsl, Date.parse("2026-08-01T00:00:00+08:00")), null);
+
+  assert.equal(
+    resolveMatrixAccountScriptExecutionDecision(
+      versionId,
+      "account_detect",
+      dsl,
+      Date.parse("2026-07-10T19:40:00+08:00")
+    ).kind,
+    "substitute"
+  );
+  assert.equal(
+    resolveMatrixAccountScriptExecutionDecision(
+      "malsv_other",
+      "account_detect",
+      dsl,
+      Date.parse("2026-07-10T19:40:00+08:00")
+    ).kind,
+    "deny"
+  );
+  assert.equal(
+    resolveMatrixAccountScriptExecutionDecision(
+      versionId,
+      "account_detect",
+      dsl,
+      Date.parse("2026-08-01T00:00:00+08:00")
+    ).kind,
+    "deny"
+  );
 });

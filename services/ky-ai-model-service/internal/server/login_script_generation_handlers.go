@@ -396,7 +396,30 @@ func extractJSONDSL(content string, expectedPurpose string) (json.RawMessage, er
 	if value.Purpose != expectedPurpose {
 		return nil, fmt.Errorf("模型返回脚本用途不匹配")
 	}
+	for _, rawStep := range value.Steps {
+		var step struct {
+			Action string `json:"action"`
+		}
+		if err := json.Unmarshal(rawStep, &step); err != nil || strings.TrimSpace(step.Action) == "" {
+			return nil, fmt.Errorf("模型返回脚本步骤无效")
+		}
+		if step.Action == "readStorage" || step.Action == "readIndexedDB" {
+			return nil, fmt.Errorf("模型返回脚本包含禁止的敏感读取动作")
+		}
+		if !validGeneratedLoginScriptAction(step.Action) {
+			return nil, fmt.Errorf("模型返回脚本包含不支持的动作")
+		}
+	}
 	return raw, nil
+}
+
+func validGeneratedLoginScriptAction(action string) bool {
+	switch action {
+	case "clickText", "clickSelector", "wait", "waitForElement", "captureElement", "readText", "navigateAllowedUrl":
+		return true
+	default:
+		return false
+	}
 }
 
 func estimateTokens(text string) int {

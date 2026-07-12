@@ -14,10 +14,7 @@ import {
 } from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
 import { MatrixAccountOnboardingCoordinator } from "../matrix-account-onboarding-coordinator";
-import {
-  getLegacyCredentialAdapterSubstitution,
-  getMatrixAccountScriptPolicyViolation
-} from "../matrix-account-script-policy";
+import { resolveMatrixAccountScriptExecutionDecision } from "../matrix-account-script-policy";
 import {
   MatrixAccountSessionVault,
   SessionVaultError,
@@ -1032,8 +1029,16 @@ async function runWebSpaceLoginScript(
   const state: ScriptRuntimeState = { textResults: {} };
   try {
     assertValidScriptDsl(input.dsl, input.purpose);
-    const legacySubstitution = getLegacyCredentialAdapterSubstitution(input.scriptVersionId, input.dsl);
-    if (legacySubstitution) {
+    const executionDecision = resolveMatrixAccountScriptExecutionDecision(
+      input.scriptVersionId,
+      input.purpose,
+      input.dsl
+    );
+    if (executionDecision.kind === "deny") {
+      throw scriptError(executionDecision.violation.code, executionDecision.violation.message);
+    }
+    if (executionDecision.kind === "substitute") {
+      const legacySubstitution = executionDecision.substitution;
       void writeMatrixAccountDebugLog("legacy-credential-adapter-substituted", {
         webSpaceId: input.webSpaceId,
         platform: input.platform,
@@ -2146,9 +2151,14 @@ function validateWebSpaceScriptInput(input: MatrixAccountWebSpaceScriptInput): D
     const known = normalizeScriptError(err);
     return fail("validation_error", known.message);
   }
-  const legacySubstitution = getLegacyCredentialAdapterSubstitution(input.scriptVersionId, input.dsl);
-  const policyViolation = legacySubstitution ? null : getMatrixAccountScriptPolicyViolation(input.purpose, input.dsl);
-  if (policyViolation) return fail(policyViolation.code, policyViolation.message);
+  const executionDecision = resolveMatrixAccountScriptExecutionDecision(
+    input.scriptVersionId,
+    input.purpose,
+    input.dsl
+  );
+  if (executionDecision.kind === "deny") {
+    return fail(executionDecision.violation.code, executionDecision.violation.message);
+  }
   return ok(undefined as never);
 }
 

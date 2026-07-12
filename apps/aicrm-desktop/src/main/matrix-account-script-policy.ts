@@ -12,6 +12,11 @@ export interface LegacyCredentialAdapterSubstitution {
   reasonCode: "legacy_credential_adapter_substituted";
 }
 
+export type MatrixAccountScriptExecutionDecision =
+  | { kind: "allow" }
+  | { kind: "substitute"; substitution: LegacyCredentialAdapterSubstitution }
+  | { kind: "deny"; violation: MatrixAccountScriptPolicyViolation };
+
 const LEGACY_DOUYIN_ACCOUNT_DETECT_VERSION_ID = "malsv_643d906e3d4d52c6f30e31258e29a062";
 const LEGACY_DOUYIN_ACCOUNT_DETECT_CANONICAL_SHA256 = "808c429273b69c2b4362516b62ca93556a0829154deb51c5b39d67239b819867";
 const LEGACY_DOUYIN_ACCOUNT_DETECT_EXPIRES_AT = "2026-07-31T23:59:59+08:00";
@@ -39,16 +44,33 @@ export function getLegacyCredentialAdapterSubstitution(
 }
 
 export function getMatrixAccountScriptPolicyViolation(
-  purpose: MatrixAccountLoginScriptPurpose,
+  _purpose: MatrixAccountLoginScriptPurpose,
   dsl: MatrixAccountLoginScriptDsl
 ): MatrixAccountScriptPolicyViolation | null {
-  if (purpose !== "account_detect") return null;
   const readsSensitiveState = dsl.steps.some((step) => step.action === "readStorage" || step.action === "readIndexedDB");
   if (!readsSensitiveState) return null;
   return {
     code: "sensitive_method_forbidden",
-    message: "账号身份识别方法不得读取 Cookie、Storage 或 IndexedDB，请改用页面公开资料识别账号"
+    message: "登录脚本不得读取 Cookie、Storage 或 IndexedDB，请改用公开页面信息"
   };
+}
+
+/**
+ * Central execution decision used at both the IPC boundary and immediately
+ * before running steps. The exact legacy adapter is the only temporary
+ * exception, and an exception always substitutes the original steps rather
+ * than authorizing them.
+ */
+export function resolveMatrixAccountScriptExecutionDecision(
+  scriptVersionId: string,
+  purpose: MatrixAccountLoginScriptPurpose,
+  dsl: MatrixAccountLoginScriptDsl,
+  now = Date.now()
+): MatrixAccountScriptExecutionDecision {
+  const substitution = getLegacyCredentialAdapterSubstitution(scriptVersionId, dsl, now);
+  if (substitution) return { kind: "substitute", substitution };
+  const violation = getMatrixAccountScriptPolicyViolation(purpose, dsl);
+  return violation ? { kind: "deny", violation } : { kind: "allow" };
 }
 
 function canonicalDslHash(dsl: MatrixAccountLoginScriptDsl): string {
