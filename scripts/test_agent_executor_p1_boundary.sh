@@ -49,6 +49,8 @@ grep -q 'BrokerLauncher' "$SERVICE_DIR/internal/server/server.go" || fail "Agent
 grep -q '^User=root$' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.service" || fail "runtime broker is not root-owned"
 grep -q -- '-m 1770 /var/lib/aicrm-agent-executors' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.service" || fail "credential root anchor contract missing"
 grep -q '^ListenSequentialPacket=/run/aicrm-agent-runtime.sock$' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.socket" || fail "runtime broker socket contract missing"
+grep -q '^After=network-online.target ky-agent-executor-runtime-broker.service$' "$ROOT_DIR/ops/native/ky-agent-executor-service.service" || fail "executor service does not start after broker recovery"
+grep -q '^Requires=ky-agent-executor-runtime-broker.service$' "$ROOT_DIR/ops/native/ky-agent-executor-service.service" || fail "executor service does not require broker recovery"
 grep -Eq 'uid[[:space:]]*!=[[:space:]]*s\.agentUID' "$SERVICE_DIR/internal/runtimebroker/server_linux.go" || fail "runtime broker peer UID check missing"
 if grep -R -n -E 'INSERT[[:space:]]+INTO|UPDATE[[:space:]]+ky_|DELETE[[:space:]]+FROM|TRUNCATE[[:space:]]+' \
   "$SERVICE_DIR/internal/store" --include='*.go' --exclude='*_test.go' --exclude='control_*.go'; then

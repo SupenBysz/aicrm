@@ -17,6 +17,10 @@ type createAuthorizationBody struct {
 	Intent string `json:"intent"`
 }
 
+type authorizationExpectedRevisionBody struct {
+	ExpectedSessionRevision int64 `json:"expectedSessionRevision"`
+}
+
 func (s *Server) createAuthorizationSession(w http.ResponseWriter, r *http.Request, actor actorContext) {
 	executorID := r.PathValue("executorId")
 	if !validOpaqueID(executorID) {
@@ -132,15 +136,15 @@ func (s *Server) reopenAuthorizationSession(w http.ResponseWriter, r *http.Reque
 		writeError(w, r, http.StatusBadRequest, "idempotency_key_required", "a valid Idempotency-Key is required")
 		return
 	}
-	var body expectedRevisionBody
-	if !decodeStrictJSON(w, r, &body) || body.ExpectedRevision < 1 {
+	var body authorizationExpectedRevisionBody
+	if !decodeStrictJSON(w, r, &body) || body.ExpectedSessionRevision < 1 {
 		return
 	}
 	item, ok := s.authorizationSessionFromPath(w, r)
 	if !ok {
 		return
 	}
-	if item.Revision != body.ExpectedRevision {
+	if item.Revision != body.ExpectedSessionRevision {
 		s.writeAuthorizationStoreError(w, r, store.ErrRevisionConflict)
 		return
 	}
@@ -175,19 +179,20 @@ func (s *Server) cancelAuthorizationSession(w http.ResponseWriter, r *http.Reque
 		writeError(w, r, http.StatusBadRequest, "idempotency_key_required", "a valid Idempotency-Key is required")
 		return
 	}
-	var body expectedRevisionBody
+	var body authorizationExpectedRevisionBody
 	if !decodeStrictJSON(w, r, &body) {
 		return
 	}
 	sessionID := r.PathValue("sessionId")
-	if !validOpaqueID(sessionID) || body.ExpectedRevision < 1 {
+	if !validOpaqueID(sessionID) || body.ExpectedSessionRevision < 1 {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "cancel request is invalid")
 		return
 	}
 	canonical, _ := json.Marshal(body)
 	item, transitioned, err := s.control.CancelAuthorizationSession(r.Context(), store.CancelAuthorizationInput{
-		SessionID: sessionID, ActorID: actor.ActorID, ExpectedRevision: body.ExpectedRevision,
+		SessionID: sessionID, ActorID: actor.ActorID, ExpectedRevision: body.ExpectedSessionRevision,
 		IdempotencyKeyHash: sha256Hex([]byte(key)), RequestHash: sha256Hex(canonical),
+		CanCancelAny: actor.GrantedPermissions["platform.ai_executors.force_revoke"],
 	})
 	if err != nil {
 		s.writeAuthorizationStoreError(w, r, err)
@@ -210,16 +215,35 @@ func (s *Server) listAuthorizationSessionEvents(w http.ResponseWriter, r *http.R
 		writeError(w, r, http.StatusBadRequest, "invalid_event_cursor", "event cursor is invalid")
 		return
 	}
-	if _, err := s.control.GetAuthorizationSession(r.Context(), sessionID); err != nil {
-		s.writeAuthorizationStoreError(w, r, err)
-		return
-	}
-	items, err := s.control.ListAuthorizationEvents(r.Context(), sessionID, after, limit)
+	session, err := s.control.GetAuthorizationSession(r.Context(), sessionID)
 	if err != nil {
 		s.writeAuthorizationStoreError(w, r, err)
 		return
 	}
-	writeData(w, r, http.StatusOK, map[string]any{"items": items})
+	items, err := s.control.ListAuthorizationEvents(r.Context(), sessionID, after, limit+1)
+	if err != nil {
+		s.writeAuthorizationStoreError(w, r, err)
+		return
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	nextSequence := after
+	if len(items) > 0 {
+		nextSequence = items[len(items)-1].Sequence
+	}
+	historyItems := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		historyItems = append(historyItems, map[string]any{
+			"sequence": item.Sequence, "event": item.EventType,
+			"occurredAt": item.OccurredAt,
+			"data":       authorizationEventData(sessionID, item, session),
+		})
+	}
+	writeData(w, r, http.StatusOK, map[string]any{
+		"items": historyItems, "nextSequence": nextSequence, "hasMore": hasMore,
+	})
 }
 
 func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http.Request, _ actorContext) {
@@ -228,13 +252,21 @@ func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http
 		writeError(w, r, http.StatusBadRequest, "validation_error", "sessionId is invalid")
 		return
 	}
-	after, _, ok := authorizationCursor(r)
-	if last := strings.TrimSpace(r.Header.Get("Last-Event-ID")); last != "" {
-		parsed, err := strconv.ParseInt(last, 10, 64)
-		if err != nil || parsed < 0 {
+	after, _, queryCursorOK := authorizationCursor(r)
+	ok := queryCursorOK
+	lastEventIDs := r.Header.Values("Last-Event-ID")
+	if len(lastEventIDs) > 0 {
+		ok = true
+		if len(lastEventIDs) != 1 {
 			ok = false
 		} else {
-			after = parsed
+			last := strings.TrimSpace(lastEventIDs[0])
+			parsed, err := strconv.ParseInt(last, 10, 64)
+			if err != nil || parsed < 0 || last == "" {
+				ok = false
+			} else {
+				after = parsed
+			}
 		}
 	}
 	if !ok {
@@ -246,34 +278,48 @@ func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http
 		writeError(w, r, http.StatusNotImplemented, "stream_unavailable", "event stream is unavailable")
 		return
 	}
-	if _, err := s.control.GetAuthorizationSession(r.Context(), sessionID); err != nil {
+	session, err := s.control.GetAuthorizationSession(r.Context(), sessionID)
+	if err != nil {
 		s.writeAuthorizationStoreError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	poll := time.NewTicker(time.Second)
+	defer poll.Stop()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
 	cursor := after
 	for {
-		items, err := s.control.ListAuthorizationEvents(r.Context(), sessionID, cursor, 100)
-		if err != nil {
-			return
-		}
-		for _, item := range items {
-			encoded, _ := json.Marshal(item)
-			_, _ = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", item.Sequence, item.EventType, encoded)
-			cursor = item.Sequence
-		}
-		if len(items) > 0 {
-			flusher.Flush()
-		}
-		session, err := s.control.GetAuthorizationSession(r.Context(), sessionID)
-		if err != nil {
-			return
+		for {
+			items, err := s.control.ListAuthorizationEvents(r.Context(), sessionID, cursor, 100)
+			if err != nil {
+				return
+			}
+			session, err = s.control.GetAuthorizationSession(r.Context(), sessionID)
+			if err != nil {
+				return
+			}
+			for _, item := range items {
+				encoded, err := json.Marshal(authorizationEventData(sessionID, item, session))
+				if err != nil {
+					return
+				}
+				if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", item.Sequence, item.EventType, encoded); err != nil {
+					return
+				}
+				cursor = item.Sequence
+			}
+			if len(items) > 0 {
+				flusher.Flush()
+			}
+			if len(items) < 100 {
+				break
+			}
 		}
 		if terminalAuthorizationStatus(session.Status) && cursor >= session.Sequence {
 			return
@@ -281,8 +327,25 @@ func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case <-poll.C:
+		case <-heartbeat.C:
+			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
 		}
+	}
+}
+
+func authorizationEventData(sessionID string, item store.AuthorizationEventProjection, session store.AuthorizationSessionProjection) map[string]any {
+	if item.EventType == store.AuthorizationEventClosed {
+		return map[string]any{
+			"sessionId": sessionID, "sequence": item.Sequence, "reason": "terminal",
+		}
+	}
+	return map[string]any{
+		"sessionId": sessionID, "sequence": item.Sequence,
+		"occurredAt": item.OccurredAt, "session": session,
 	}
 }
 
@@ -335,6 +398,8 @@ func (s *Server) writeAuthorizationStoreError(w http.ResponseWriter, r *http.Req
 		writeError(w, r, http.StatusConflict, "authorization_session_conflict", "another authorization session is active")
 	case errors.Is(err, store.ErrRevisionConflict):
 		writeError(w, r, http.StatusConflict, "revision_conflict", "authorization session revision changed")
+	case errors.Is(err, store.ErrRequesterMismatch):
+		writeError(w, r, http.StatusForbidden, "permission_denied", "only the requester or platform owner may cancel authorization")
 	case errors.Is(err, store.ErrIdempotencyReuse):
 		writeError(w, r, http.StatusConflict, "idempotency_key_reused", "Idempotency-Key was reused with another request")
 	case errors.Is(err, store.ErrExecutorBusy):

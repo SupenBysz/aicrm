@@ -121,7 +121,9 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 		t.Fatalf("models=%#v err=%v", models, err)
 	}
 	events, err := control.ListAuthorizationEvents(ctx, activated.ID, 0, 100)
-	if err != nil || len(events) != 5 || events[len(events)-1].EventType != "succeeded" {
+	if err != nil || len(events) != 6 ||
+		events[len(events)-2].EventType != AuthorizationEventTerminal ||
+		events[len(events)-1].EventType != AuthorizationEventClosed {
 		t.Fatalf("events=%#v err=%v", events, err)
 	}
 
@@ -134,6 +136,17 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, transitioned, err := control.CancelAuthorizationSession(ctx, CancelAuthorizationInput{
+		SessionID: cancelResult.Session.ID, ActorID: "user_not_requester", ExpectedRevision: cancelResult.Session.Revision,
+		IdempotencyKeyHash: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		RequestHash:        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+	}); !errors.Is(err, ErrRequesterMismatch) || transitioned {
+		t.Fatalf("cross-requester cancel transitioned=%v err=%v", transitioned, err)
+	}
+	unchanged, err := control.GetAuthorizationSession(ctx, cancelResult.Session.ID)
+	if err != nil || unchanged.Status != "starting" || unchanged.Revision != cancelResult.Session.Revision {
+		t.Fatalf("rejected cancel changed session=%#v err=%v", unchanged, err)
+	}
 	cancelled, transitioned, err := control.CancelAuthorizationSession(ctx, CancelAuthorizationInput{
 		SessionID: cancelResult.Session.ID, ActorID: "user_platform_owner", ExpectedRevision: cancelResult.Session.Revision,
 		IdempotencyKeyHash: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
@@ -141,5 +154,82 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 	})
 	if err != nil || !transitioned || cancelled.Status != "cancelled" {
 		t.Fatalf("cancelled=%#v transitioned=%v err=%v", cancelled, transitioned, err)
+	}
+	cancelEvents, err := control.ListAuthorizationEvents(ctx, cancelled.ID, 0, 100)
+	if err != nil || len(cancelEvents) != 4 ||
+		cancelEvents[len(cancelEvents)-2].EventType != AuthorizationEventTerminal ||
+		cancelEvents[len(cancelEvents)-1].EventType != AuthorizationEventClosed {
+		t.Fatalf("cancel events=%#v err=%v", cancelEvents, err)
+	}
+
+	recoveryResult, err := control.CreateAuthorizationSession(ctx, CreateAuthorizationSessionInput{
+		ID: "auth_recovery_" + suffix, ExecutorID: created.ID, Intent: "authorize",
+		ActorID:            "user_platform_owner",
+		IdempotencyKeyHash: "1212121212121212121212121212121212121212121212121212121212121212",
+		RequestHash:        "3434343434343434343434343434343434343434343434343434343434343434",
+		Deadline:           time.Now().Add(10 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryWaiting, err := control.MarkAuthorizationWaiting(ctx, recoveryResult.Session.ID, "owner_before_restart",
+		"5656565656565656565656565656565656565656565656565656565656565656", recoveryResult.Session.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.RecoverInterruptedAuthorizationSessions(ctx, "owner_after_restart"); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := control.GetAuthorizationSession(ctx, recoveryWaiting.ID)
+	if err != nil || recovered.Status != "interrupted" || recovered.Failure == nil || recovered.Failure.Code != "service_restarted" {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	recoveryEvents, err := control.ListAuthorizationEvents(ctx, recovered.ID, 0, 100)
+	if err != nil || len(recoveryEvents) != 5 || recoveryEvents[3].EventType != AuthorizationEventTerminal || recoveryEvents[4].EventType != AuthorizationEventClosed {
+		t.Fatalf("recovery events=%#v err=%v", recoveryEvents, err)
+	}
+	if _, err := control.RecoverInterruptedAuthorizationSessions(ctx, "owner_after_restart"); err != nil {
+		t.Fatal(err)
+	}
+	replayedRecoveryEvents, err := control.ListAuthorizationEvents(ctx, recovered.ID, 0, 100)
+	if err != nil || len(replayedRecoveryEvents) != len(recoveryEvents) {
+		t.Fatalf("repeated recovery added events=%#v err=%v", replayedRecoveryEvents, err)
+	}
+
+	preparedRecovery, err := control.CreateAuthorizationSession(ctx, CreateAuthorizationSessionInput{
+		ID: "auth_prepared_recovery_" + suffix, ExecutorID: created.ID, Intent: "change_account",
+		ActorID:            "user_platform_owner",
+		IdempotencyKeyHash: "7878787878787878787878787878787878787878787878787878787878787878",
+		RequestHash:        "9090909090909090909090909090909090909090909090909090909090909090",
+		Deadline:           time.Now().Add(10 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedWaiting, err := control.MarkAuthorizationWaiting(ctx, preparedRecovery.Session.ID, "owner_prepared_restart",
+		"abababababababababababababababababababababababababababababababab", preparedRecovery.Session.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedVerifying, err := control.MarkAuthorizationVerifying(ctx, preparedWaiting.ID, "owner_prepared_restart", preparedWaiting.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = control.PrepareServerCredential(ctx, CredentialPreparationInput{
+		SessionID: preparedVerifying.ID, ExpectedSessionRevision: preparedVerifying.Revision,
+		OwnerInstanceID: "owner_prepared_restart", OperationID: "auth_prepared_operation_" + suffix,
+		RuntimeBindingID: "server_test", RuntimeBindingRevision: 1,
+		AccountFingerprint: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+		PlanType:           "plus", BindingDigest: "efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.RecoverInterruptedAuthorizationSessions(ctx, "owner_after_prepared_restart"); !errors.Is(err, ErrCredentialRecoveryRequired) {
+		t.Fatalf("prepared recovery did not fail closed: %v", err)
+	}
+	stillVerifying, err := control.GetAuthorizationSession(ctx, preparedVerifying.ID)
+	if err != nil || stillVerifying.Status != "verifying" || stillVerifying.PreparedCredentialRev == nil {
+		t.Fatalf("prepared candidate changed during fail-closed recovery: %#v err=%v", stillVerifying, err)
 	}
 }

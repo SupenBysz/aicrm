@@ -1,8 +1,8 @@
 [Unit]
 Description=AiCRM Agent Executor Control Plane
-After=network-online.target ky-agent-executor-runtime-broker.socket
+After=network-online.target ky-agent-executor-runtime-broker.service
 Wants=network-online.target
-Requires=ky-agent-executor-runtime-broker.socket
+Requires=ky-agent-executor-runtime-broker.service
 
 [Service]
 Type=simple

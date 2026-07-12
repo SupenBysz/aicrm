@@ -9,12 +9,26 @@ import (
 )
 
 var (
-	ErrAuthorizationConflict = errors.New("authorization session conflict")
-	ErrAuthorizationTerminal = errors.New("authorization session terminal")
-	ErrExecutorBusy          = errors.New("executor operation busy")
-	ErrExecutorFenced        = errors.New("executor operation fenced")
-	ErrRequesterMismatch     = errors.New("authorization requester mismatch")
+	ErrAuthorizationConflict      = errors.New("authorization session conflict")
+	ErrAuthorizationTerminal      = errors.New("authorization session terminal")
+	ErrExecutorBusy               = errors.New("executor operation busy")
+	ErrExecutorFenced             = errors.New("executor operation fenced")
+	ErrRequesterMismatch          = errors.New("authorization requester mismatch")
+	ErrCredentialRecoveryRequired = errors.New("prepared credential recovery is required")
 )
+
+const (
+	AuthorizationEventChanged  = "authorization.session.changed"
+	AuthorizationEventTerminal = "authorization.session.terminal"
+	AuthorizationEventClosed   = "authorization.stream.closed"
+)
+
+type AuthorizationRecoveryItem struct {
+	SessionID                  string
+	ExecutorID                 string
+	PreparedCredentialRevision *int64
+	OperationID                string
+}
 
 type AuthorizationSessionProjection struct {
 	ID                    string          `json:"id"`
@@ -126,7 +140,7 @@ func (s *ControlStore) CreateAuthorizationSession(ctx context.Context, input Cre
 	if err != nil {
 		return CreateAuthorizationSessionResult{}, classifyControlWrite(err)
 	}
-	if err := insertSessionEvent(ctx, tx, input.ID, 1, "started", map[string]any{"intent": input.Intent}); err != nil {
+	if err := insertSessionEvent(ctx, tx, input.ID, 1, AuthorizationEventChanged, map[string]any{"change": "started", "intent": input.Intent}); err != nil {
 		return CreateAuthorizationSessionResult{}, err
 	}
 	if err := insertControlOutbox(ctx, tx, "authorization_session", input.ID, 1, "started", map[string]any{"executorId": input.ExecutorID}); err != nil {
@@ -220,7 +234,7 @@ func (s *ControlStore) MarkAuthorizationWaiting(ctx context.Context, sessionID, 
 	if err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
-	if err := insertSessionEvent(ctx, tx, sessionID, sequence, "waiting_user", map[string]any{}); err != nil {
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence, AuthorizationEventChanged, map[string]any{"change": "waiting_user"}); err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
 	if err := insertControlOutbox(ctx, tx, "authorization_session", sessionID, revision, "waiting_user", map[string]any{"executorId": executorID}); err != nil {
@@ -252,7 +266,7 @@ func (s *ControlStore) MarkAuthorizationVerifying(ctx context.Context, sessionID
 	if err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
-	if err := insertSessionEvent(ctx, tx, sessionID, sequence, "verifying", map[string]any{}); err != nil {
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence, AuthorizationEventChanged, map[string]any{"change": "verifying"}); err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
 	if err := insertControlOutbox(ctx, tx, "authorization_session", sessionID, revision, "verifying", map[string]any{"executorId": executorID}); err != nil {
@@ -289,7 +303,7 @@ func (s *ControlStore) ListAuthorizationEvents(ctx context.Context, sessionID st
 		if err := rows.Scan(&item.Sequence, &item.EventType, &payload, &occurredAt); err != nil {
 			return nil, err
 		}
-		item.EventType = safeStoredCode(item.EventType)
+		item.EventType = safeAuthorizationEventType(item.EventType)
 		item.SafePayload = append(json.RawMessage(nil), payload...)
 		item.OccurredAt = occurredAt.UTC().Format(time.RFC3339Nano)
 		items = append(items, item)
@@ -616,7 +630,7 @@ func (s *ControlStore) ActivateServerCredential(ctx context.Context, input Activ
 	result, err = tx.ExecContext(ctx, `
 		UPDATE ky_ai_executor_authorization_session
 		SET status='succeeded', account_summary_json=$1::jsonb,
-		    current_sequence=current_sequence+2, revision=revision+1,
+		    current_sequence=current_sequence+3, revision=revision+1,
 		    finished_at=now(), updated_at=now()
 		WHERE id=$2 AND revision=$3 AND status='verifying'
 	`, string(input.AccountSummaryJSON), input.SessionID, prep.SessionRevision)
@@ -626,10 +640,13 @@ func (s *ControlStore) ActivateServerCredential(ctx context.Context, input Activ
 	if affected, _ := result.RowsAffected(); affected != 1 {
 		return AuthorizationSessionProjection{}, ErrRevisionConflict
 	}
-	if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+1, "credential_promoted", map[string]any{"credentialRevision": prep.CredentialRevision}); err != nil {
+	if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+1, AuthorizationEventChanged, map[string]any{"change": "credential_promoted", "credentialRevision": prep.CredentialRevision}); err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
-	if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+2, "succeeded", map[string]any{}); err != nil {
+	if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+2, AuthorizationEventTerminal, map[string]any{"status": "succeeded"}); err != nil {
+		return AuthorizationSessionProjection{}, err
+	}
+	if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+3, AuthorizationEventClosed, map[string]any{"reason": "terminal"}); err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -682,7 +699,7 @@ func (s *ControlStore) FailAuthorizationSession(ctx context.Context, sessionID, 
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE ky_ai_executor_authorization_session
-		SET status=$1, failure_code=$2, current_sequence=current_sequence+1,
+		SET status=$1, failure_code=$2, current_sequence=current_sequence+3,
 		    revision=revision+1, finished_at=now(), updated_at=now()
 		WHERE id=$3 AND revision=$4
 	`, terminalStatus, safeStoredCode(failureCode), sessionID, revision)
@@ -704,7 +721,14 @@ func (s *ControlStore) FailAuthorizationSession(ctx context.Context, sessionID, 
 			WHERE executor_id=$1 AND operation_id=$2 AND status='active'
 		`, executorID, operationID)
 	}
-	if err := insertSessionEvent(ctx, tx, sessionID, sequence+1, terminalStatus, map[string]any{"failureCode": safeStoredCode(failureCode)}); err != nil {
+	safeFailure := safeStoredCode(failureCode)
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence+1, AuthorizationEventChanged, map[string]any{"change": terminalStatus, "failureCode": safeFailure}); err != nil {
+		return AuthorizationSessionProjection{}, err
+	}
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence+2, AuthorizationEventTerminal, map[string]any{"status": terminalStatus, "failureCode": safeFailure}); err != nil {
+		return AuthorizationSessionProjection{}, err
+	}
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence+3, AuthorizationEventClosed, map[string]any{"reason": "terminal"}); err != nil {
 		return AuthorizationSessionProjection{}, err
 	}
 	if err := insertControlOutbox(ctx, tx, "authorization_session", sessionID, revision+1, terminalStatus, map[string]any{"executorId": executorID, "failureCode": safeStoredCode(failureCode)}); err != nil {
@@ -716,12 +740,124 @@ func (s *ControlStore) FailAuthorizationSession(ctx context.Context, sessionID, 
 	return s.GetAuthorizationSession(ctx, sessionID)
 }
 
+// RecoverInterruptedAuthorizationSessions is called by the single writer
+// before it accepts HTTP traffic. A device-code challenge and its App Server
+// stdio channel cannot survive process loss, so pre-prepare sessions are
+// fenced, audited and made retryable through a new session. Prepared or
+// committing candidates stop startup until the locked recovery matrix runs.
+func (s *ControlStore) RecoverInterruptedAuthorizationSessions(ctx context.Context, _ string) ([]AuthorizationRecoveryItem, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id,executor_id,current_sequence,revision,prepared_credential_revision,operation_id
+		FROM ky_ai_executor_authorization_session
+		WHERE runtime_type='server' AND status IN ('starting','waiting_user','verifying')
+		ORDER BY created_at FOR UPDATE
+	`)
+	if err != nil {
+		return nil, err
+	}
+	type pendingRecovery struct {
+		item     AuthorizationRecoveryItem
+		sequence int64
+		revision int64
+	}
+	pending := []pendingRecovery{}
+	for rows.Next() {
+		var current pendingRecovery
+		var prepared sql.NullInt64
+		if err := rows.Scan(&current.item.SessionID, &current.item.ExecutorID, &current.sequence,
+			&current.revision, &prepared, &current.item.OperationID); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		current.item.PreparedCredentialRevision = nullableInt64(prepared)
+		pending = append(pending, current)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, current := range pending {
+		if current.item.PreparedCredentialRevision != nil {
+			// A prepared or committing candidate must follow the locked
+			// filesystem recovery matrix. Until that recovery path completes,
+			// refuse startup without changing the session, binding or lease.
+			return nil, ErrCredentialRecoveryRequired
+		}
+	}
+	for _, current := range pending {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE ky_ai_executor_authorization_session
+			SET status='interrupted',failure_code='service_restarted',
+			    current_sequence=current_sequence+3,revision=revision+1,
+			    finished_at=now(),updated_at=now()
+			WHERE id=$1 AND revision=$2 AND status IN ('starting','waiting_user','verifying')
+		`, current.item.SessionID, current.revision)
+		if err != nil {
+			return nil, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return nil, ErrRevisionConflict
+		}
+		if current.item.OperationID != "" {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE ky_ai_executor_operation_lease SET status='released',updated_at=now()
+				WHERE executor_id=$1 AND operation_id=$2 AND status='active'
+			`, current.item.ExecutorID, current.item.OperationID); err != nil {
+				return nil, err
+			}
+		}
+		if err := insertSessionEvent(ctx, tx, current.item.SessionID, current.sequence+1, AuthorizationEventChanged, map[string]any{"change": "interrupted", "failureCode": "service_restarted"}); err != nil {
+			return nil, err
+		}
+		if err := insertSessionEvent(ctx, tx, current.item.SessionID, current.sequence+2, AuthorizationEventTerminal, map[string]any{"status": "interrupted", "failureCode": "service_restarted"}); err != nil {
+			return nil, err
+		}
+		if err := insertSessionEvent(ctx, tx, current.item.SessionID, current.sequence+3, AuthorizationEventClosed, map[string]any{"reason": "terminal"}); err != nil {
+			return nil, err
+		}
+		if err := insertControlOutbox(ctx, tx, "authorization_session", current.item.SessionID, current.revision+1, "interrupted", map[string]any{"executorId": current.item.ExecutorID, "failureCode": "service_restarted"}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, classifyControlWrite(err)
+	}
+	// Include prior interrupted sessions so a crash between the database
+	// transition and filesystem quarantine is repaired idempotently.
+	rows, err = s.db.QueryContext(ctx, `
+		SELECT id,executor_id,prepared_credential_revision,operation_id
+		FROM ky_ai_executor_authorization_session
+		WHERE runtime_type='server' AND status='interrupted' AND failure_code='service_restarted'
+		ORDER BY created_at
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuthorizationRecoveryItem{}
+	for rows.Next() {
+		var item AuthorizationRecoveryItem
+		var prepared sql.NullInt64
+		if err := rows.Scan(&item.SessionID, &item.ExecutorID, &prepared, &item.OperationID); err != nil {
+			return nil, err
+		}
+		item.PreparedCredentialRevision = nullableInt64(prepared)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 type CancelAuthorizationInput struct {
 	SessionID          string
 	ActorID            string
 	ExpectedRevision   int64
 	IdempotencyKeyHash string
 	RequestHash        string
+	CanCancelAny       bool
 }
 
 func (s *ControlStore) CancelAuthorizationSession(ctx context.Context, input CancelAuthorizationInput) (AuthorizationSessionProjection, bool, error) {
@@ -746,14 +882,14 @@ func (s *ControlStore) CancelAuthorizationSession(ctx context.Context, input Can
 	if !errors.Is(err, sql.ErrNoRows) {
 		return AuthorizationSessionProjection{}, false, err
 	}
-	var status, executorID, operationID string
+	var status, executorID, operationID, requestedBy string
 	var revision, sequence int64
 	var prepared sql.NullInt64
 	err = tx.QueryRowContext(ctx, `
-		SELECT status,revision,current_sequence,executor_id,prepared_credential_revision,operation_id
+		SELECT status,revision,current_sequence,executor_id,prepared_credential_revision,operation_id,requested_by
 		FROM ky_ai_executor_authorization_session
 		WHERE id=$1 FOR UPDATE
-	`, input.SessionID).Scan(&status, &revision, &sequence, &executorID, &prepared, &operationID)
+	`, input.SessionID).Scan(&status, &revision, &sequence, &executorID, &prepared, &operationID, &requestedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthorizationSessionProjection{}, false, ErrNotFound
 	}
@@ -763,13 +899,16 @@ func (s *ControlStore) CancelAuthorizationSession(ctx context.Context, input Can
 	if revision != input.ExpectedRevision {
 		return AuthorizationSessionProjection{}, false, ErrRevisionConflict
 	}
+	if requestedBy != input.ActorID && !input.CanCancelAny {
+		return AuthorizationSessionProjection{}, false, ErrRequesterMismatch
+	}
 	terminal := status == "succeeded" || status == "failed" || status == "cancelled" || status == "expired" || status == "interrupted" || status == "superseded"
 	transitioned := false
 	if !terminal {
 		result, err := tx.ExecContext(ctx, `
 			UPDATE ky_ai_executor_authorization_session
 			SET status='cancelled',failure_code='',revision=revision+1,
-			    current_sequence=current_sequence+1,finished_at=now(),updated_at=now()
+			    current_sequence=current_sequence+3,finished_at=now(),updated_at=now()
 			WHERE id=$1 AND revision=$2
 		`, input.SessionID, revision)
 		if err != nil {
@@ -778,7 +917,13 @@ func (s *ControlStore) CancelAuthorizationSession(ctx context.Context, input Can
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return AuthorizationSessionProjection{}, false, ErrRevisionConflict
 		}
-		if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+1, "cancelled", map[string]any{}); err != nil {
+		if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+1, AuthorizationEventChanged, map[string]any{"change": "cancelled"}); err != nil {
+			return AuthorizationSessionProjection{}, false, err
+		}
+		if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+2, AuthorizationEventTerminal, map[string]any{"status": "cancelled"}); err != nil {
+			return AuthorizationSessionProjection{}, false, err
+		}
+		if err := insertSessionEvent(ctx, tx, input.SessionID, sequence+3, AuthorizationEventClosed, map[string]any{"reason": "terminal"}); err != nil {
 			return AuthorizationSessionProjection{}, false, err
 		}
 		if err := insertControlOutbox(ctx, tx, "authorization_session", input.SessionID, revision+1, "cancelled", map[string]any{}); err != nil {
@@ -849,6 +994,18 @@ func insertSessionEvent(ctx context.Context, tx *sql.Tx, sessionID string, seque
 		VALUES ($1,$2,$3,$4,$5::jsonb,now())
 	`, "auth_event_"+sessionID+"_"+itoa64(sequence), sessionID, sequence, eventType, string(encoded))
 	return err
+}
+
+func safeAuthorizationEventType(value string) string {
+	switch value {
+	case AuthorizationEventChanged, AuthorizationEventTerminal, AuthorizationEventClosed:
+		return value
+	default:
+		// Older P2A development rows used transition names as event types. They
+		// are still safe to replay as a generic change, but arbitrary database
+		// content must never become an SSE event name.
+		return AuthorizationEventChanged
+	}
 }
 
 func insertControlOutbox(ctx context.Context, tx *sql.Tx, aggregateType, aggregateID string, revision int64, eventType string, reference map[string]any) error {

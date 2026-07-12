@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -48,6 +49,7 @@ type controlStore interface {
 	CancelAuthorizationSession(context.Context, store.CancelAuthorizationInput) (store.AuthorizationSessionProjection, bool, error)
 	RecordAuthorizationReopen(context.Context, string, string, string, string) error
 	FailAuthorizationSession(context.Context, string, string, string, string) (store.AuthorizationSessionProjection, error)
+	RecoverInterruptedAuthorizationSessions(context.Context, string) ([]store.AuthorizationRecoveryItem, error)
 }
 
 func New(cfg config.Config) *Server {
@@ -90,6 +92,13 @@ func (s *Server) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		recoveryItems, err := opened.RecoverInterruptedAuthorizationSessions(ctx, s.cfg.OwnerInstanceID)
+		if err != nil {
+			return err
+		}
+		if err := recoverAuthorizationCredentialTrees(credentials, recoveryItems); err != nil {
+			return err
+		}
 		launcher := appserver.BrokerLauncher{SocketPath: s.cfg.RuntimeBrokerSocket}
 		runtime, err := authorization.New(opened, launcher, credentials, authorization.Config{
 			OwnerInstanceID: s.cfg.OwnerInstanceID, CodexVersion: s.cfg.CodexVersion,
@@ -128,6 +137,82 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+func recoverAuthorizationCredentialTrees(credentials *credentialfs.Manager, items []store.AuthorizationRecoveryItem) error {
+	for _, item := range items {
+		staging, err := credentials.StagingPath(item.ExecutorID, item.SessionID)
+		if err != nil {
+			return err
+		}
+		operation := ""
+		if item.OperationID != "" {
+			operation, err = credentials.OperationPath(item.ExecutorID, item.OperationID)
+			if err != nil {
+				return err
+			}
+		}
+		if item.PreparedCredentialRevision == nil {
+			for _, path := range []string{staging, operation} {
+				if path == "" {
+					continue
+				}
+				exists, err := safeCredentialDirectoryExists(path)
+				if err != nil {
+					return err
+				}
+				if exists {
+					if err := credentials.RemoveEphemeral(path); err != nil {
+						return err
+					}
+				}
+			}
+			continue
+		}
+		revision, err := credentials.RevisionPath(item.ExecutorID, *item.PreparedCredentialRevision)
+		if err != nil {
+			return err
+		}
+		candidates := []struct {
+			path string
+			name string
+		}{
+			{staging, "recovery_staging_" + item.SessionID},
+			{revision, "recovery_revision_" + item.SessionID},
+		}
+		if operation != "" {
+			candidates = append(candidates, struct {
+				path string
+				name string
+			}{operation, "recovery_operation_" + item.SessionID})
+		}
+		for _, candidate := range candidates {
+			exists, err := safeCredentialDirectoryExists(candidate.path)
+			if err != nil {
+				return err
+			}
+			if exists {
+				if _, err := credentials.Quarantine(item.ExecutorID, candidate.path, candidate.name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func safeCredentialDirectoryExists(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false, credentialfs.ErrInvalidPath
+	}
+	return true, nil
+}
+
 func (s *Server) buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
@@ -160,7 +245,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}", s.public([]string{"platform.ai_executors.view"}, nil, s.getAuthorizationSession))
 	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/user-action", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.getAuthorizationUserAction))
 	mux.HandleFunc("POST /api/v1/ai-executor-authorization-sessions/{sessionId}/reopen", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.reopenAuthorizationSession))
-	mux.HandleFunc("POST /api/v1/ai-executor-authorization-sessions/{sessionId}/cancel", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.cancelAuthorizationSession))
+	mux.HandleFunc("POST /api/v1/ai-executor-authorization-sessions/{sessionId}/cancel", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account", "platform.ai_executors.force_revoke"}, s.cancelAuthorizationSession))
 	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/events", s.public([]string{"platform.ai_executors.view"}, nil, s.listAuthorizationSessionEvents))
 	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/events-stream", s.public([]string{"platform.ai_executors.view"}, nil, s.streamAuthorizationSessionEvents))
 

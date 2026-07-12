@@ -225,6 +225,7 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 			return
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
+			m.fail(session.ID, "service_restarted", ctx)
 			return
 		}
 		m.fail(session.ID, "executor_app_server_unavailable", ctx)
@@ -308,6 +309,9 @@ func (m *Manager) fail(sessionID, code string, runCtx context.Context) {
 	status := "failed"
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		status = "expired"
+	} else if errors.Is(runCtx.Err(), context.Canceled) {
+		status = "interrupted"
+		code = "service_restarted"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -19,7 +19,11 @@ type fakeControl struct {
 	patched     store.ExecutorPatch
 	authCreated store.CreateAuthorizationSessionInput
 	session     store.AuthorizationSessionProjection
+	events      []store.AuthorizationEventProjection
+	eventAfter  int64
+	eventLimit  int
 	cancelInput store.CancelAuthorizationInput
+	cancelErr   error
 }
 
 func (f *fakeControl) Ping(context.Context) error { return nil }
@@ -66,11 +70,24 @@ func (f *fakeControl) GetAuthorizationSession(context.Context, string) (store.Au
 	}
 	return f.session, nil
 }
-func (f *fakeControl) ListAuthorizationEvents(context.Context, string, int64, int) ([]store.AuthorizationEventProjection, error) {
-	return []store.AuthorizationEventProjection{}, nil
+func (f *fakeControl) ListAuthorizationEvents(_ context.Context, _ string, after int64, limit int) ([]store.AuthorizationEventProjection, error) {
+	f.eventAfter, f.eventLimit = after, limit
+	items := make([]store.AuthorizationEventProjection, 0, limit)
+	for _, item := range f.events {
+		if item.Sequence > after {
+			items = append(items, item)
+		}
+		if len(items) == limit {
+			break
+		}
+	}
+	return items, nil
 }
 func (f *fakeControl) CancelAuthorizationSession(_ context.Context, input store.CancelAuthorizationInput) (store.AuthorizationSessionProjection, bool, error) {
 	f.cancelInput = input
+	if f.cancelErr != nil {
+		return store.AuthorizationSessionProjection{}, false, f.cancelErr
+	}
 	f.session.Status = "cancelled"
 	f.session.Revision++
 	return f.session, true, nil
@@ -84,10 +101,14 @@ func (f *fakeControl) FailAuthorizationSession(_ context.Context, id, _ string, 
 	f.session.Failure = &store.SessionFailure{Code: code}
 	return f.session, nil
 }
+func (f *fakeControl) RecoverInterruptedAuthorizationSessions(context.Context, string) ([]store.AuthorizationRecoveryItem, error) {
+	return nil, nil
+}
 
 type fakeAuthorizer struct {
 	request accessclient.Request
 	err     error
+	granted []string
 }
 
 func (f *fakeAuthorizer) Evaluate(_ context.Context, _ string, request accessclient.Request) (accessclient.Decision, error) {
@@ -96,7 +117,13 @@ func (f *fakeAuthorizer) Evaluate(_ context.Context, _ string, request accesscli
 		return accessclient.Decision{}, f.err
 	}
 	granted := append([]string{}, request.RequiredAllPermissions...)
-	granted = append(granted, request.RequiredAnyPermissions...)
+	if f.granted != nil {
+		granted = append(granted, f.granted...)
+	} else if len(request.RequiredAnyPermissions) > 0 {
+		// Model the least-privileged caller by default. Tests that need owner
+		// powers must opt in explicitly instead of receiving every requiredAny.
+		granted = append(granted, request.RequiredAnyPermissions[0])
+	}
 	return accessclient.Decision{
 		Allowed: true, ActorID: request.ActorID, MembershipID: "membership_1",
 		WorkspaceType: request.WorkspaceType, WorkspaceID: request.WorkspaceID,
