@@ -66,12 +66,16 @@ export class DesktopCredentialJournalError extends Error {
 export interface DesktopCredentialOperationJournalOptions {
   root: string;
   safeStorage: SafeStorageLike;
+  platform?: NodeJS.Platform;
+  directorySync?: (directory: string) => Promise<void>;
 }
 
 /** Main-only safeStorage envelope for promotion recovery metadata. */
 export class DesktopCredentialOperationJournalStore {
   private readonly root: string;
   private readonly safeStorage: SafeStorageLike;
+  private readonly platform: NodeJS.Platform;
+  private readonly directorySync: (directory: string) => Promise<void>;
 
   constructor(options: DesktopCredentialOperationJournalOptions) {
     this.root = path.resolve(options.root);
@@ -79,6 +83,8 @@ export class DesktopCredentialOperationJournalStore {
       throw journalError("desktop_credential_journal_unsafe", "凭据操作日志目录无效");
     }
     this.safeStorage = options.safeStorage;
+    this.platform = options.platform ?? process.platform;
+    this.directorySync = options.directorySync ?? syncDirectoryStrict;
   }
 
   async save(value: DesktopCredentialOperationRecord): Promise<void> {
@@ -117,10 +123,10 @@ export class DesktopCredentialOperationJournalStore {
     if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size < 1 || info.size > MAX_JOURNAL_BYTES) {
       throw journalError("desktop_credential_journal_unsafe", "凭据操作日志文件不安全");
     }
-    if (process.platform !== "win32" && (info.mode & 0o777) !== 0o600) {
+    if (this.platform !== "win32" && (info.mode & 0o777) !== 0o600) {
       throw journalError("desktop_credential_journal_unsafe", "凭据操作日志权限不安全");
     }
-    const flags = fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+    const flags = fsConstants.O_RDONLY | (this.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
     let handle;
     try {
       handle = await open(target, flags);
@@ -132,7 +138,7 @@ export class DesktopCredentialOperationJournalStore {
         before.nlink !== 1 ||
         before.size < 1 ||
         before.size > MAX_JOURNAL_BYTES ||
-        (process.platform !== "win32" && (before.mode & 0o777) !== 0o600) ||
+        (this.platform !== "win32" && (before.mode & 0o777) !== 0o600) ||
         before.dev !== info.dev ||
         before.ino !== info.ino ||
         before.dev !== after.dev ||
@@ -194,7 +200,7 @@ export class DesktopCredentialOperationJournalStore {
     }
     await rm(this.target(record.operationId));
     await rm(this.temporary(record.operationId), { force: true });
-    await syncDirectory(this.root);
+    await this.directorySync(this.root);
   }
 
   projection(record: DesktopCredentialOperationRecord): DesktopCredentialOperationProjection {
@@ -228,12 +234,12 @@ export class DesktopCredentialOperationJournalStore {
     try {
       handle = await open(temporary, "wx", 0o600);
       await handle.writeFile(value);
-      if (process.platform !== "win32") await handle.chmod(0o600);
+      if (this.platform !== "win32") await handle.chmod(0o600);
       await handle.sync();
       await handle.close();
       handle = undefined;
       await rename(temporary, target);
-      await syncDirectory(this.root);
+      await this.directorySync(this.root);
     } catch (error) {
       await handle?.close().catch(() => undefined);
       throw error;
@@ -255,7 +261,7 @@ export class DesktopCredentialOperationJournalStore {
       temporaryInfo.nlink !== 1 ||
       temporaryInfo.size < 1 ||
       temporaryInfo.size > MAX_JOURNAL_BYTES ||
-      (process.platform !== "win32" && (temporaryInfo.mode & 0o777) !== 0o600)
+      (this.platform !== "win32" && (temporaryInfo.mode & 0o777) !== 0o600)
     ) {
       throw journalError("desktop_credential_journal_unsafe", "凭据操作临时日志不安全");
     }
@@ -266,7 +272,7 @@ export class DesktopCredentialOperationJournalStore {
       if (!isErrorCode(error, "ENOENT")) throw error;
       await rename(temporary, this.target(operationId));
     }
-    await syncDirectory(this.root);
+    await this.directorySync(this.root);
   }
 
   private async ensureRoot(): Promise<void> {
@@ -275,7 +281,7 @@ export class DesktopCredentialOperationJournalStore {
     if (!info.isDirectory() || info.isSymbolicLink()) {
       throw journalError("desktop_credential_journal_unsafe", "凭据操作日志目录不安全");
     }
-    if (process.platform !== "win32") await chmod(this.root, 0o700);
+    if (this.platform !== "win32") await chmod(this.root, 0o700);
   }
 
   private assertSecureStorage(): void {
@@ -354,21 +360,13 @@ function isExactRecord(value: unknown, keys: readonly string[]): value is Record
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-async function syncDirectory(directory: string): Promise<void> {
-  let handle;
+async function syncDirectoryStrict(directory: string): Promise<void> {
+  const handle = await open(directory, fsConstants.O_RDONLY);
   try {
-    handle = await open(directory, fsConstants.O_RDONLY);
     await handle.sync();
-  } catch (error) {
-    if (process.platform === "win32" && isUnsupportedDirectorySync(error)) return;
-    throw error;
   } finally {
-    await handle?.close().catch(() => undefined);
+    await handle.close().catch(() => undefined);
   }
-}
-
-function isUnsupportedDirectorySync(error: unknown): boolean {
-  return isErrorCode(error, "EINVAL") || isErrorCode(error, "EPERM") || isErrorCode(error, "ENOTSUP");
 }
 
 function isErrorCode(error: unknown, code: string): boolean {

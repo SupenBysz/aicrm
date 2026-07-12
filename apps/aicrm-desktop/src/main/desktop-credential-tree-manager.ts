@@ -23,6 +23,10 @@ import {
   DesktopCredentialTreeError,
   digestDesktopCredentialTree
 } from "./desktop-credential-tree-digest.ts";
+import {
+  createDesktopWindowsCredentialProtection,
+  type DesktopWindowsCredentialProtection
+} from "./desktop-credential-windows-protection.ts";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,120}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
@@ -145,6 +149,8 @@ export interface DesktopCredentialTreeManagerOptions {
   safeStorage: SafeStorageLike;
   now?: () => Date;
   faultInjector?: DesktopCredentialTreeFaultInjector;
+  platform?: NodeJS.Platform;
+  windowsProtection?: DesktopWindowsCredentialProtection;
 }
 
 /**
@@ -157,6 +163,8 @@ export class DesktopCredentialTreeManager {
   private readonly safeStorage: SafeStorageLike;
   private readonly now: () => Date;
   private readonly faultInjector?: DesktopCredentialTreeFaultInjector;
+  private readonly platform: NodeJS.Platform;
+  private readonly windowsProtection?: DesktopWindowsCredentialProtection;
 
   constructor(options: DesktopCredentialTreeManagerOptions) {
     this.root = path.resolve(options.root);
@@ -166,6 +174,12 @@ export class DesktopCredentialTreeManager {
     this.safeStorage = options.safeStorage;
     this.now = options.now ?? (() => new Date());
     this.faultInjector = options.faultInjector;
+    this.platform = options.platform ?? process.platform;
+    this.windowsProtection =
+      options.windowsProtection ??
+      (this.platform === "win32" && process.platform === "win32"
+        ? createDesktopWindowsCredentialProtection()
+        : undefined);
   }
 
   async initialize(): Promise<void> {
@@ -178,7 +192,7 @@ export class DesktopCredentialTreeManager {
     return this.withExecutorLock(executorId, async () => {
       const parent = await this.ensurePrivatePath(executorId, "staging");
       const target = this.pathFor({ kind: "staging", executorId, sessionId });
-      await createDirectoryNoReplace(target);
+      await this.createPrivateDirectoryNoReplace(target);
       await this.syncParent(parent);
       return { kind: "staging", executorId, sessionId };
     });
@@ -199,21 +213,26 @@ export class DesktopCredentialTreeManager {
       const target = this.pathFor({ kind: "operation", executorId, operationId });
       await this.assertSafeDirectory(source);
       const fence = await this.readReservationFence(executorId, revision);
-      await validateReadOnlyTree(sourceContainer);
+      await this.validateReadOnlyTree(sourceContainer);
       const before = await digestDesktopCredentialTree(source);
       if (before.digest !== fence.expectedDigest) {
         throw managerError("desktop_credential_digest_mismatch", "凭据版本与预留栅栏不一致");
       }
-      await createDirectoryNoReplace(target);
+      await this.createPrivateDirectoryNoReplace(target);
       try {
-        await copyCredentialTree(source, target);
+        await copyCredentialTree(
+          source,
+          target,
+          this.platform,
+          (directory) => this.createPrivateDirectoryNoReplace(directory)
+        );
         await this.durableBarrier(target);
         await this.syncParent(targetParent);
         const [sourceAfter, targetDigest] = await Promise.all([
           digestDesktopCredentialTree(source),
           digestDesktopCredentialTree(target)
         ]);
-        await validateReadOnlyTree(sourceContainer);
+        await this.validateReadOnlyTree(sourceContainer);
         if (sourceAfter.digest !== before.digest || targetDigest.digest !== before.digest) {
           throw managerError("desktop_credential_digest_mismatch", "凭据 COW 副本摘要不一致");
         }
@@ -322,8 +341,8 @@ export class DesktopCredentialTreeManager {
       if (!reservationMatches(fence, record)) {
         throw managerError("desktop_credential_recovery_required", "凭据预留所有权栅栏不匹配");
       }
-      await validateReadOnlyTree(target);
-      await validateReadOnlyTree(this.revisionContainerPath(input.executorId, input.revision));
+      await this.validateReadOnlyTree(target);
+      await this.validateReadOnlyTree(this.revisionContainerPath(input.executorId, input.revision));
       const verified = await digestDesktopCredentialTree(target);
       if (verified.digest !== input.expectedDigest) {
         throw managerError("desktop_credential_digest_mismatch", "凭据 ACK 完成摘要不匹配");
@@ -493,15 +512,29 @@ export class DesktopCredentialTreeManager {
     if (!reservationMatches(fence, record)) {
       throw managerError("desktop_credential_recovery_required", "凭据预留所有权栅栏不匹配");
     }
-    await makeReadOnly(target);
-    await this.fault("after_readonly");
-    record.phase = "immutable";
-    await journal.save(record);
-    await makeReservationReadOnly(targetContainer);
-    await this.durableBarrier(targetContainer);
-    await this.syncParent(path.dirname(targetContainer));
+    if (this.platform === "win32") {
+      if (record.phase === "immutable" || record.phase === "verified") {
+        // A durable journal phase is the recovery receipt for the native seal.
+        // Never weaken an already sealed tree merely to obtain a new write handle.
+        await this.validateReadOnlyTree(targetContainer);
+      } else {
+        await this.sealWindowsReadOnlyTree(targetContainer);
+        await this.syncParent(path.dirname(targetContainer));
+        record.phase = "immutable";
+        await journal.save(record);
+        await this.fault("after_readonly");
+      }
+    } else {
+      await makeReadOnly(target, this.platform);
+      await this.fault("after_readonly");
+      record.phase = "immutable";
+      await journal.save(record);
+      await makeReservationReadOnly(targetContainer, this.platform);
+      await this.durableBarrier(targetContainer);
+      await this.syncParent(path.dirname(targetContainer));
+    }
     await this.fault("after_target_durable");
-    await validateReadOnlyTree(targetContainer);
+    await this.validateReadOnlyTree(targetContainer);
     const verified = await digestDesktopCredentialTree(target);
     if (verified.digest !== record.expectedDigest) {
       record.phase = "quarantined";
@@ -552,22 +585,42 @@ export class DesktopCredentialTreeManager {
     }
     const info = await lstat(sourceRoot);
     const originalMode = info.mode & 0o777;
-    const adjusted = process.platform !== "win32" && (originalMode & 0o200) === 0;
+    const adjusted = this.platform !== "win32" && (originalMode & 0o200) === 0;
     if (adjusted) {
-      await validateReadOnlyTree(sourceRoot);
+      await this.validateReadOnlyTree(sourceRoot);
       await chmod(sourceRoot, originalMode | 0o200);
     }
+    const windowsRevision = this.platform === "win32" && ref.kind === "revision";
+    if (windowsRevision) {
+      await this.validateReadOnlyTree(sourceRoot);
+      try {
+        await this.requireWindowsProtection().prepareReadOnlyTreeForMove(sourceRoot);
+      } catch {
+        throw managerError("desktop_credential_tree_unsafe", "Windows 凭据只读树无法安全隔离");
+      }
+    }
     try {
-      await this.durableBarrier(sourceRoot);
-      await createDirectoryNoReplace(targetReservation);
+      // A sealed Windows revision already crossed its durable seal barrier.
+      // Reopening it writable only to fsync would weaken the immutable boundary.
+      if (!windowsRevision) await this.durableBarrier(sourceRoot);
+      await this.createPrivateDirectoryNoReplace(targetReservation);
       await this.syncParent(targetParent);
       await renameIntoPrivateReservation(sourceRoot, targetPayload, targetReservation);
       await this.syncParent(path.dirname(sourceRoot));
-      await this.syncParent(targetReservation);
-      if (adjusted) await chmod(targetPayload, originalMode);
-      await this.durableBarrier(targetPayload);
-      if (process.platform !== "win32") await chmod(targetReservation, 0o500);
-      await this.syncParent(targetReservation);
+      if (this.platform === "win32") {
+        if (windowsRevision) {
+          await this.sealWindowsQuarantineReservation(targetReservation, targetPayload);
+        } else {
+          await this.sealWindowsReadOnlyTree(targetReservation);
+        }
+        await this.validateReadOnlyTree(targetReservation);
+      } else {
+        await this.syncParent(targetReservation);
+        if (adjusted) await chmod(targetPayload, originalMode);
+        await this.durableBarrier(targetPayload);
+        await chmod(targetReservation, 0o500);
+        await this.syncParent(targetReservation);
+      }
       await this.syncParent(targetParent);
       return targetRef;
     } catch (error) {
@@ -614,7 +667,7 @@ export class DesktopCredentialTreeManager {
       return;
     }
     try {
-      await createDirectoryNoReplace(container);
+      await this.createPrivateDirectoryNoReplace(container);
     } catch (error) {
       if (
         error instanceof DesktopCredentialTreeManagerError &&
@@ -641,7 +694,7 @@ export class DesktopCredentialTreeManager {
     try {
       handle = await open(target, "wx", 0o600);
       await handle.writeFile(Buffer.from(JSON.stringify(fence), "utf8"));
-      if (process.platform !== "win32") await handle.chmod(0o600);
+      if (this.platform !== "win32") await handle.chmod(0o600);
       await handle.sync();
       await handle.close();
       handle = undefined;
@@ -680,11 +733,11 @@ export class DesktopCredentialTreeManager {
       info.nlink !== 1 ||
       info.size < 1 ||
       info.size > MAX_RESERVATION_FENCE_BYTES ||
-      (process.platform !== "win32" && ![0o600, 0o400].includes(info.mode & 0o777))
+      (this.platform !== "win32" && ![0o600, 0o400].includes(info.mode & 0o777))
     ) {
       throw managerError("desktop_credential_tree_unsafe", "凭据版本所有权栅栏不安全");
     }
-    const flags = fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+    const flags = fsConstants.O_RDONLY | (this.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
     let handle;
     try {
       handle = await open(target, flags);
@@ -696,7 +749,7 @@ export class DesktopCredentialTreeManager {
         before.nlink !== 1 ||
         before.size < 1 ||
         before.size > MAX_RESERVATION_FENCE_BYTES ||
-        (process.platform !== "win32" && ![0o600, 0o400].includes(before.mode & 0o777)) ||
+        (this.platform !== "win32" && ![0o600, 0o400].includes(before.mode & 0o777)) ||
         before.dev !== info.dev ||
         before.ino !== info.ino ||
         raw.byteLength !== before.size ||
@@ -733,7 +786,12 @@ export class DesktopCredentialTreeManager {
 
   private async journal(executorId: string): Promise<DesktopCredentialOperationJournalStore> {
     const root = await this.ensurePrivatePath(executorId, "journals");
-    return new DesktopCredentialOperationJournalStore({ root, safeStorage: this.safeStorage });
+    return new DesktopCredentialOperationJournalStore({
+      root,
+      safeStorage: this.safeStorage,
+      platform: this.platform,
+      directorySync: (directory) => this.syncJournalDirectory(directory)
+    });
   }
 
   private async ensureRoot(): Promise<void> {
@@ -742,7 +800,11 @@ export class DesktopCredentialTreeManager {
     if (!info.isDirectory() || info.isSymbolicLink()) {
       throw managerError("desktop_credential_tree_unsafe", "凭据 Vault 根目录不安全");
     }
-    if (process.platform !== "win32") await chmod(this.root, 0o700);
+    if (this.platform !== "win32") {
+      await chmod(this.root, 0o700);
+    } else {
+      await this.ensureWindowsPrivateDirectory(this.root);
+    }
   }
 
   private async ensurePrivatePath(...segments: string[]): Promise<string> {
@@ -768,7 +830,11 @@ export class DesktopCredentialTreeManager {
       if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
         throw managerError("desktop_credential_tree_unsafe", "凭据子目录发生路径逃逸");
       }
-      if (process.platform !== "win32") await chmod(current, 0o700);
+      if (this.platform !== "win32") {
+        await chmod(current, 0o700);
+      } else {
+        await this.ensureWindowsPrivateDirectory(current);
+      }
     }
     return current;
   }
@@ -823,7 +889,7 @@ export class DesktopCredentialTreeManager {
         if (!metadata.isFile() || metadata.nlink !== 1) {
           throw managerError("desktop_credential_tree_unsafe", "凭据落盘只允许单链接普通文件");
         }
-        const flags = fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+        const flags = fsConstants.O_RDONLY | (this.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
         const handle = await open(target, flags);
         try {
           const opened = await handle.stat();
@@ -831,7 +897,7 @@ export class DesktopCredentialTreeManager {
             throw managerError("desktop_credential_tree_unsafe", "凭据文件在落盘前发生变化");
           }
           await this.fault("before_file_fsync");
-          await handle.sync();
+          if (this.platform !== "win32") await handle.sync();
         } finally {
           await handle.close().catch(() => undefined);
         }
@@ -840,9 +906,14 @@ export class DesktopCredentialTreeManager {
     try {
       await visit(root);
       directories.sort((left, right) => right.length - left.length);
-      for (const directory of directories) {
-        await this.fault("before_directory_fsync");
-        await syncDirectory(directory);
+      if (this.platform === "win32") {
+        for (const _directory of directories) await this.fault("before_directory_fsync");
+        await this.requireWindowsProtection().syncMutableTree(root);
+      } else {
+        for (const directory of directories) {
+          await this.fault("before_directory_fsync");
+          await this.syncDirectory(directory);
+        }
       }
     } catch (error) {
       if (error instanceof DesktopCredentialTreeManagerError) throw error;
@@ -853,10 +924,95 @@ export class DesktopCredentialTreeManager {
   private async syncParent(directory: string): Promise<void> {
     try {
       await this.fault("before_parent_fsync");
-      await syncDirectory(directory);
+      await this.syncDirectory(directory);
     } catch (error) {
       if (error instanceof DesktopCredentialTreeManagerError) throw error;
       throw managerError("desktop_credential_durability_failed", "凭据父目录持久化失败");
+    }
+  }
+
+  private async syncJournalDirectory(directory: string): Promise<void> {
+    try {
+      await this.syncDirectory(directory);
+    } catch (error) {
+      if (error instanceof DesktopCredentialTreeManagerError) throw error;
+      throw managerError("desktop_credential_durability_failed", "凭据事务日志持久化失败");
+    }
+  }
+
+  private requireWindowsProtection(): DesktopWindowsCredentialProtection {
+    if (this.platform !== "win32" || this.windowsProtection === undefined) {
+      throw managerError(
+        "desktop_credential_tree_unsafe",
+        "Windows 凭据保护组件不可用"
+      );
+    }
+    return this.windowsProtection;
+  }
+
+  private async ensureWindowsPrivateDirectory(directory: string): Promise<void> {
+    try {
+      await this.requireWindowsProtection().ensurePrivateDirectory(directory);
+    } catch (error) {
+      if (error instanceof DesktopCredentialTreeManagerError) throw error;
+      throw managerError("desktop_credential_tree_unsafe", "Windows 凭据私有目录保护失败");
+    }
+  }
+
+  private async createPrivateDirectoryNoReplace(directory: string): Promise<void> {
+    await createDirectoryNoReplace(directory);
+    if (this.platform !== "win32") return;
+    try {
+      await this.ensureWindowsPrivateDirectory(directory);
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async syncDirectory(directory: string): Promise<void> {
+    if (this.platform === "win32") {
+      await this.requireWindowsProtection().syncDirectory(directory);
+      return;
+    }
+    await syncPosixDirectory(directory);
+  }
+
+  private async validateReadOnlyTree(root: string): Promise<void> {
+    await validateReadOnlyTree(root, this.platform);
+    if (this.platform !== "win32") return;
+    try {
+      await this.requireWindowsProtection().validateReadOnlyTree(root);
+    } catch (error) {
+      if (error instanceof DesktopCredentialTreeManagerError) throw error;
+      throw managerError("desktop_credential_tree_unsafe", "Windows 凭据只读 ACL 校验失败");
+    }
+  }
+
+  private async sealWindowsReadOnlyTree(root: string): Promise<void> {
+    await validateReadOnlyTree(root, this.platform);
+    try {
+      const protection = this.requireWindowsProtection();
+      await protection.sealReadOnlyTree(root);
+      await protection.validateReadOnlyTree(root);
+    } catch (error) {
+      if (error instanceof DesktopCredentialTreeManagerError) throw error;
+      throw managerError("desktop_credential_durability_failed", "Windows 凭据只读落盘屏障失败");
+    }
+  }
+
+  private async sealWindowsQuarantineReservation(
+    reservation: string,
+    payload: string
+  ): Promise<void> {
+    await validateReadOnlyTree(payload, this.platform);
+    try {
+      const protection = this.requireWindowsProtection();
+      await protection.sealQuarantineReservation(reservation, payload);
+      await protection.validateReadOnlyTree(reservation);
+    } catch (error) {
+      if (error instanceof DesktopCredentialTreeManagerError) throw error;
+      throw managerError("desktop_credential_durability_failed", "Windows 凭据隔离落盘屏障失败");
     }
   }
 
@@ -869,7 +1025,12 @@ export class DesktopCredentialTreeManager {
   }
 }
 
-async function copyCredentialTree(source: string, target: string): Promise<void> {
+async function copyCredentialTree(
+  source: string,
+  target: string,
+  platform: NodeJS.Platform,
+  createDirectory: (directory: string) => Promise<void>
+): Promise<void> {
   let fileCount = 0;
   let totalBytes = 0;
   const copyDirectory = async (sourceDirectory: string, targetDirectory: string): Promise<void> => {
@@ -881,7 +1042,7 @@ async function copyCredentialTree(source: string, target: string): Promise<void>
         throw managerError("desktop_credential_tree_unsafe", "凭据 COW 禁止符号链接");
       }
       if (info.isDirectory()) {
-        await createDirectoryNoReplace(targetPath);
+        await createDirectory(targetPath);
         await copyDirectory(sourcePath, targetPath);
         continue;
       }
@@ -899,7 +1060,7 @@ async function copyCredentialTree(source: string, target: string): Promise<void>
       }
       fileCount += 1;
       totalBytes += info.size;
-      const flags = fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+      const flags = fsConstants.O_RDONLY | (platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
       const input = await open(sourcePath, flags);
       let output;
       try {
@@ -947,7 +1108,7 @@ async function copyCredentialTree(source: string, target: string): Promise<void>
   await copyDirectory(source, target);
 }
 
-async function makeReadOnly(root: string): Promise<void> {
+async function makeReadOnly(root: string, platform: NodeJS.Platform): Promise<void> {
   const values: Array<{ target: string; directory: boolean }> = [];
   const visit = async (target: string): Promise<void> => {
     const info = await lstat(target);
@@ -961,13 +1122,16 @@ async function makeReadOnly(root: string): Promise<void> {
   };
   await visit(root);
   values.sort((left, right) => right.target.length - left.target.length);
-  if (process.platform !== "win32") {
+  if (platform !== "win32") {
     for (const value of values) await chmod(value.target, value.directory ? 0o500 : 0o400);
   }
 }
 
-async function makeReservationReadOnly(container: string): Promise<void> {
-  if (process.platform === "win32") return;
+async function makeReservationReadOnly(
+  container: string,
+  platform: NodeJS.Platform
+): Promise<void> {
+  if (platform === "win32") return;
   const fence = path.join(container, RESERVATION_FENCE);
   const fenceInfo = await lstat(fence);
   const containerInfo = await lstat(container);
@@ -984,13 +1148,13 @@ async function makeReservationReadOnly(container: string): Promise<void> {
   await chmod(container, 0o500);
 }
 
-async function validateReadOnlyTree(root: string): Promise<void> {
+async function validateReadOnlyTree(root: string, platform: NodeJS.Platform): Promise<void> {
   const visit = async (target: string): Promise<void> => {
     const info = await lstat(target);
     if (
       info.isSymbolicLink() ||
       (!info.isDirectory() && (!info.isFile() || info.nlink !== 1)) ||
-      (process.platform !== "win32" && (info.mode & 0o222) !== 0)
+      (platform !== "win32" && (info.mode & 0o222) !== 0)
     ) {
       throw managerError("desktop_credential_tree_unsafe", "凭据版本不是安全只读树");
     }
@@ -1037,16 +1201,12 @@ async function renameIntoPrivateReservation(
   await rename(source, target);
 }
 
-async function syncDirectory(directory: string): Promise<void> {
-  let handle;
+async function syncPosixDirectory(directory: string): Promise<void> {
+  const handle = await open(directory, fsConstants.O_RDONLY);
   try {
-    handle = await open(directory, fsConstants.O_RDONLY);
     await handle.sync();
-  } catch (error) {
-    if (process.platform === "win32" && isUnsupportedDirectorySync(error)) return;
-    throw error;
   } finally {
-    await handle?.close().catch(() => undefined);
+    await handle.close().catch(() => undefined);
   }
 }
 
@@ -1228,10 +1388,6 @@ function normalizeTreeError(error: unknown): unknown {
     );
   }
   return error;
-}
-
-function isUnsupportedDirectorySync(error: unknown): boolean {
-  return isErrorCode(error, "EINVAL") || isErrorCode(error, "EPERM") || isErrorCode(error, "ENOTSUP");
 }
 
 function isErrorCode(error: unknown, code: string): boolean {

@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  rm as removePath,
+  stat,
+  symlink,
+  writeFile
+} from "node:fs/promises";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +25,7 @@ import {
   digestDesktopCredentialTree
 } from "./desktop-credential-tree-digest.ts";
 import { DesktopCredentialTreeManager } from "./desktop-credential-tree-manager.ts";
+import { PowerShellDesktopWindowsCredentialProtection } from "./desktop-credential-windows-protection.ts";
 
 const fixturePath = path.resolve(
   process.cwd(),
@@ -47,6 +61,141 @@ class FakeSafeStorage {
   }
 }
 
+class FakeWindowsCredentialProtection {
+  constructor() {
+    this.privateDirectories = [];
+    this.syncedFiles = [];
+    this.syncedDirectories = [];
+    this.syncedTrees = [];
+    this.sealedTrees = [];
+    this.validatedTrees = [];
+    this.preparedMoves = [];
+    this.sealedQuarantines = [];
+    this.protectedRoots = new Set();
+    this.driftedRoots = new Set();
+    this.failSeal = false;
+    this.failNextFileSync = false;
+    this.failNextDirectorySync = false;
+    this.failDirectorySyncWhen = null;
+  }
+
+  async ensurePrivateDirectory(directory) {
+    this.privateDirectories.push(path.resolve(directory));
+  }
+
+  async syncFile(file) {
+    this.syncedFiles.push(path.resolve(file));
+    if (this.failNextFileSync) {
+      this.failNextFileSync = false;
+      throw new Error("native file flush failed");
+    }
+  }
+
+  async syncDirectory(directory) {
+    const resolved = path.resolve(directory);
+    this.syncedDirectories.push(resolved);
+    if (this.failNextDirectorySync || this.failDirectorySyncWhen?.(resolved)) {
+      this.failNextDirectorySync = false;
+      this.failDirectorySyncWhen = null;
+      throw new Error("native directory flush failed");
+    }
+  }
+
+  async syncMutableTree(root) {
+    const resolvedRoot = path.resolve(root);
+    this.syncedTrees.push(resolvedRoot);
+    const directories = [];
+    const visit = async (directory) => {
+      directories.push(directory);
+      for (const child of await readdir(directory, { withFileTypes: true })) {
+        const target = path.join(directory, child.name);
+        if (child.isDirectory()) await visit(target);
+        else await this.syncFile(target);
+      }
+    };
+    await visit(resolvedRoot);
+    directories.sort((left, right) => right.length - left.length);
+    for (const directory of directories) await this.syncDirectory(directory);
+  }
+
+  async sealReadOnlyTree(root) {
+    const resolved = path.resolve(root);
+    this.sealedTrees.push(resolved);
+    if (this.failSeal) throw new Error("native ACL seal failed");
+    if (this.protectedRoots.has(resolved)) {
+      throw new Error("sealed tree cannot be reopened with GENERIC_WRITE");
+    }
+    this.protectedRoots.add(resolved);
+  }
+
+  async validateReadOnlyTree(root) {
+    const resolved = path.resolve(root);
+    this.validatedTrees.push(resolved);
+    if (
+      [...this.driftedRoots].some(
+        (drifted) => isSameOrDescendant(resolved, drifted) || isSameOrDescendant(drifted, resolved)
+      )
+    ) {
+      throw new Error("ACL drift detected");
+    }
+    if (![...this.protectedRoots].some((sealed) => isSameOrDescendant(resolved, sealed))) {
+      throw new Error("tree is not protected");
+    }
+  }
+
+  async prepareReadOnlyTreeForMove(root) {
+    await this.validateReadOnlyTree(root);
+    this.preparedMoves.push(path.resolve(root));
+  }
+
+  async sealQuarantineReservation(reservation, payload) {
+    const resolved = path.resolve(reservation);
+    const resolvedPayload = path.resolve(payload);
+    if (this.preparedMoves.length === 0) throw new Error("readonly payload was not prepared");
+    this.protectedRoots.add(resolvedPayload);
+    await this.validateReadOnlyTree(resolvedPayload);
+    this.sealedQuarantines.push({
+      reservation: resolved,
+      payload: resolvedPayload
+    });
+    if (this.failSeal) throw new Error("native quarantine ACL seal failed");
+    this.protectedRoots.add(resolved);
+  }
+
+  drift(root) {
+    this.driftedRoots.add(path.resolve(root));
+  }
+}
+
+function isSameOrDescendant(candidate, root) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function rm(target, options) {
+  if (options?.recursive) await makeTestTreeWritable(target);
+  return removePath(target, options);
+}
+
+async function makeTestTreeWritable(target) {
+  let info;
+  try {
+    info = await lstat(target);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  if (info.isSymbolicLink()) return;
+  if (!info.isDirectory()) {
+    await chmod(target, 0o600).catch(() => undefined);
+    return;
+  }
+  await chmod(target, 0o700).catch(() => undefined);
+  for (const child of await readdir(target)) {
+    await makeTestTreeWritable(path.join(target, child));
+  }
+}
+
 async function managerFixture(options = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-credential-tree-"));
   const root = path.join(base, "vault");
@@ -55,7 +204,9 @@ async function managerFixture(options = {}) {
     root,
     safeStorage: storage,
     now: () => new Date("2026-07-13T00:00:00.000Z"),
-    faultInjector: options.faultInjector
+    faultInjector: options.faultInjector,
+    platform: options.platform,
+    windowsProtection: options.windowsProtection
   });
   await manager.initialize();
   return { base, root, storage, manager };
@@ -872,4 +1023,273 @@ test("journal refuses unavailable or plaintext safeStorage before filesystem pro
       assert.equal((await lstat(staging.target)).isDirectory(), true);
     });
   }
+});
+
+test("Windows protection helper uses execFile stdin and literal environment input without secret inheritance", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-windows-protection-runner-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const shim = path.join(base, "powershell-shim");
+  await writeFile(
+    shim,
+    [
+      `#!${process.execPath}`,
+      'import fs from "node:fs";',
+      'let input = "";',
+      'process.stdin.setEncoding("utf8");',
+      'process.stdin.on("data", (chunk) => { input += chunk; });',
+      'process.stdin.on("end", () => {',
+      '  fs.writeFileSync(`${process.argv[1]}.capture`, JSON.stringify({',
+      '    args: process.argv.slice(2),',
+      '    action: process.env.AICRM_CREDENTIAL_ACTION,',
+      '    target: process.env.AICRM_CREDENTIAL_TARGET,',
+      '    leak: process.env.AICRM_TEST_SECRET,',
+      '    path: process.env.PATH ?? process.env.Path,',
+      '    psModulePath: process.env.PSModulePath,',
+      '    pathExt: process.env.PATHEXT,',
+      '    input',
+      '  }));',
+      '  process.stdout.write("OK");',
+      '});',
+      ''
+    ].join("\n"),
+    { mode: 0o700 }
+  );
+  const target = path.join(base, "literal ; $(must-not-run) [credential]");
+  const previous = process.env.AICRM_TEST_SECRET;
+  process.env.AICRM_TEST_SECRET = tokenCanary;
+  try {
+    const protection = new PowerShellDesktopWindowsCredentialProtection(shim);
+    await protection.ensurePrivateDirectory(target);
+  } finally {
+    if (previous === undefined) delete process.env.AICRM_TEST_SECRET;
+    else process.env.AICRM_TEST_SECRET = previous;
+  }
+  const capture = JSON.parse(await readFile(`${shim}.capture`, "utf8"));
+  assert.equal(capture.args.join("\n").includes(target), false);
+  assert.equal(capture.args.join("\n").includes(tokenCanary), false);
+  assert.equal(capture.target, target);
+  assert.equal(capture.action, "ensure_private_directory");
+  assert.equal(capture.leak, undefined);
+  assert.equal(capture.path, undefined);
+  assert.equal(capture.psModulePath, undefined);
+  assert.equal(capture.pathExt, undefined);
+  assert.equal(capture.input.includes("Get-Item -LiteralPath $Target -Force"), true);
+});
+
+test("simulated Windows promotion uses native ACL sealing and explicit durable flushes", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  const projection = await current.manager.promoteStaging({
+    executorId: "executor_1",
+    sessionId: "session_1",
+    operationId: "promote_1",
+    revision: 1,
+    expectedDigest: staging.digest.digest
+  });
+  const revision = current.manager.mainOnlyResolvePath({
+    kind: "revision",
+    executorId: "executor_1",
+    revision: 1
+  });
+  const container = path.dirname(revision);
+  assert.deepEqual(protection.sealedTrees, [container]);
+  assert.equal(protection.validatedTrees.includes(container), true);
+  assert.equal(protection.syncedFiles.some((file) => file.endsWith(`${path.sep}auth.json`)), true);
+  assert.equal(protection.syncedDirectories.includes(path.dirname(container)), true);
+  assert.equal((await current.manager.listPendingOperations("executor_1"))[0].phase, "verified");
+  await acknowledge(current.manager, projection);
+});
+
+test("simulated Windows ACL drift blocks COW before creating an operation tree", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  const projection = await current.manager.promoteStaging({
+    executorId: "executor_1",
+    sessionId: "session_1",
+    operationId: "promote_1",
+    revision: 1,
+    expectedDigest: staging.digest.digest
+  });
+  await acknowledge(current.manager, projection);
+  const revision = current.manager.mainOnlyResolvePath({
+    kind: "revision",
+    executorId: "executor_1",
+    revision: 1
+  });
+  protection.drift(path.dirname(revision));
+  await assert.rejects(current.manager.cloneRevision("executor_1", 1, "rotate_1"), {
+    code: "desktop_credential_tree_unsafe"
+  });
+  await assert.rejects(
+    lstat(current.manager.mainOnlyResolvePath({
+      kind: "operation",
+      executorId: "executor_1",
+      operationId: "rotate_1"
+    })),
+    { code: "ENOENT" }
+  );
+});
+
+test("simulated Windows seal failure never advances the journal to immutable", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  protection.failSeal = true;
+  await assert.rejects(
+    current.manager.promoteStaging({
+      executorId: "executor_1",
+      sessionId: "session_1",
+      operationId: "promote_1",
+      revision: 1,
+      expectedDigest: staging.digest.digest
+    }),
+    { code: "desktop_credential_durability_failed" }
+  );
+  const pending = await current.manager.listPendingOperations("executor_1");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].phase, "renamed");
+  assert.equal(protection.protectedRoots.size, 0);
+});
+
+test("simulated Windows durable immutable receipt recovers without weakening or resealing", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  let crashed = false;
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection,
+    faultInjector(point) {
+      if (!crashed && point === "after_readonly") {
+        crashed = true;
+        throw new Error("crash after durable Windows seal receipt");
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  await assert.rejects(
+    current.manager.promoteStaging({
+      executorId: "executor_1",
+      sessionId: "session_1",
+      operationId: "promote_1",
+      revision: 1,
+      expectedDigest: staging.digest.digest
+    }),
+    /crash after durable Windows seal receipt/
+  );
+  assert.equal((await current.manager.listPendingOperations("executor_1"))[0].phase, "immutable");
+  const restarted = new DesktopCredentialTreeManager({
+    root: current.root,
+    safeStorage: current.storage,
+    platform: "win32",
+    windowsProtection: protection
+  });
+  const recovered = await restarted.recoverOperation("executor_1", "promote_1");
+  assert.equal(recovered.digest, staging.digest.digest);
+  assert.equal(protection.sealedTrees.length, 1);
+  await acknowledge(restarted, recovered);
+});
+
+test("simulated Windows parent flush failure after sealing remains fail closed and unverified", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  protection.failDirectorySyncWhen = (directory) =>
+    protection.sealedTrees.length === 1 && directory.endsWith(`${path.sep}revisions`);
+  await assert.rejects(
+    current.manager.promoteStaging({
+      executorId: "executor_1",
+      sessionId: "session_1",
+      operationId: "promote_1",
+      revision: 1,
+      expectedDigest: staging.digest.digest
+    }),
+    { code: "desktop_credential_durability_failed" }
+  );
+  assert.equal((await current.manager.listPendingOperations("executor_1"))[0].phase, "renamed");
+  await assert.rejects(current.manager.recoverOperation("executor_1", "promote_1"), {
+    code: "desktop_credential_durability_failed"
+  });
+  assert.equal((await current.manager.listPendingOperations("executor_1"))[0].phase, "renamed");
+});
+
+test("simulated Windows directory flush failure is not treated as success", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  protection.failNextDirectorySync = true;
+  await assert.rejects(
+    current.manager.promoteStaging({
+      executorId: "executor_1",
+      sessionId: "session_1",
+      operationId: "promote_1",
+      revision: 1,
+      expectedDigest: staging.digest.digest
+    }),
+    { code: "desktop_credential_durability_failed" }
+  );
+  assert.equal(protection.syncedDirectories.length > 0, true);
+  assert.equal((await current.manager.listPendingOperations("executor_1"))[0].phase, "prepared");
+});
+
+test("simulated Windows revision quarantine verifies the sealed payload and seals its reservation", async (t) => {
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_1", "session_1", "windows");
+  const projection = await current.manager.promoteStaging({
+    executorId: "executor_1",
+    sessionId: "session_1",
+    operationId: "promote_1",
+    revision: 1,
+    expectedDigest: staging.digest.digest
+  });
+  await acknowledge(current.manager, projection);
+  const ref = { kind: "revision", executorId: "executor_1", revision: 1 };
+  const source = path.dirname(current.manager.mainOnlyResolvePath(ref));
+  const quarantinedRef = await current.manager.quarantine(ref);
+  const quarantined = current.manager.mainOnlyResolvePath(quarantinedRef);
+  assert.deepEqual(protection.preparedMoves, [source]);
+  assert.deepEqual(protection.sealedQuarantines, [{
+    reservation: path.dirname(path.dirname(quarantined)),
+    payload: path.dirname(quarantined)
+  }]);
+  assert.equal((await digestDesktopCredentialTree(quarantined)).digest, staging.digest.digest);
+});
+
+test("simulated Windows fails closed when no native credential protection is injected", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-credential-tree-win-missing-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const manager = new DesktopCredentialTreeManager({
+    root: path.join(base, "vault"),
+    safeStorage: new FakeSafeStorage(),
+    platform: "win32"
+  });
+  await assert.rejects(manager.initialize(), {
+    code: "desktop_credential_tree_unsafe"
+  });
 });
