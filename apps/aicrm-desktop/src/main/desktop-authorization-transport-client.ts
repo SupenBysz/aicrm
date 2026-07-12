@@ -125,6 +125,31 @@ export type SubmitDesktopAuthorizationProofResponse =
   | SubmitDesktopAuthorizationProofSucceededResponse
   | (SubmitDesktopAuthorizationProofBaseResponse & { result: "failed" | "cancelled" });
 
+export interface RenewDesktopCredentialActivationLeaseInput {
+  sessionId: string;
+  activationToken: string;
+  operationId: string;
+  activationId: string;
+  credentialRevision: number;
+  leaseEpoch: number;
+  sourceCredentialRevision: number;
+  revocationEpoch: number;
+  bindingDigest: string;
+}
+
+export interface RenewDesktopCredentialActivationLeaseResponse {
+  activationId: string;
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  leaseEpoch: number;
+  sourceCredentialRevision: number;
+  revocationEpoch: number;
+  renewedAt: string;
+  leaseExpiresAt: string;
+  replayed: boolean;
+}
+
 export interface AcknowledgeDesktopCredentialActivationInput {
   sessionId: string;
   activationToken: string;
@@ -149,7 +174,7 @@ export interface AcknowledgeDesktopCredentialActivationResponse {
 interface AuthorizationIdentityStore
   extends Pick<DesktopDeviceIdentityStore, "getIdentity" | "signRequest"> {}
 
-interface AuthorizationRequestLane extends Pick<DesktopDeviceRequestLane, "run"> {}
+interface AuthorizationRequestLane extends Pick<DesktopDeviceRequestLane, "runPinned"> {}
 
 interface AuthorizationRequestJournal
   extends Pick<
@@ -228,33 +253,31 @@ export class DesktopAuthorizationTransportClient {
     const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-handoffs/${handoffId}/claim`;
     const authorization = buildAuthorization("AiCRM-Handoff", handoffTicket);
     const epoch = this.cancellationEpoch;
-    return this.requestLane.run(() =>
-      this.submit(
-        {
-          kind: "handoff_claim",
-          path,
-          authorization,
-          authorizationScheme: "AiCRM-Handoff",
-          createBody: () =>
-            encodeJson({ handoffId, claimedAt: canonicalDeviceNow(this.now(), "认领时间无效") }),
-          validateRecoveredBody: (body) => {
-            const value = parseJson(body, "认领恢复 body 无效");
-            if (!exactObject(value, ["handoffId", "claimedAt"])) {
-              throw recoveryConflict("认领恢复 body 结构不匹配");
-            }
-            const recovered = value as { handoffId: unknown; claimedAt: unknown };
-            if (recovered.handoffId !== handoffId || !canonicalDeviceTime(recovered.claimedAt)) {
-              throw recoveryConflict("认领恢复 body 与当前操作不匹配");
-            }
-            requireCanonicalEncoding(body, {
-              handoffId,
-              claimedAt: recovered.claimedAt
-            });
-          },
-          validateResponse: (value) => validateClaimResponse(value, handoffId)
+    return this.runTrusted(
+      {
+        kind: "handoff_claim",
+        path,
+        authorization,
+        authorizationScheme: "AiCRM-Handoff",
+        createBody: () =>
+          encodeJson({ handoffId, claimedAt: canonicalDeviceNow(this.now(), "认领时间无效") }),
+        validateRecoveredBody: (body) => {
+          const value = parseJson(body, "认领恢复 body 无效");
+          if (!exactObject(value, ["handoffId", "claimedAt"])) {
+            throw recoveryConflict("认领恢复 body 结构不匹配");
+          }
+          const recovered = value as { handoffId: unknown; claimedAt: unknown };
+          if (recovered.handoffId !== handoffId || !canonicalDeviceTime(recovered.claimedAt)) {
+            throw recoveryConflict("认领恢复 body 与当前操作不匹配");
+          }
+          requireCanonicalEncoding(body, {
+            handoffId,
+            claimedAt: recovered.claimedAt
+          });
         },
-        epoch
-      )
+        validateResponse: (value) => validateClaimResponse(value, handoffId)
+      },
+      epoch
     );
   }
 
@@ -291,19 +314,46 @@ export class DesktopAuthorizationTransportClient {
     const expectedBody = encodeJson(bodyObject);
     const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-proofs`;
     const epoch = this.cancellationEpoch;
-    return this.requestLane.run(() =>
-      this.submit(
-        {
-          kind: "authorization_proof",
-          path,
-          authorization: buildAuthorization("AiCRM-Claim", claimToken),
-          authorizationScheme: "AiCRM-Claim",
-          createBody: () => expectedBody,
-          validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "登录证明恢复冲突"),
-          validateResponse: (value) => validateProofResponse(value, result)
-        },
-        epoch
-      )
+    return this.runTrusted(
+      {
+        kind: "authorization_proof",
+        path,
+        authorization: buildAuthorization("AiCRM-Claim", claimToken),
+        authorizationScheme: "AiCRM-Claim",
+        createBody: () => expectedBody,
+        validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "登录证明恢复冲突"),
+        validateResponse: (value) => validateProofResponse(value, result)
+      },
+      epoch
+    );
+  }
+
+  renewCredentialActivationLease(
+    input: RenewDesktopCredentialActivationLeaseInput
+  ): Promise<DesktopTrustedTransportResult<RenewDesktopCredentialActivationLeaseResponse>> {
+    const tuple = validateActivationTuple(input);
+    const expectedBody = encodeJson({
+      operationId: tuple.operationId,
+      activationId: tuple.activationId,
+      credentialRevision: tuple.credentialRevision,
+      leaseEpoch: tuple.leaseEpoch,
+      sourceCredentialRevision: tuple.sourceCredentialRevision,
+      revocationEpoch: tuple.revocationEpoch,
+      bindingDigest: tuple.bindingDigest
+    });
+    const path = `/api/v1/ai-executor-authorization-sessions/${tuple.sessionId}/desktop-activations/${tuple.activationId}/lease-renewals`;
+    const epoch = this.cancellationEpoch;
+    return this.runTrusted(
+      {
+        kind: "credential_activation_lease_renewal",
+        path,
+        authorization: buildAuthorization("AiCRM-Activation", tuple.activationToken),
+        authorizationScheme: "AiCRM-Activation",
+        createBody: () => expectedBody,
+        validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "激活续租恢复冲突"),
+        validateResponse: (value) => validateLeaseRenewalResponse(value, tuple)
+      },
+      epoch
     );
   }
 
@@ -344,20 +394,18 @@ export class DesktopAuthorizationTransportClient {
     const expectedBody = encodeJson(bodyObject);
     const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-activations/${activationId}/ack`;
     const epoch = this.cancellationEpoch;
-    return this.requestLane.run(() =>
-      this.submit(
-        {
-          kind: "credential_activation_ack",
-          path,
-          authorization: buildAuthorization("AiCRM-Activation", activationToken),
-          authorizationScheme: "AiCRM-Activation",
-          createBody: () => expectedBody,
-          validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "激活确认恢复冲突"),
-          validateResponse: (value) =>
-            validateActivationResponse(value, activationId, credentialRevision)
-        },
-        epoch
-      )
+    return this.runTrusted(
+      {
+        kind: "credential_activation_ack",
+        path,
+        authorization: buildAuthorization("AiCRM-Activation", activationToken),
+        authorizationScheme: "AiCRM-Activation",
+        createBody: () => expectedBody,
+        validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "激活确认恢复冲突"),
+        validateResponse: (value) =>
+          validateActivationResponse(value, activationId, credentialRevision)
+      },
+      epoch
     );
   }
 
@@ -368,6 +416,27 @@ export class DesktopAuthorizationTransportClient {
   cancel(): void {
     this.cancellationEpoch += 1;
     for (const controller of this.activeControllers) controller.abort();
+  }
+
+  private runTrusted<T>(
+    definition: TrustedRequestDefinition<T>,
+    epoch: number
+  ): Promise<DesktopTrustedTransportResult<T>> {
+    const reference = desktopTrustedRequestReference(definition.kind, definition.path);
+    return this.requestLane.runPinned(
+      reference,
+      () => this.submit(definition, epoch),
+      async () => {
+        try {
+          const pending = await this.requestJournal.load(reference);
+          return pending !== null && pending.response === null;
+        } catch {
+          // A corrupt or unavailable recovery ledger is itself a hard sequence
+          // fence: no later request may consume a larger high-water sequence.
+          return true;
+        }
+      }
+    );
   }
 
   private async submit<T>(
@@ -720,6 +789,71 @@ function validateProofResponse(
     activationToken: response.activationToken,
     expiresAt: response.expiresAt
   };
+}
+
+function validateActivationTuple(
+  input: RenewDesktopCredentialActivationLeaseInput
+): RenewDesktopCredentialActivationLeaseInput {
+  const tuple: RenewDesktopCredentialActivationLeaseInput = {
+    sessionId: validOpaque(input.sessionId, "sessionId"),
+    activationToken: validTicket(input.activationToken, "activationToken"),
+    operationId: validOpaque(input.operationId, "operationId"),
+    activationId: validOpaque(input.activationId, "activationId"),
+    credentialRevision: positiveRevision(input.credentialRevision, "credentialRevision"),
+    leaseEpoch: positiveRevision(input.leaseEpoch, "leaseEpoch"),
+    sourceCredentialRevision: nonNegativeRevision(
+      input.sourceCredentialRevision,
+      "sourceCredentialRevision"
+    ),
+    revocationEpoch: nonNegativeRevision(input.revocationEpoch, "revocationEpoch"),
+    bindingDigest: validDigest(input.bindingDigest, "bindingDigest")
+  };
+  if (tuple.sourceCredentialRevision >= tuple.credentialRevision) {
+    throw contractInvalid("sourceCredentialRevision 无效");
+  }
+  return tuple;
+}
+
+function validateLeaseRenewalResponse(
+  value: unknown,
+  expected: RenewDesktopCredentialActivationLeaseInput
+): RenewDesktopCredentialActivationLeaseResponse {
+  if (!exactObject(value, [
+    "activationId",
+    "executorId",
+    "operationId",
+    "credentialRevision",
+    "leaseEpoch",
+    "sourceCredentialRevision",
+    "revocationEpoch",
+    "renewedAt",
+    "leaseExpiresAt",
+    "replayed"
+  ])) {
+    throw invalidResponse("Desktop 激活续租响应不是安全投影");
+  }
+  const response = value as unknown as RenewDesktopCredentialActivationLeaseResponse;
+  const renewedAt = Date.parse(response.renewedAt);
+  const leaseExpiresAt = Date.parse(response.leaseExpiresAt);
+  if (
+    response.activationId !== expected.activationId ||
+    !isOpaque(response.executorId) ||
+    response.operationId !== expected.operationId ||
+    response.credentialRevision !== expected.credentialRevision ||
+    response.leaseEpoch !== expected.leaseEpoch ||
+    response.sourceCredentialRevision !== expected.sourceCredentialRevision ||
+    response.revocationEpoch !== expected.revocationEpoch ||
+    !canonicalServerTime(response.renewedAt) ||
+    !canonicalServerTime(response.leaseExpiresAt) ||
+    !Number.isFinite(renewedAt) ||
+    !Number.isFinite(leaseExpiresAt) ||
+    leaseExpiresAt <= renewedAt ||
+    leaseExpiresAt - renewedAt > 30_000 ||
+    typeof response.replayed !== "boolean"
+  ) {
+    throw invalidResponse("Desktop 激活续租响应无效");
+  }
+  return { ...response };
 }
 
 function validateActivationResponse(

@@ -37,6 +37,7 @@ const rootOperationTails = new Map<string, Promise<void>>();
 export type DesktopTrustedRequestKind =
   | "handoff_claim"
   | "authorization_proof"
+  | "credential_activation_lease_renewal"
   | "credential_activation_ack"
   | "authorization_command_ack"
   | "credential_revocation_ack";
@@ -548,6 +549,7 @@ function trustedRequestKind(value: string): value is DesktopTrustedRequestKind {
   return [
     "handoff_claim",
     "authorization_proof",
+    "credential_activation_lease_renewal",
     "credential_activation_ack",
     "authorization_command_ack",
     "credential_revocation_ack"
@@ -560,6 +562,7 @@ function authorizationScheme(kind: DesktopTrustedRequestKind): string {
       return "AiCRM-Handoff";
     case "authorization_proof":
       return "AiCRM-Claim";
+    case "credential_activation_lease_renewal":
     case "credential_activation_ack":
       return "AiCRM-Activation";
     case "authorization_command_ack":

@@ -233,6 +233,20 @@ test("proof and activation ACK use strict device-only contracts and explicit com
         expiresAt: "2026-07-13T09:02:00.123Z"
       });
     }
+    if (url.endsWith("/lease-renewals")) {
+      return response({
+        activationId: "activation_1",
+        executorId: "executor_1",
+        operationId: "operation_1",
+        credentialRevision: 4,
+        leaseEpoch: 2,
+        sourceCredentialRevision: 0,
+        revocationEpoch: 0,
+        renewedAt: "2026-07-13T09:00:00.123Z",
+        leaseExpiresAt: "2026-07-13T09:00:30.123Z",
+        replayed: false
+      });
+    }
     return response({
       activationId: "activation_1",
       executorId: "executor_1",
@@ -257,6 +271,20 @@ test("proof and activation ACK use strict device-only contracts and explicit com
   assert.equal(proof.data.activationToken, ACTIVATION_TOKEN);
   await client.completeRequest(proof.requestReference, proof.requestHash);
 
+  const renewal = await client.renewCredentialActivationLease({
+    sessionId: "session_1",
+    activationToken: ACTIVATION_TOKEN,
+    operationId: "operation_1",
+    activationId: "activation_1",
+    credentialRevision: 4,
+    leaseEpoch: 2,
+    sourceCredentialRevision: 0,
+    revocationEpoch: 0,
+    bindingDigest: BINDING_DIGEST
+  });
+  assert.equal(renewal.data.leaseExpiresAt, "2026-07-13T09:00:30.123Z");
+  await client.completeRequest(renewal.requestReference, renewal.requestHash);
+
   const acknowledgement = await client.acknowledgeCredentialActivation({
     sessionId: "session_1",
     activationToken: ACTIVATION_TOKEN,
@@ -272,7 +300,7 @@ test("proof and activation ACK use strict device-only contracts and explicit com
   assert.equal(acknowledgement.data.executorId, "executor_1");
   await client.completeRequest(acknowledgement.requestReference, acknowledgement.requestHash);
 
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 3);
   for (const { init } of requests) {
     const headers = { ...init.headers };
     assert.equal("X-KY-Workspace-Type" in headers, false);
@@ -284,6 +312,7 @@ test("proof and activation ACK use strict device-only contracts and explicit com
   }
   assert.equal(requests[0].init.headers.Authorization, `AiCRM-Claim ${CLAIM_TOKEN}`);
   assert.equal(requests[1].init.headers.Authorization, `AiCRM-Activation ${ACTIVATION_TOKEN}`);
+  assert.equal(requests[2].init.headers.Authorization, `AiCRM-Activation ${ACTIVATION_TOKEN}`);
   assert.deepEqual(JSON.parse(requests[0].init.body), {
     handoffId: "handoff_1",
     sessionRevision: 2,
@@ -292,6 +321,15 @@ test("proof and activation ACK use strict device-only contracts and explicit com
     checkedAt: NOW,
     accountFingerprint: ACCOUNT_FINGERPRINT,
     candidateBindingDigest: BINDING_DIGEST
+  });
+  assert.deepEqual(JSON.parse(requests[1].init.body), {
+    operationId: "operation_1",
+    activationId: "activation_1",
+    credentialRevision: 4,
+    leaseEpoch: 2,
+    sourceCredentialRevision: 0,
+    revocationEpoch: 0,
+    bindingDigest: BINDING_DIGEST
   });
 });
 
@@ -345,7 +383,7 @@ test("claim response requires an exact trusted executor id", async (t) => {
   assert.deepEqual(requests[2], requests[0]);
 });
 
-test("shared lane orders authorization behind heartbeat work and cancellation releases it", async (t) => {
+test("shared lane orders requests and pins every later sequence behind an ambiguous journal", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
   let releaseBlocker;
@@ -387,9 +425,42 @@ test("shared lane orders authorization behind heartbeat work and cancellation re
   cancellable.cancel();
   await assert.rejects(pending, { code: "desktop_authorization_transport_cancelled" });
   assert.equal((await second.journal.list())[0].response, null);
+  await assert.rejects(second.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+
+  const recovered = await second.client({
+    fetch: async () => response(claimData())
+  }).claimDesktopHandoff(claimInput());
+  assert.equal(recovered.data.handoffId, "handoff_1");
   let laneReleased = false;
   await second.lane.run(async () => {
     laneReleased = true;
   });
   assert.equal(laneReleased, true);
+});
+
+test("startup restoration blocks heartbeat work until the exact journal head is recovered", async () => {
+  const lane = new DesktopDeviceRequestLane();
+  const reference = "a".repeat(64);
+  await lane.restorePin(reference);
+  let laterRequestStarted = false;
+  await assert.rejects(
+    lane.run(async () => {
+      laterRequestStarted = true;
+    }),
+    { code: "desktop_device_request_lane_pinned" }
+  );
+  assert.equal(laterRequestStarted, false);
+
+  const recovered = await lane.runPinned(
+    reference,
+    async () => "recovered",
+    async () => false
+  );
+  assert.equal(recovered, "recovered");
+  await lane.run(async () => {
+    laterRequestStarted = true;
+  });
+  assert.equal(laterRequestStarted, true);
 });
