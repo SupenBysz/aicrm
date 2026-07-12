@@ -8,8 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test:executor-auth-safety": "node --test src/executor-auth-safety.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:executor-auth-safety": "node --test src/executor-auth-safety.test.mjs src/executor-desktop-authorization-flow.test.mjs"
   },
   "dependencies": {
     "@ky/admin-core": "workspace:*",

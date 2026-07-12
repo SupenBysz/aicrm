@@ -5,6 +5,7 @@ import test from "node:test";
 const apiUrl = new URL("./api.ts", import.meta.url);
 const pageUrl = new URL("./pages/executors-page.tsx", import.meta.url);
 const authorizationUrl = new URL("./components/executor-authorization-panel.tsx", import.meta.url);
+const desktopAuthorizationFlowUrl = new URL("./executor-desktop-authorization-flow.ts", import.meta.url);
 const controlUrl = new URL("./components/executor-control-panel.tsx", import.meta.url);
 const indexUrl = new URL("./index.tsx", import.meta.url);
 const permissionsUrl = new URL("./permissions.ts", import.meta.url);
@@ -52,10 +53,33 @@ test("server device-code UI only opens exact official HTTPS origins", async () =
 });
 
 test("Desktop authorization cannot start before device handoff is wired", async () => {
-  const [apiSource, authorizationSource] = await Promise.all([readFile(apiUrl, "utf8"), readFile(authorizationUrl, "utf8")]);
+  const [apiSource, authorizationSource, flowSource] = await Promise.all([
+    readFile(apiUrl, "utf8"),
+    readFile(authorizationUrl, "utf8"),
+    readFile(desktopAuthorizationFlowUrl, "utf8")
+  ]);
   assert.match(apiSource, /AI_EXECUTOR_DESKTOP_HANDOFF_READY\s*=\s*false/);
+  assert.match(apiSource, /authorization-sessions\/\$\{sessionId\}\/desktop-handoffs/);
+  assert.match(apiSource, /body: \{ deviceId, expectedSessionRevision \}/);
   assert.match(authorizationSource, /!desktopBridgeReady \|\| !AI_EXECUTOR_DESKTOP_HANDOFF_READY/);
+  assert.match(authorizationSource, /getAiExecutorDesktopTrustBridge\(\)/);
+  assert.match(authorizationSource, /getAiExecutorAuthorizationBridge\(\)/);
+  assert.match(authorizationSource, /startAiExecutorDesktopAuthorization/);
   assert.match(authorizationSource, /不会仅凭 capability 创建会话/);
+  assert.match(flowSource, /DESKTOP_HANDOFF_TARGET_MISMATCH\s*=\s*"desktop_handoff_target_mismatch"/);
+  assert.match(flowSource, /bindExecutorDevice\(\{ executorId, expectedRevision: 0 \}\)/);
+  assert.match(flowSource, /getSession\(sessionId\)/);
+  assert.match(flowSource, /cancelSession\(\{ id: current\.id, revision: current\.revision \}\)/);
+});
+
+test("Desktop handoff bearer material is not retained by the Admin UI or written to logs", async () => {
+  const [authorizationSource, flowSource] = await Promise.all([
+    readFile(authorizationUrl, "utf8"),
+    readFile(desktopAuthorizationFlowUrl, "utf8")
+  ]);
+  assert.doesNotMatch(authorizationSource, /handoffTicket|\bnonce\b|setHandoff|window\.open\([^)]*handoff/);
+  assert.doesNotMatch(flowSource, /console\.|localStorage|sessionStorage/);
+  assert.match(flowSource, /return session;/);
 });
 
 test("connection-level authorization close is handled without advancing the persisted cursor", async () => {

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, App, Button, Card, Descriptions, Space, Tag, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  getAiExecutorAuthorizationBridge,
+  getAiExecutorDesktopTrustBridge,
   getCodexAuthorizationCapabilities,
   isAiExecutorDesktopRuntime,
   usePermissions,
@@ -11,6 +13,8 @@ import {
   AI_EXECUTOR_DESKTOP_HANDOFF_READY,
   cancelAiExecutorAuthorizationSession,
   createAiExecutorAuthorizationSession,
+  createAiExecutorDesktopHandoff,
+  getAiExecutorAuthorizationSession,
   getAiExecutorAuthorizationUserAction,
   getCurrentAiExecutorAuthorizationSession,
   reopenAiExecutorAuthorizationSession,
@@ -20,6 +24,7 @@ import {
   type AiExecutorAuthorizationUserAction,
   type AiExecutorConfig
 } from "../api";
+import { startAiExecutorDesktopAuthorization } from "../executor-desktop-authorization-flow";
 import { AI_EXECUTOR_PERMISSIONS } from "../permissions";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "expired", "interrupted", "superseded"]);
@@ -65,6 +70,12 @@ export function ExecutorAuthorizationPanel({ executor, onExecutorChanged }: { ex
   useEffect(() => {
     let active = true;
     if (!isDesktop || !isAiExecutorDesktopRuntime()) {
+      setDesktopBridgeReady(false);
+      return () => {
+        active = false;
+      };
+    }
+    if (!getAiExecutorDesktopTrustBridge()) {
       setDesktopBridgeReady(false);
       return () => {
         active = false;
@@ -124,7 +135,31 @@ export function ExecutorAuthorizationPanel({ executor, onExecutorChanged }: { ex
   }, [client, message, session?.id, session?.status, session?.userActionRequired]);
 
   const startMutation = useMutation({
-    mutationFn: (intent: AiExecutorAuthorizationIntent) => createAiExecutorAuthorizationSession(client, executor.id, intent),
+    mutationFn: async (intent: AiExecutorAuthorizationIntent) => {
+      if (!isDesktop) return createAiExecutorAuthorizationSession(client, executor.id, intent);
+      const trustBridge = getAiExecutorDesktopTrustBridge();
+      const authorizationBridge = getAiExecutorAuthorizationBridge();
+      if (!AI_EXECUTOR_DESKTOP_HANDOFF_READY || !isAiExecutorDesktopRuntime()) {
+        throw new Error("AiCRM Desktop 可信授权 handoff 尚未启用");
+      }
+      return startAiExecutorDesktopAuthorization(
+        { executorId: executor.id, intent, trustBridge, authorizationBridge },
+        {
+          createSession: (executorId, nextIntent) =>
+            createAiExecutorAuthorizationSession(client, executorId, nextIntent),
+          createHandoff: (sessionId, deviceId, expectedSessionRevision, idempotencyKey) =>
+            createAiExecutorDesktopHandoff(
+              client,
+              sessionId,
+              deviceId,
+              expectedSessionRevision,
+              idempotencyKey
+            ),
+          getSession: (sessionId) => getAiExecutorAuthorizationSession(client, sessionId),
+          cancelSession: (current) => cancelAiExecutorAuthorizationSession(client, current)
+        }
+      );
+    },
     onSuccess: (next) => {
       setSession(next);
       setStreamState("connecting");

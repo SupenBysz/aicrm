@@ -272,6 +272,18 @@ export interface AiExecutorAuthorizationUserAction {
   sessionDeadlineAt: string;
 }
 
+/**
+ * One-shot bearer material for handing a Desktop authorization session to the
+ * trusted Main process. Callers must pass it straight to the Desktop bridge and
+ * must never retain it in React state, telemetry, or logs.
+ */
+export interface AiExecutorDesktopHandoff {
+  handoffId: string;
+  handoffTicket: string;
+  nonce: string;
+  expiresAt: string;
+}
+
 export type AiExecutorAuthorizationEventName =
   | "authorization.session.changed"
   | "authorization.session.terminal"
@@ -569,6 +581,33 @@ export function createAiExecutorAuthorizationSession(
   });
 }
 
+export async function createAiExecutorDesktopHandoff(
+  client: RequestClient,
+  sessionId: string,
+  deviceId: string,
+  expectedSessionRevision: number,
+  idempotencyKey = newIdempotencyKey()
+): Promise<AiExecutorDesktopHandoff> {
+  if (
+    !validDesktopHandoffIdentifier(sessionId) ||
+    !validDesktopHandoffIdentifier(deviceId) ||
+    !Number.isSafeInteger(expectedSessionRevision) ||
+    expectedSessionRevision <= 0 ||
+    !validIdempotencyKey(idempotencyKey)
+  ) {
+    throw new Error("Desktop handoff 请求参数无效");
+  }
+  const value = await client.request<unknown>(
+    `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-handoffs`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: { deviceId, expectedSessionRevision }
+    }
+  );
+  return parseAiExecutorDesktopHandoff(value);
+}
+
 export async function getCurrentAiExecutorAuthorizationSession(
   client: RequestClient,
   executorId: string
@@ -750,6 +789,64 @@ function validEventCursor(value: number | undefined): boolean {
 
 function newIdempotencyKey(): string {
   return crypto.randomUUID();
+}
+
+function parseAiExecutorDesktopHandoff(value: unknown): AiExecutorDesktopHandoff {
+  if (!value || typeof value !== "object") throw new Error("Desktop handoff 响应无效");
+  const item = value as Record<string, unknown>;
+  const keys = Object.keys(item);
+  if (
+    keys.length !== 4 ||
+    !["handoffId", "handoffTicket", "nonce", "expiresAt"].every((key) =>
+      Object.prototype.hasOwnProperty.call(item, key)
+    ) ||
+    !validDesktopHandoffIdentifier(item.handoffId) ||
+    !validCompactJws(item.handoffTicket) ||
+    !validDesktopHandoffNonce(item.nonce) ||
+    !validDesktopHandoffExpiry(item.expiresAt)
+  ) {
+    throw new Error("Desktop handoff 响应无效");
+  }
+  return {
+    handoffId: item.handoffId,
+    handoffTicket: item.handoffTicket,
+    nonce: item.nonce,
+    expiresAt: item.expiresAt
+  };
+}
+
+function validDesktopHandoffIdentifier(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(value);
+}
+
+function validCompactJws(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 16 << 10) return false;
+  const parts = value.split(".");
+  return parts.length === 3 && parts.every(validCanonicalBase64UrlSegment);
+}
+
+function validCanonicalBase64UrlSegment(value: string): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) return false;
+  const remainder = value.length % 4;
+  if (remainder === 2) return /[AQgw]$/.test(value);
+  if (remainder === 3) return /[AEIMQUYcgkosw048]$/.test(value);
+  return true;
+}
+
+function validDesktopHandoffNonce(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{21}[AQgw]$/.test(value);
+}
+
+function validDesktopHandoffExpiry(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function validIdempotencyKey(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 16 && value.length <= 200 && value.trim() === value;
 }
 
 function errorCode(error: unknown): string {
