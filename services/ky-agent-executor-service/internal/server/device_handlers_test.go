@@ -108,6 +108,7 @@ func deviceHandlerServer(control *fakeDeviceControl, authorizer accessclient.Aut
 		DeviceChallengeSecret: deviceTestChallengeSecret,
 	}, &fakeReader{}, control, authorizer)
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
+	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	return server
 }
 
