@@ -35,7 +35,7 @@ func TestProductionStoreContainsOnlyReadQueries(t *testing.T) {
 	}
 }
 
-func TestProductionTreeHasNoProcessSpawner(t *testing.T) {
+func TestProductionTreeOnlyAllowsIsolatedStdioAppServerLauncher(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("cannot locate service tree")
@@ -53,14 +53,36 @@ func TestProductionTreeHasNoProcessSpawner(t *testing.T) {
 			return err
 		}
 		text := string(source)
-		for _, forbidden := range []string{`"os/exec"`, "exec.Command", "codex app-server", "CODEX_HOME"} {
-			if strings.Contains(text, forbidden) {
-				t.Fatalf("production file %s contains process/runtime token %q", path, forbidden)
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(text, `"os/exec"`) || strings.Contains(text, "exec.Command") {
+			if filepath.ToSlash(relative) != "internal/appserver/launcher_linux.go" {
+				t.Fatalf("process spawning escaped isolated launcher: %s", path)
+			}
+		}
+		for _, forbidden := range []string{"codex --remote", "--listen ws", "--listen unix", `"github.com/creack/pty"`, "CODEX_HOME="} {
+			if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) && filepath.ToSlash(relative) != "internal/appserver/launcher_linux.go" {
+				t.Fatalf("production file %s contains runtime token %q", path, forbidden)
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	launcher, err := os.ReadFile(filepath.Join(root, "internal", "appserver", "launcher_linux.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(launcher)
+	for _, required := range []string{
+		`"/usr/bin/env"`, `"-i"`, "systemd-run", "DynamicUser=yes", "ProtectSystem=strict",
+		"PrivateDevices=true", "CapabilityBoundingSet=", `"app-server", "--listen", "stdio://"`,
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("isolated launcher is missing %q", required)
+		}
 	}
 }

@@ -31,9 +31,15 @@ if grep -Eqi 'GRANT[[:space:]]+(INSERT|UPDATE|DELETE|TRUNCATE|ALL)[^;]*ky_agent_
   fail "writer received a business table write grant"
 fi
 
-if grep -R -n -E 'os/exec|exec\.Command|codex app-server|CODEX_HOME' \
-  "$SERVICE_DIR" --include='*.go' --exclude='*_test.go'; then
-  fail "P1 production service contains a process/runtime path"
+if find "$SERVICE_DIR" -type f -name '*.go' ! -name '*_test.go' \
+  ! -path '*/internal/appserver/launcher_linux.go' -print0 \
+  | xargs -0 grep -n -E 'os/exec|exec\.Command|codex --remote|--listen[[:space:]]+(ws|unix)|CODEX_HOME='; then
+  fail "runtime spawning escaped the isolated App Server launcher"
+fi
+grep -q 'DynamicUser=yes' "$SERVICE_DIR/internal/appserver/launcher_linux.go" || fail "DynamicUser runtime missing"
+grep -q '"app-server", "--listen", "stdio://"' "$SERVICE_DIR/internal/appserver/launcher_linux.go" || fail "stdio App Server command missing"
+if grep -q 'internal/appserver\|internal/credentialfs' "$SERVICE_DIR/internal/server/server.go"; then
+  fail "P1 deployed server must not wire the P2A runtime before cutover"
 fi
 if grep -R -n -E 'INSERT[[:space:]]+INTO|UPDATE[[:space:]]+ky_|DELETE[[:space:]]+FROM|TRUNCATE[[:space:]]+' \
   "$SERVICE_DIR/internal/store" --include='*.go' --exclude='*_test.go'; then

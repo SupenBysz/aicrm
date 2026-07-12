@@ -2,7 +2,10 @@ module github.com/Kysion/KyaiCRM/services/ky-agent-executor-service
 
 go 1.25.0
 
-require github.com/jackc/pgx/v5 v5.7.2
+require (
+	github.com/jackc/pgx/v5 v5.7.2
+	golang.org/x/sys v0.44.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
