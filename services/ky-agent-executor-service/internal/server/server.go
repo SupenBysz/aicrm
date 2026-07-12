@@ -25,17 +25,41 @@ import (
 )
 
 type Server struct {
-	cfg                   config.Config
-	reader                store.Reader
-	control               controlStore
-	authorizer            accessclient.Authorizer
-	authRuntime           authorizationRuntime
-	taskRuntime           taskRuntime
-	confirmationRuntime   operationConfirmationRuntime
-	handoffRuntime        desktopHandoffRuntime
-	revocationRuntime     credentialRevocationRuntime
-	activationRuntime     desktopActivationRuntime
-	desktopCommandRuntime desktopAuthorizationCommandRuntime
+	cfg                       config.Config
+	reader                    store.Reader
+	control                   controlStore
+	authorizer                accessclient.Authorizer
+	authRuntime               authorizationRuntime
+	taskRuntime               taskRuntime
+	confirmationRuntime       operationConfirmationRuntime
+	handoffRuntime            desktopHandoffRuntime
+	revocationRuntime         credentialRevocationRuntime
+	activationRuntime         desktopActivationRuntime
+	desktopCommandRuntime     desktopAuthorizationCommandRuntime
+	trustedTokenClock         trustedTokenDatabaseClock
+	trustedTokenKeyRing       *trustedtoken.PublicKeyRingProjection
+	trustedTokenSigningWindow *trustedtoken.KeyWindow
+}
+
+type trustedTokenDatabaseClock interface {
+	TrustedTokenDatabaseNow(context.Context) (time.Time, error)
+}
+
+var _ trustedTokenDatabaseClock = (*store.ControlStore)(nil)
+
+func validateTrustedTokenSigningWindow(
+	ctx context.Context,
+	clock trustedTokenDatabaseClock,
+	window trustedtoken.KeyWindow,
+) error {
+	if clock == nil {
+		return errors.New("trusted-token database clock is unavailable")
+	}
+	databaseNow, err := clock.TrustedTokenDatabaseNow(ctx)
+	if err != nil || !window.AllowsIssuedAt(databaseNow) {
+		return errors.New("trusted-token active signing window is unavailable")
+	}
+	return nil
 }
 
 type authorizationRuntime interface {
@@ -113,18 +137,34 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.authorizer = authorizer
-		keyMaterial, err := s.cfg.TrustedTokenKeyMaterial()
+		trustMaterial, err := s.cfg.TrustedTokenTrustMaterial()
 		if err != nil {
 			return err
 		}
-		signer, err := trustedtoken.NewSigner(keyMaterial.KeyID, keyMaterial.PrivateKey)
+		signer, err := trustedtoken.NewWindowedSigner(
+			trustMaterial.Active.KeyID,
+			trustMaterial.Active.PrivateKey,
+			trustMaterial.SigningWindow,
+		)
 		if err != nil {
 			return err
 		}
-		confirmationManager, err := operationconfirmation.New(
+		clock, ok := any(opened).(trustedTokenDatabaseClock)
+		if !ok {
+			return errors.New("trusted-token database clock is unavailable")
+		}
+		if err := validateTrustedTokenSigningWindow(ctx, clock, trustMaterial.SigningWindow); err != nil {
+			return err
+		}
+		s.trustedTokenClock = clock
+		publicKeyRing := trustMaterial.PublicProjection
+		s.trustedTokenKeyRing = &publicKeyRing
+		signingWindow := trustMaterial.SigningWindow
+		s.trustedTokenSigningWindow = &signingWindow
+		confirmationManager, err := operationconfirmation.NewWithKeyRing(
 			opened,
 			signer,
-			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			trustMaterial.VerificationKeys,
 			[]byte(s.cfg.ConfirmationChallengeSecret),
 			[]byte(s.cfg.TrustedTokenNonceSecret),
 		)
@@ -132,41 +172,41 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.confirmationRuntime = confirmationManager
-		handoffManager, err := desktophandoff.New(
+		handoffManager, err := desktophandoff.NewWithKeyRing(
 			opened,
 			signer,
-			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			trustMaterial.VerificationKeys,
 			[]byte(s.cfg.TrustedTokenNonceSecret),
 		)
 		if err != nil {
 			return err
 		}
 		s.handoffRuntime = handoffManager
-		activationManager, err := desktopactivation.New(
+		activationManager, err := desktopactivation.NewWithKeyRing(
 			opened,
 			signer,
-			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			trustMaterial.VerificationKeys,
 			[]byte(s.cfg.TrustedTokenNonceSecret),
 		)
 		if err != nil {
 			return err
 		}
 		s.activationRuntime = activationManager
-		desktopCommandManager, err := desktopcommand.New(
+		desktopCommandManager, err := desktopcommand.NewWithKeyRing(
 			opened,
 			signer,
-			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			trustMaterial.VerificationKeys,
 			[]byte(s.cfg.TrustedTokenNonceSecret),
 		)
 		if err != nil {
 			return err
 		}
 		s.desktopCommandRuntime = desktopCommandManager
-		revocationManager, err := credentialrevocation.New(
+		revocationManager, err := credentialrevocation.NewWithKeyRing(
 			opened,
 			confirmationManager,
 			signer,
-			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			trustMaterial.VerificationKeys,
 			[]byte(s.cfg.TrustedTokenNonceSecret),
 		)
 		if err != nil {
@@ -325,6 +365,8 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
+	mux.HandleFunc("GET /api/v1/public/ai-executor-trusted-token-keyring", s.getPublicTrustedTokenKeyRing)
+	mux.HandleFunc("/api/v1/public/ai-executor-trusted-token-keyring", s.getPublicTrustedTokenKeyRing)
 
 	// P1 safe shadow-read projections.
 	mux.HandleFunc("GET /internal/v1/shadow/executors/{executorId}", s.internal(s.getExecutorShadow))
@@ -477,7 +519,14 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	databaseReady := s.reader != nil && s.reader.Ping(r.Context()) == nil
 	internalTokenConfigured := s.cfg.InternalToken != ""
+	trustedTokenSigningReady := false
+	if s.trustedTokenClock != nil && s.trustedTokenSigningWindow != nil {
+		trustedTokenSigningReady = validateTrustedTokenSigningWindow(
+			r.Context(), s.trustedTokenClock, *s.trustedTokenSigningWindow,
+		) == nil
+	}
 	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil &&
+		trustedTokenSigningReady && s.trustedTokenKeyRing != nil &&
 		operationConfirmationRuntimeReady(s.confirmationRuntime) &&
 		s.handoffRuntime != nil &&
 		s.activationRuntime != nil &&

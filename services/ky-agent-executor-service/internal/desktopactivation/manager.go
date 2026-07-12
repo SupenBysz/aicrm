@@ -6,7 +6,6 @@ package desktopactivation
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -35,11 +34,11 @@ type Store interface {
 }
 
 type Manager struct {
-	store            Store
-	signer           *trustedtoken.Signer
-	verificationKeys trustedtoken.KeySet
-	nonceSecret      []byte
-	random           io.Reader
+	store       Store
+	signer      *trustedtoken.Signer
+	verifier    *trustedtoken.Verifier
+	nonceSecret []byte
+	random      io.Reader
 }
 
 func New(
@@ -48,21 +47,37 @@ func New(
 	verificationKeys trustedtoken.KeySet,
 	nonceSecret []byte,
 ) (*Manager, error) {
-	if activationStore == nil || signer == nil || signer.KeyID() == "" || len(nonceSecret) < 32 {
+	verifier, err := trustedtoken.NewLegacyVerifier(verificationKeys)
+	if err != nil {
 		return nil, ErrInvalidConfiguration
 	}
-	if publicKey, ok := verificationKeys[signer.KeyID()]; !ok || len(publicKey) != ed25519.PublicKeySize {
+	return newManager(activationStore, signer, verifier, nonceSecret)
+}
+
+func NewWithKeyRing(
+	activationStore Store,
+	signer *trustedtoken.Signer,
+	verificationKeys trustedtoken.VerificationKeyRing,
+	nonceSecret []byte,
+) (*Manager, error) {
+	verifier, err := trustedtoken.NewKeyRingVerifier(verificationKeys)
+	if err != nil {
 		return nil, ErrInvalidConfiguration
 	}
-	keys := make(trustedtoken.KeySet, len(verificationKeys))
-	for keyID, publicKey := range verificationKeys {
-		if keyID == "" || len(publicKey) != ed25519.PublicKeySize {
-			return nil, ErrInvalidConfiguration
-		}
-		keys[keyID] = append(ed25519.PublicKey(nil), publicKey...)
+	return newManager(activationStore, signer, verifier, nonceSecret)
+}
+
+func newManager(
+	activationStore Store,
+	signer *trustedtoken.Signer,
+	verifier *trustedtoken.Verifier,
+	nonceSecret []byte,
+) (*Manager, error) {
+	if activationStore == nil || signer == nil || !verifier.MatchesSigner(signer) || len(nonceSecret) < 32 {
+		return nil, ErrInvalidConfiguration
 	}
 	return &Manager{
-		store: activationStore, signer: signer, verificationKeys: keys,
+		store: activationStore, signer: signer, verifier: verifier,
 		nonceSecret: append([]byte(nil), nonceSecret...), random: rand.Reader,
 	}, nil
 }
@@ -260,7 +275,7 @@ func (m *Manager) Acknowledge(ctx context.Context, input AcknowledgeInput) (Ackn
 
 func (m *Manager) verifyClaimToken(token string) store.DesktopClaimTokenVerifier {
 	return func(databaseNow time.Time) (store.VerifiedDesktopClaimToken, error) {
-		claims, err := trustedtoken.Verify(token, m.verificationKeys, databaseNow,
+		claims, err := m.verifier.Verify(token, databaseNow,
 			trustedtoken.AudienceClaim, trustedtoken.PurposeAuthorizationClaim)
 		if err != nil {
 			return store.VerifiedDesktopClaimToken{}, err
@@ -280,7 +295,7 @@ func (m *Manager) verifyClaimToken(token string) store.DesktopClaimTokenVerifier
 
 func (m *Manager) verifyActivationToken(token string) store.DesktopActivationTokenVerifier {
 	return func(databaseNow time.Time) (store.VerifiedDesktopActivationToken, error) {
-		claims, err := trustedtoken.Verify(token, m.verificationKeys, databaseNow,
+		claims, err := m.verifier.Verify(token, databaseNow,
 			trustedtoken.AudienceActivation, trustedtoken.PurposeCredentialActivation)
 		if err != nil {
 			return store.VerifiedDesktopActivationToken{}, err

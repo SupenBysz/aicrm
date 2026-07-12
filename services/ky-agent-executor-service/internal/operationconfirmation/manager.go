@@ -4,7 +4,6 @@ package operationconfirmation
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -48,7 +47,7 @@ func (m *Manager) ResolveOperationConfirmationAction(
 type Manager struct {
 	store            Store
 	signer           *trustedtoken.Signer
-	verificationKeys trustedtoken.KeySet
+	verifier         *trustedtoken.Verifier
 	challengeSecret  []byte
 	tokenNonceSecret []byte
 	random           io.Reader
@@ -61,22 +60,40 @@ func New(
 	challengeSecret []byte,
 	tokenNonceSecret []byte,
 ) (*Manager, error) {
-	if control == nil || signer == nil || signer.KeyID() == "" || len(challengeSecret) < 32 ||
+	verifier, err := trustedtoken.NewLegacyVerifier(verificationKeys)
+	if err != nil {
+		return nil, ErrInvalidConfiguration
+	}
+	return newManager(control, signer, verifier, challengeSecret, tokenNonceSecret)
+}
+
+func NewWithKeyRing(
+	control Store,
+	signer *trustedtoken.Signer,
+	verificationKeys trustedtoken.VerificationKeyRing,
+	challengeSecret []byte,
+	tokenNonceSecret []byte,
+) (*Manager, error) {
+	verifier, err := trustedtoken.NewKeyRingVerifier(verificationKeys)
+	if err != nil {
+		return nil, ErrInvalidConfiguration
+	}
+	return newManager(control, signer, verifier, challengeSecret, tokenNonceSecret)
+}
+
+func newManager(
+	control Store,
+	signer *trustedtoken.Signer,
+	verifier *trustedtoken.Verifier,
+	challengeSecret []byte,
+	tokenNonceSecret []byte,
+) (*Manager, error) {
+	if control == nil || signer == nil || !verifier.MatchesSigner(signer) || len(challengeSecret) < 32 ||
 		len(tokenNonceSecret) < 32 || hmac.Equal(challengeSecret, tokenNonceSecret) {
 		return nil, ErrInvalidConfiguration
 	}
-	if publicKey, ok := verificationKeys[signer.KeyID()]; !ok || len(publicKey) != ed25519.PublicKeySize {
-		return nil, ErrInvalidConfiguration
-	}
-	keys := make(trustedtoken.KeySet, len(verificationKeys))
-	for keyID, publicKey := range verificationKeys {
-		if len(publicKey) != ed25519.PublicKeySize {
-			return nil, ErrInvalidConfiguration
-		}
-		keys[keyID] = append(ed25519.PublicKey(nil), publicKey...)
-	}
 	return &Manager{
-		store: control, signer: signer, verificationKeys: keys,
+		store: control, signer: signer, verifier: verifier,
 		challengeSecret:  append([]byte(nil), challengeSecret...),
 		tokenNonceSecret: append([]byte(nil), tokenNonceSecret...), random: rand.Reader,
 	}, nil
@@ -195,8 +212,8 @@ func (m *Manager) Consume(
 		return store.OperationConfirmationProjection{}, ErrInvalidInput
 	}
 	return m.store.ConsumeOperationConfirmation(ctx, func(databaseNow time.Time) (store.ConsumeOperationConfirmationInput, error) {
-		claims, err := trustedtoken.Verify(
-			input.ConfirmationToken, m.verificationKeys, databaseNow,
+		claims, err := m.verifier.Verify(
+			input.ConfirmationToken, databaseNow,
 			trustedtoken.AudienceConfirmation, purpose,
 		)
 		if err != nil {

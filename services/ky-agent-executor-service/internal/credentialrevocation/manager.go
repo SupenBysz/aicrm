@@ -6,7 +6,6 @@ package credentialrevocation
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -40,12 +39,12 @@ type ConfirmationConsumer interface {
 }
 
 type Manager struct {
-	store            Store
-	confirmations    ConfirmationConsumer
-	signer           *trustedtoken.Signer
-	verificationKeys trustedtoken.KeySet
-	nonceSecret      []byte
-	random           io.Reader
+	store         Store
+	confirmations ConfirmationConsumer
+	signer        *trustedtoken.Signer
+	verifier      *trustedtoken.Verifier
+	nonceSecret   []byte
+	random        io.Reader
 }
 
 func New(
@@ -55,22 +54,40 @@ func New(
 	verificationKeys trustedtoken.KeySet,
 	nonceSecret []byte,
 ) (*Manager, error) {
-	if control == nil || confirmations == nil || signer == nil || signer.KeyID() == "" || len(nonceSecret) < 32 {
+	verifier, err := trustedtoken.NewLegacyVerifier(verificationKeys)
+	if err != nil {
 		return nil, ErrInvalidConfiguration
 	}
-	if publicKey, ok := verificationKeys[signer.KeyID()]; !ok || len(publicKey) != ed25519.PublicKeySize {
+	return newManager(control, confirmations, signer, verifier, nonceSecret)
+}
+
+func NewWithKeyRing(
+	control Store,
+	confirmations ConfirmationConsumer,
+	signer *trustedtoken.Signer,
+	verificationKeys trustedtoken.VerificationKeyRing,
+	nonceSecret []byte,
+) (*Manager, error) {
+	verifier, err := trustedtoken.NewKeyRingVerifier(verificationKeys)
+	if err != nil {
 		return nil, ErrInvalidConfiguration
 	}
-	keys := make(trustedtoken.KeySet, len(verificationKeys))
-	for keyID, publicKey := range verificationKeys {
-		if keyID == "" || len(publicKey) != ed25519.PublicKeySize {
-			return nil, ErrInvalidConfiguration
-		}
-		keys[keyID] = append(ed25519.PublicKey(nil), publicKey...)
+	return newManager(control, confirmations, signer, verifier, nonceSecret)
+}
+
+func newManager(
+	control Store,
+	confirmations ConfirmationConsumer,
+	signer *trustedtoken.Signer,
+	verifier *trustedtoken.Verifier,
+	nonceSecret []byte,
+) (*Manager, error) {
+	if control == nil || confirmations == nil || signer == nil || !verifier.MatchesSigner(signer) || len(nonceSecret) < 32 {
+		return nil, ErrInvalidConfiguration
 	}
 	return &Manager{
 		store: control, confirmations: confirmations, signer: signer,
-		verificationKeys: keys, nonceSecret: append([]byte(nil), nonceSecret...), random: rand.Reader,
+		verifier: verifier, nonceSecret: append([]byte(nil), nonceSecret...), random: rand.Reader,
 	}, nil
 }
 
@@ -218,8 +235,8 @@ func (m *Manager) issueLogoutTicket(
 
 func (m *Manager) verifyLogoutTicket(token string) store.CredentialLogoutTicketVerifier {
 	return func(databaseNow time.Time) (store.VerifiedCredentialLogoutTicket, error) {
-		claims, err := trustedtoken.Verify(
-			token, m.verificationKeys, databaseNow,
+		claims, err := m.verifier.Verify(
+			token, databaseNow,
 			trustedtoken.AudienceCommand, trustedtoken.PurposeCredentialLogout,
 		)
 		if err != nil {

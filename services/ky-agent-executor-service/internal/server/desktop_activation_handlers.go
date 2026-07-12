@@ -13,7 +13,6 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktopactivation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/deviceauth"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
-	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/trustedtoken"
 )
 
 const (
@@ -440,7 +439,7 @@ func (s *Server) writeDesktopActivationError(w http.ResponseWriter, r *http.Requ
 		writeError(w, r, http.StatusConflict, "desktop_proof_conflict", "Desktop authorization proof conflicts with current state")
 	case errors.Is(err, store.ErrDesktopActivationConflict), errors.Is(err, store.ErrConflict):
 		writeError(w, r, http.StatusConflict, "desktop_activation_conflict", "Desktop credential activation conflicts with current state")
-	case errors.Is(err, trustedtoken.ErrExpired), errors.Is(err, trustedtoken.ErrUnknownKey),
+	case isTrustedTokenGone(err),
 		errors.Is(err, store.ErrDesktopHandoffExpired),
 		errors.Is(err, desktopactivation.ErrTokenKeyUnavailable), errors.Is(err, desktopactivation.ErrTokenReconstruction),
 		errors.Is(err, store.ErrDesktopActivationTokenReconstruction):

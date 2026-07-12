@@ -47,7 +47,6 @@ func (stub activationStoreStub) RenewDesktopCredentialActivationLease(
 func TestManagerBindsAndDeterministicallyReconstructsActivationToken(t *testing.T) {
 	issuedAt := time.Date(2026, time.July, 13, 6, 7, 8, 0, time.UTC)
 	signer, publicKey := activationTestSigner(t, 19, "activation-key-1")
-	keys := trustedtoken.KeySet{"activation-key-1": publicKey}
 	secret := bytes.Repeat([]byte{0x5a}, 32)
 	deviceID := string(bytes.Repeat([]byte{'a'}, 64))
 	bindingDigest := string(bytes.Repeat([]byte{'b'}, 64))
@@ -137,7 +136,16 @@ func TestManagerBindsAndDeterministicallyReconstructsActivationToken(t *testing.
 		}, nil
 	}
 
-	manager, err := New(stub, signer, keys, secret)
+	window, err := trustedtoken.NewKeyWindow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationKey, err := trustedtoken.NewVerificationKey(publicKey, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationKeys := trustedtoken.VerificationKeyRing{"activation-key-1": verificationKey}
+	manager, err := NewWithKeyRing(stub, signer, verificationKeys, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +158,7 @@ func TestManagerBindsAndDeterministicallyReconstructsActivationToken(t *testing.
 	if err != nil || proof.Activation == nil || proof.Activation.ActivationToken != activationToken {
 		t.Fatalf("proof=%#v err=%v", proof, err)
 	}
-	claims, err := trustedtoken.Verify(activationToken, keys, issuedAt.Add(2*time.Minute),
+	claims, err := trustedtoken.VerifyWithKeyRing(activationToken, verificationKeys, issuedAt.Add(2*time.Minute),
 		trustedtoken.AudienceActivation, trustedtoken.PurposeCredentialActivation)
 	if err != nil || claims.ActivationID != proof.Activation.ActivationID ||
 		claims.BindingDigest != bindingDigest {

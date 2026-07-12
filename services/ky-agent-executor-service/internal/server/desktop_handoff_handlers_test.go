@@ -18,6 +18,7 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktophandoff"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/deviceauth"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/trustedtoken"
 )
 
 type fakeDesktopHandoffRuntime struct {
@@ -59,6 +60,7 @@ func desktopHandoffHandlerServer(
 		InternalToken: "desktop-handoff-internal", AuthTokenSecret: deviceTestAuthSecret,
 		DeviceChallengeSecret: deviceTestChallengeSecret,
 	}, &fakeReader{}, control, authorizer)
+	installTrustedTokenTestReadiness(server)
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = runtime
 	return server
@@ -251,6 +253,8 @@ func TestClaimDesktopHandoffMapsExpiredAndReplayErrors(t *testing.T) {
 		text string
 	}{
 		{"expired", store.ErrDesktopHandoffExpired, http.StatusGone, "desktop_handoff_gone"},
+		{"key window", trustedtoken.ErrKeyWindowMismatch, http.StatusGone, "desktop_handoff_gone"},
+		{"key retired", trustedtoken.ErrKeyRetired, http.StatusGone, "desktop_handoff_gone"},
 		{"replayed", store.ErrDeviceProofReplayed, http.StatusConflict, deviceauth.DeviceProofReplayedCode},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {

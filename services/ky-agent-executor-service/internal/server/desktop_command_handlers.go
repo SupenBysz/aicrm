@@ -229,7 +229,7 @@ func (s *Server) writeDesktopAuthorizationCommandError(
 	case errors.Is(err, store.ErrAuthorizationTerminal):
 		writeError(w, r, http.StatusConflict, "authorization_session_terminal", "authorization session is terminal")
 	case errors.Is(err, desktopcommand.ErrTokenKeyUnavailable), errors.Is(err, desktopcommand.ErrTokenReconstruction),
-		acknowledgement && (errors.Is(err, trustedtoken.ErrExpired) || errors.Is(err, trustedtoken.ErrUnknownKey)):
+		acknowledgement && isTrustedTokenGone(err):
 		writeError(w, r, http.StatusGone, "desktop_command_gone", "Desktop command is no longer available")
 	case errors.Is(err, store.ErrDesktopAuthorizationCommandTicketMismatch),
 		errors.Is(err, store.ErrDeviceInactive), errors.Is(err, store.ErrDeviceKeyGenerationMismatch),

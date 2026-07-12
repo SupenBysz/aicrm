@@ -5,7 +5,6 @@ package desktophandoff
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -33,11 +32,11 @@ type Store interface {
 }
 
 type Manager struct {
-	store            Store
-	signer           *trustedtoken.Signer
-	verificationKeys trustedtoken.KeySet
-	nonceSecret      []byte
-	random           io.Reader
+	store       Store
+	signer      *trustedtoken.Signer
+	verifier    *trustedtoken.Verifier
+	nonceSecret []byte
+	random      io.Reader
 }
 
 func New(
@@ -46,21 +45,37 @@ func New(
 	verificationKeys trustedtoken.KeySet,
 	nonceSecret []byte,
 ) (*Manager, error) {
-	if handoffStore == nil || signer == nil || signer.KeyID() == "" || len(nonceSecret) < 32 {
+	verifier, err := trustedtoken.NewLegacyVerifier(verificationKeys)
+	if err != nil {
 		return nil, ErrInvalidConfiguration
 	}
-	if publicKey, ok := verificationKeys[signer.KeyID()]; !ok || len(publicKey) != ed25519.PublicKeySize {
+	return newManager(handoffStore, signer, verifier, nonceSecret)
+}
+
+func NewWithKeyRing(
+	handoffStore Store,
+	signer *trustedtoken.Signer,
+	verificationKeys trustedtoken.VerificationKeyRing,
+	nonceSecret []byte,
+) (*Manager, error) {
+	verifier, err := trustedtoken.NewKeyRingVerifier(verificationKeys)
+	if err != nil {
 		return nil, ErrInvalidConfiguration
 	}
-	keys := make(trustedtoken.KeySet, len(verificationKeys))
-	for keyID, publicKey := range verificationKeys {
-		if keyID == "" || len(publicKey) != ed25519.PublicKeySize {
-			return nil, ErrInvalidConfiguration
-		}
-		keys[keyID] = append(ed25519.PublicKey(nil), publicKey...)
+	return newManager(handoffStore, signer, verifier, nonceSecret)
+}
+
+func newManager(
+	handoffStore Store,
+	signer *trustedtoken.Signer,
+	verifier *trustedtoken.Verifier,
+	nonceSecret []byte,
+) (*Manager, error) {
+	if handoffStore == nil || signer == nil || !verifier.MatchesSigner(signer) || len(nonceSecret) < 32 {
+		return nil, ErrInvalidConfiguration
 	}
 	return &Manager{
-		store: handoffStore, signer: signer, verificationKeys: keys,
+		store: handoffStore, signer: signer, verifier: verifier,
 		nonceSecret: append([]byte(nil), nonceSecret...), random: rand.Reader,
 	}, nil
 }
@@ -146,8 +161,8 @@ func (m *Manager) Claim(ctx context.Context, input ClaimInput) (ClaimResult, err
 
 func (m *Manager) verifyHandoffTicket(token string) store.DesktopHandoffTicketVerifier {
 	return func(databaseNow time.Time) (store.VerifiedDesktopHandoffTicket, error) {
-		claims, err := trustedtoken.Verify(
-			token, m.verificationKeys, databaseNow,
+		claims, err := m.verifier.Verify(
+			token, databaseNow,
 			trustedtoken.AudienceDesktop, trustedtoken.PurposeAuthorizationHandoff,
 		)
 		if err != nil {

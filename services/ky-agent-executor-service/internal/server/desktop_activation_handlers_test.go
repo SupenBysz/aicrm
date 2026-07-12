@@ -71,6 +71,7 @@ func desktopActivationHandlerServer(
 		InternalToken: "desktop-activation-internal", AuthTokenSecret: deviceTestAuthSecret,
 		DeviceChallengeSecret: deviceTestChallengeSecret,
 	}, &fakeReader{}, control, &fakeAuthorizer{})
+	installTrustedTokenTestReadiness(server)
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
@@ -315,6 +316,8 @@ func TestDesktopActivationLeaseRenewalMapsFenceAndExpiredToken(t *testing.T) {
 	}{
 		{"fenced", store.ErrExecutorFenced, http.StatusConflict, "executor_fenced"},
 		{"expired", trustedtoken.ErrExpired, http.StatusGone, "desktop_authorization_gone"},
+		{"key window", trustedtoken.ErrKeyWindowMismatch, http.StatusGone, "desktop_authorization_gone"},
+		{"key retired", trustedtoken.ErrKeyRetired, http.StatusGone, "desktop_authorization_gone"},
 	}
 	for index, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -502,6 +505,8 @@ func TestDesktopActivationErrorMappingDistinguishesReplayFenceAndRotation(t *tes
 		{"cross session hidden", store.ErrNotFound, http.StatusForbidden, "authorization_proof_invalid"},
 		{"rotation", trustedtoken.ErrUnknownKey, http.StatusGone, "desktop_authorization_gone"},
 		{"expired", trustedtoken.ErrExpired, http.StatusGone, "desktop_authorization_gone"},
+		{"key window", trustedtoken.ErrKeyWindowMismatch, http.StatusGone, "desktop_authorization_gone"},
+		{"key retired", trustedtoken.ErrKeyRetired, http.StatusGone, "desktop_authorization_gone"},
 	}
 	for index, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {

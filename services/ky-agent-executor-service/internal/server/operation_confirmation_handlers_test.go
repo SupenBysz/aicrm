@@ -125,6 +125,7 @@ func operationConfirmationHandlerServer(
 		HTTPAddr: "127.0.0.1:18087", WriteEnabled: true,
 		InternalToken: "operation-confirmation-internal", AuthTokenSecret: operationConfirmationTestAuthSecret,
 	}, &fakeReader{}, &fakeControl{}, authorizer)
+	installTrustedTokenTestReadiness(server)
 	server.confirmationRuntime = runtime
 	return server
 }
@@ -415,6 +416,7 @@ func TestReadyzIncludesOperationConfirmationManagerReadiness(t *testing.T) {
 	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
 	server.activationRuntime = &fakeDesktopActivationRuntime{}
 	server.desktopCommandRuntime = &fakeDesktopAuthorizationCommandRuntime{}
+	installTrustedTokenTestReadiness(server)
 	for _, testCase := range []struct {
 		name       string
 		runtime    operationConfirmationRuntime

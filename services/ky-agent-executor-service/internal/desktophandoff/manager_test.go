@@ -38,7 +38,6 @@ func (stub managerStoreStub) ClaimDesktopHandoff(
 func TestManagerIssuesDeterministicTargetBoundTokens(t *testing.T) {
 	issuedAt := time.Date(2026, time.July, 13, 1, 2, 3, 0, time.UTC)
 	signer, publicKey := managerSigner(t, 11, "desktop-key-1")
-	keys := trustedtoken.KeySet{"desktop-key-1": publicKey}
 	secret := bytes.Repeat([]byte{0x4a}, 32)
 
 	var ticket string
@@ -99,7 +98,16 @@ func TestManagerIssuesDeterministicTargetBoundTokens(t *testing.T) {
 		return store.ClaimDesktopHandoffResult{Handoff: item, ClaimToken: first.Token, SessionRevision: 4}, nil
 	}
 
-	manager, err := New(stub, signer, keys, secret)
+	window, err := trustedtoken.NewKeyWindow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationKey, err := trustedtoken.NewVerificationKey(publicKey, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationKeys := trustedtoken.VerificationKeyRing{"desktop-key-1": verificationKey}
+	manager, err := NewWithKeyRing(stub, signer, verificationKeys, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +124,7 @@ func TestManagerIssuesDeterministicTargetBoundTokens(t *testing.T) {
 	if created.HandoffTicket != ticket || created.HandoffID == "" || created.Nonce == "" || !created.Created {
 		t.Fatalf("unexpected create result: %#v", created)
 	}
-	ticketClaims, err := trustedtoken.Verify(ticket, keys, issuedAt.Add(time.Second),
+	ticketClaims, err := trustedtoken.VerifyWithKeyRing(ticket, verificationKeys, issuedAt.Add(time.Second),
 		trustedtoken.AudienceDesktop, trustedtoken.PurposeAuthorizationHandoff)
 	if err != nil || ticketClaims.HandoffID != created.HandoffID || ticketClaims.ExpectedSessionRevision == nil ||
 		*ticketClaims.ExpectedSessionRevision != 3 {
@@ -130,7 +138,7 @@ func TestManagerIssuesDeterministicTargetBoundTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimClaims, err := trustedtoken.Verify(claimed.ClaimToken, keys, issuedAt.Add(61*time.Second),
+	claimClaims, err := trustedtoken.VerifyWithKeyRing(claimed.ClaimToken, verificationKeys, issuedAt.Add(61*time.Second),
 		trustedtoken.AudienceClaim, trustedtoken.PurposeAuthorizationClaim)
 	if err != nil || claimClaims.HandoffID != created.HandoffID || claimClaims.ExpectedSessionRevision == nil ||
 		*claimClaims.ExpectedSessionRevision != 4 || claimed.ExecutorID != "executor_desktop_1" ||

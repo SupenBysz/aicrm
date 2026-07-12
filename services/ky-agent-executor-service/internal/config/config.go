@@ -34,6 +34,7 @@ type Config struct {
 	TrustedTokenNonceSecret     string
 	TrustedTokenKeyID           string
 	TrustedTokenPrivateKey      string
+	TrustedTokenKeyringFile     string
 	MembershipURL               string
 	WriteEnabled                bool
 	CredentialRoot              string
@@ -97,6 +98,7 @@ func Load() Config {
 		TrustedTokenNonceSecret:     strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET")),
 		TrustedTokenKeyID:           strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID")),
 		TrustedTokenPrivateKey:      strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY")),
+		TrustedTokenKeyringFile:     strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEYRING_FILE")),
 		MembershipURL:               membershipURL,
 		WriteEnabled:                strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
 		CredentialRoot:              credentialRoot,
@@ -139,6 +141,7 @@ func (c Config) validateControlPlane() error {
 		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET":    c.TrustedTokenNonceSecret,
 		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID":          c.TrustedTokenKeyID,
 		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY":     c.TrustedTokenPrivateKey,
+		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEYRING_FILE":    c.TrustedTokenKeyringFile,
 		"KY_MEMBERSHIP_SERVICE_URL":                       c.MembershipURL,
 		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":               c.CredentialRoot,
 		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":             c.OwnerInstanceID,
@@ -162,10 +165,11 @@ func (c Config) validateControlPlane() error {
 	if len(c.TrustedTokenNonceSecret) < 32 {
 		return errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET must be at least 32 bytes")
 	}
-	keyMaterial, err := c.TrustedTokenKeyMaterial()
+	trustMaterial, err := c.TrustedTokenTrustMaterial()
 	if err != nil {
 		return err
 	}
+	keyMaterial := trustMaterial.Active
 	for _, secret := range []string{c.AuthTokenSecret, c.InternalToken, c.DeviceChallengeSecret} {
 		if c.ConfirmationChallengeSecret == secret {
 			return errors.New("KY_AGENT_EXECUTOR_CONFIRMATION_CHALLENGE_SECRET must be independent")

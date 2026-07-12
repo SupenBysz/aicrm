@@ -40,15 +40,17 @@ const (
 )
 
 var (
-	ErrInvalidKey       = errors.New("invalid trusted token key")
-	ErrInvalidClaims    = errors.New("invalid trusted token claims")
-	ErrMalformed        = errors.New("malformed trusted token")
-	ErrUnknownKey       = errors.New("unknown trusted token key")
-	ErrInvalidSignature = errors.New("invalid trusted token signature")
-	ErrAudienceMismatch = errors.New("trusted token audience mismatch")
-	ErrPurposeMismatch  = errors.New("trusted token purpose mismatch")
-	ErrNotYetValid      = errors.New("trusted token is not yet valid")
-	ErrExpired          = errors.New("trusted token expired")
+	ErrInvalidKey        = errors.New("invalid trusted token key")
+	ErrInvalidClaims     = errors.New("invalid trusted token claims")
+	ErrMalformed         = errors.New("malformed trusted token")
+	ErrUnknownKey        = errors.New("unknown trusted token key")
+	ErrInvalidSignature  = errors.New("invalid trusted token signature")
+	ErrKeyWindowMismatch = errors.New("trusted token key issuance window mismatch")
+	ErrKeyRetired        = errors.New("trusted token verification key retired")
+	ErrAudienceMismatch  = errors.New("trusted token audience mismatch")
+	ErrPurposeMismatch   = errors.New("trusted token purpose mismatch")
+	ErrNotYetValid       = errors.New("trusted token is not yet valid")
+	ErrExpired           = errors.New("trusted token expired")
 )
 
 var (
@@ -99,6 +101,7 @@ type protectedHeader struct {
 type Signer struct {
 	keyID      string
 	privateKey ed25519.PrivateKey
+	window     *KeyWindow
 }
 
 func NewSigner(keyID string, privateKey ed25519.PrivateKey) (*Signer, error) {
@@ -109,6 +112,22 @@ func NewSigner(keyID string, privateKey ed25519.PrivateKey) (*Signer, error) {
 	return &Signer{keyID: keyID, privateKey: copyKey}, nil
 }
 
+// NewWindowedSigner creates a signer that refuses to issue claims outside the
+// configured half-open signing interval. NewSigner remains available for
+// compatibility with callers that have not yet loaded the reviewed keyring.
+func NewWindowedSigner(keyID string, privateKey ed25519.PrivateKey, window KeyWindow) (*Signer, error) {
+	if !window.valid() {
+		return nil, ErrInvalidKey
+	}
+	signer, err := NewSigner(keyID, privateKey)
+	if err != nil {
+		return nil, err
+	}
+	copyWindow := window.clone()
+	signer.window = &copyWindow
+	return signer, nil
+}
+
 // KeyID is safe public metadata used to persist which verification key signed
 // a deterministic ticket. It never exposes private key material.
 func (s *Signer) KeyID() string {
@@ -116,6 +135,16 @@ func (s *Signer) KeyID() string {
 		return ""
 	}
 	return s.keyID
+}
+
+// VerificationKey returns a defensive copy of the public half derived from
+// the configured private key. It is safe metadata used only to prove that a
+// verifier contains the exact active signer.
+func (s *Signer) VerificationKey() ed25519.PublicKey {
+	if s == nil || len(s.privateKey) != ed25519.PrivateKeySize {
+		return nil
+	}
+	return append(ed25519.PublicKey(nil), s.privateKey.Public().(ed25519.PublicKey)...)
 }
 
 // NewClaims creates the immutable time envelope. Callers then fill only the
@@ -142,6 +171,9 @@ func (s *Signer) Issue(claims Claims) (string, error) {
 	if s == nil || len(s.privateKey) != ed25519.PrivateKeySize || validateClaims(claims) != nil {
 		return "", ErrInvalidClaims
 	}
+	if s.window != nil && !s.window.acceptsIssuedAt(claims.IssuedAt) {
+		return "", ErrKeyWindowMismatch
+	}
 	headerBytes, _ := json.Marshal(protectedHeader{Algorithm: "EdDSA", KeyID: s.keyID, Type: "JWT"})
 	payloadBytes, err := json.Marshal(claims)
 	if err != nil {
@@ -159,6 +191,29 @@ type KeySet map[string]ed25519.PublicKey
 // Verify rejects non-canonical JSON/base64 representations, unknown fields,
 // wrong target classes and expired values before returning claims.
 func Verify(token string, keys KeySet, now time.Time, expectedAudience, expectedPurpose string) (Claims, error) {
+	return verify(token, now, expectedAudience, expectedPurpose, func(keyID string) (ed25519.PublicKey, *KeyWindow, bool) {
+		publicKey, exists := keys[keyID]
+		return publicKey, nil, exists
+	})
+}
+
+// VerifyWithKeyRing additionally binds a valid signature to the key's signing
+// interval and retirement deadline. This is the required verification path
+// once the control plane loads a reviewed keyring.
+func VerifyWithKeyRing(token string, keys VerificationKeyRing, now time.Time, expectedAudience, expectedPurpose string) (Claims, error) {
+	return verify(token, now, expectedAudience, expectedPurpose, func(keyID string) (ed25519.PublicKey, *KeyWindow, bool) {
+		key, exists := keys[keyID]
+		if !exists {
+			return nil, nil, false
+		}
+		window := key.window.clone()
+		return key.publicKey, &window, true
+	})
+}
+
+type verificationKeyResolver func(string) (ed25519.PublicKey, *KeyWindow, bool)
+
+func verify(token string, now time.Time, expectedAudience, expectedPurpose string, resolve verificationKeyResolver) (Claims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || len(token) > 16<<10 {
 		return Claims{}, ErrMalformed
@@ -179,7 +234,7 @@ func Verify(token string, keys KeySet, now time.Time, expectedAudience, expected
 	if decodeStrictCanonical(headerBytes, &header) != nil || header.Algorithm != "EdDSA" || header.Type != "JWT" || !keyIDPattern.MatchString(header.KeyID) {
 		return Claims{}, ErrMalformed
 	}
-	publicKey, exists := keys[header.KeyID]
+	publicKey, window, exists := resolve(header.KeyID)
 	if !exists || len(publicKey) != ed25519.PublicKeySize {
 		return Claims{}, ErrUnknownKey
 	}
@@ -197,6 +252,14 @@ func Verify(token string, keys KeySet, now time.Time, expectedAudience, expected
 		return Claims{}, ErrPurposeMismatch
 	}
 	current := now.UTC().Unix()
+	if window != nil {
+		if !window.acceptsIssuedAt(claims.IssuedAt) {
+			return Claims{}, ErrKeyWindowMismatch
+		}
+		if window.retiredAt(current) {
+			return Claims{}, ErrKeyRetired
+		}
+	}
 	if current < claims.IssuedAt {
 		return Claims{}, ErrNotYetValid
 	}

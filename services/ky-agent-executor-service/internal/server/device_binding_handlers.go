@@ -398,7 +398,7 @@ func (s *Server) finishDeviceBindingReplay(
 
 func (s *Server) writeDeviceBindingError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, trustedtoken.ErrExpired), errors.Is(err, store.ErrOperationConfirmationTokenExpired):
+	case isTrustedTokenGone(err), errors.Is(err, store.ErrOperationConfirmationTokenExpired):
 		writeError(w, r, http.StatusGone, "operation_confirmation_gone", "operation confirmation is unavailable")
 	case errors.Is(err, store.ErrDeviceProofReplayed):
 		writeError(w, r, http.StatusConflict, deviceauth.DeviceProofReplayedCode, "device proof was replayed")
@@ -481,10 +481,16 @@ func isTrustedTokenVerificationError(err error) bool {
 		trustedtoken.ErrInvalidKey, trustedtoken.ErrInvalidClaims, trustedtoken.ErrMalformed,
 		trustedtoken.ErrUnknownKey, trustedtoken.ErrInvalidSignature, trustedtoken.ErrAudienceMismatch,
 		trustedtoken.ErrPurposeMismatch, trustedtoken.ErrNotYetValid, trustedtoken.ErrExpired,
+		trustedtoken.ErrKeyWindowMismatch, trustedtoken.ErrKeyRetired,
 	} {
 		if errors.Is(err, candidate) {
 			return true
 		}
 	}
 	return false
+}
+
+func isTrustedTokenGone(err error) bool {
+	return errors.Is(err, trustedtoken.ErrExpired) || errors.Is(err, trustedtoken.ErrUnknownKey) ||
+		errors.Is(err, trustedtoken.ErrKeyWindowMismatch) || errors.Is(err, trustedtoken.ErrKeyRetired)
 }

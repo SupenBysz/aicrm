@@ -15,7 +15,6 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/deviceauth"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/operationconfirmation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
-	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/trustedtoken"
 	"github.com/Kysion/KyaiCRM/shared/auth"
 )
 
@@ -421,9 +420,9 @@ func (s *Server) writeCredentialRevocationError(w http.ResponseWriter, r *http.R
 	case errors.Is(err, store.ErrCredentialRevocationActiveWork):
 		writeError(w, r, http.StatusConflict, "executor_has_active_tasks", "executor has active tasks")
 	case errors.Is(err, credentialrevocation.ErrTokenKeyUnavailable), errors.Is(err, credentialrevocation.ErrTokenReconstruction),
-		acknowledgement && (errors.Is(err, trustedtoken.ErrExpired) || errors.Is(err, trustedtoken.ErrUnknownKey)):
+		acknowledgement && isTrustedTokenGone(err):
 		writeError(w, r, http.StatusGone, "credential_revocation_gone", "credential revocation authorization is no longer available")
-	case !acknowledgement && (errors.Is(err, trustedtoken.ErrExpired) || errors.Is(err, trustedtoken.ErrUnknownKey) ||
+	case !acknowledgement && (isTrustedTokenGone(err) ||
 		errors.Is(err, store.ErrOperationConfirmationTokenExpired)):
 		writeError(w, r, http.StatusGone, "operation_confirmation_gone", "operation confirmation is unavailable")
 	case !acknowledgement && (errors.Is(err, store.ErrOperationConfirmationTokenMismatch) ||

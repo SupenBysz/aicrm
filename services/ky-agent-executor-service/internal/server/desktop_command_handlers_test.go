@@ -86,6 +86,7 @@ func desktopAuthorizationCommandHandlerServer(
 		AuthTokenSecret:       "auth-secret",
 		DeviceChallengeSecret: "desktop-command-independent-device-challenge",
 	}, &fakeReader{}, control, &fakeAuthorizer{})
+	installTrustedTokenTestReadiness(server)
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.activationRuntime = &fakeDesktopActivationRuntime{}
@@ -319,6 +320,8 @@ func TestDesktopAuthorizationCommandACKIsDeviceOnlyAndStrict(t *testing.T) {
 		{store.ErrDeviceProofReplayed, http.StatusConflict, deviceauth.DeviceProofReplayedCode},
 		{trustedtoken.ErrExpired, http.StatusGone, "desktop_command_gone"},
 		{trustedtoken.ErrUnknownKey, http.StatusGone, "desktop_command_gone"},
+		{trustedtoken.ErrKeyWindowMismatch, http.StatusGone, "desktop_command_gone"},
+		{trustedtoken.ErrKeyRetired, http.StatusGone, "desktop_command_gone"},
 		{store.ErrDesktopAuthorizationCommandTicketMismatch, http.StatusForbidden, "authorization_proof_invalid"},
 	} {
 		mappedRuntime := &fakeDesktopAuthorizationCommandRuntime{ackErr: mapping.err}

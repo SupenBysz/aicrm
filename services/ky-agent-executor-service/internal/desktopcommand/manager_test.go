@@ -129,7 +129,21 @@ func TestManagerCreatesTargetBoundDeterministicCancelTicket(t *testing.T) {
 			CommandCreated: true, Transitioned: true,
 		},
 	}
-	manager, publicKey := desktopCommandManager(t, control, 7, "desktop-command-key-1")
+	signer, publicKey := desktopCommandSigner(t, 7, "desktop-command-key-1")
+	window, err := trustedtoken.NewKeyWindow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationKey, err := trustedtoken.NewVerificationKey(publicKey, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWithKeyRing(control, signer, trustedtoken.VerificationKeyRing{
+		"desktop-command-key-1": verificationKey,
+	}, []byte("desktop-command-independent-nonce-secret-0001"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := manager.Cancel(context.Background(), desktopCommandCreateInput())
 	if err != nil {
 		t.Fatal(err)

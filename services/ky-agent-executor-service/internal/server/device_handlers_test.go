@@ -107,6 +107,7 @@ func deviceHandlerServer(control *fakeDeviceControl, authorizer accessclient.Aut
 		InternalToken: "device-handler-internal-token", AuthTokenSecret: deviceTestAuthSecret,
 		DeviceChallengeSecret: deviceTestChallengeSecret,
 	}, &fakeReader{}, control, authorizer)
+	installTrustedTokenTestReadiness(server)
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.revocationRuntime = &fakeCredentialRevocationRuntime{}

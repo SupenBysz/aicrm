@@ -19,6 +19,7 @@ func TestLoadIsFailClosedUnlessWriteModeIsExplicit(t *testing.T) {
 	t.Setenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET", strings.Repeat("n", 32))
 	t.Setenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID", "confirmation_key_1")
 	t.Setenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY", testTrustedTokenPrivateKey())
+	t.Setenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEYRING_FILE", testTrustedTokenKeyringFile(t))
 
 	cfg := Load()
 	if cfg.HTTPAddr != "127.0.0.1:18087" {
@@ -33,7 +34,7 @@ func TestLoadIsFailClosedUnlessWriteModeIsExplicit(t *testing.T) {
 	if cfg.ConfirmationChallengeSecret != strings.Repeat("c", 32) ||
 		cfg.TrustedTokenNonceSecret != strings.Repeat("n", 32) ||
 		cfg.TrustedTokenKeyID != "confirmation_key_1" ||
-		cfg.TrustedTokenPrivateKey != testTrustedTokenPrivateKey() {
+		cfg.TrustedTokenPrivateKey != testTrustedTokenPrivateKey() || cfg.TrustedTokenKeyringFile == "" {
 		t.Fatal("operation confirmation secrets were not loaded")
 	}
 	if os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED") != "true" {
@@ -61,6 +62,7 @@ func TestValidateWriteModeRequiresDedicatedDependencies(t *testing.T) {
 	base.TrustedTokenNonceSecret = strings.Repeat("n", 32)
 	base.TrustedTokenKeyID = "confirmation_key_1"
 	base.TrustedTokenPrivateKey = testTrustedTokenPrivateKey()
+	base.TrustedTokenKeyringFile = testTrustedTokenKeyringFile(t)
 	base.MembershipURL = "http://127.0.0.1:18083"
 	base.CredentialRoot = "/var/lib/aicrm-agent-executors"
 	base.OwnerInstanceID = "instance-1"
@@ -152,8 +154,8 @@ func TestValidateTrustPlaneSecretsArePairwiseIndependent(t *testing.T) {
 		InternalToken: strings.Repeat("i", 32), AuthTokenSecret: strings.Repeat("a", 32),
 		DeviceChallengeSecret: strings.Repeat("d", 32), ConfirmationChallengeSecret: strings.Repeat("c", 32),
 		TrustedTokenNonceSecret: strings.Repeat("n", 32), TrustedTokenKeyID: "confirmation_key_1",
-		TrustedTokenPrivateKey: testTrustedTokenPrivateKey(),
-		MembershipURL:          "http://127.0.0.1:18083", CredentialRoot: "/var/lib/aicrm-agent-executors",
+		TrustedTokenPrivateKey: testTrustedTokenPrivateKey(), TrustedTokenKeyringFile: testTrustedTokenKeyringFile(t),
+		MembershipURL: "http://127.0.0.1:18083", CredentialRoot: "/var/lib/aicrm-agent-executors",
 		OwnerInstanceID: "instance-1", CodexVersion: "0.144.1", RuntimeBindingID: "server_test",
 		RuntimeBrokerSocket: "/run/aicrm-agent-runtime.sock",
 	}

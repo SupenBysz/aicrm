@@ -103,8 +103,16 @@ func TestManagerKeepsChallengeDigestOnlyAndIssuesDeterministicBoundToken(t *test
 	fake := &fakeConfirmationStore{}
 	challengeSecret := bytes.Repeat([]byte{0x42}, 32)
 	nonceSecret := bytes.Repeat([]byte{0x43}, 32)
-	manager, err := New(fake, signer, trustedtoken.KeySet{
-		"confirmation_key_1": privateKey.Public().(ed25519.PublicKey),
+	window, err := trustedtoken.NewKeyWindow(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationKey, err := trustedtoken.NewVerificationKey(privateKey.Public().(ed25519.PublicKey), window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewWithKeyRing(fake, signer, trustedtoken.VerificationKeyRing{
+		"confirmation_key_1": verificationKey,
 	}, challengeSecret, nonceSecret)
 	if err != nil {
 		t.Fatal(err)

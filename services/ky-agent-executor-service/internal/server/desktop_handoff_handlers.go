@@ -12,7 +12,6 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktophandoff"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/deviceauth"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
-	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/trustedtoken"
 )
 
 const desktopHandoffRequestLimit = 24 << 10
@@ -219,8 +218,7 @@ func (s *Server) writeDesktopHandoffError(w http.ResponseWriter, r *http.Request
 		writeError(w, r, http.StatusConflict, deviceauth.DeviceProofReplayedCode, "device proof was replayed")
 	case errors.Is(err, store.ErrRevisionConflict):
 		writeError(w, r, http.StatusConflict, "revision_conflict", "authorization session revision changed")
-	case errors.Is(err, store.ErrDesktopHandoffExpired), errors.Is(err, trustedtoken.ErrExpired),
-		errors.Is(err, trustedtoken.ErrUnknownKey):
+	case errors.Is(err, store.ErrDesktopHandoffExpired), isTrustedTokenGone(err):
 		writeError(w, r, http.StatusGone, "desktop_handoff_gone", "Desktop authorization handoff is no longer available")
 	case errors.Is(err, store.ErrDesktopDeviceOffline):
 		writeError(w, r, http.StatusConflict, "desktop_device_offline", "the bound Desktop device is offline")

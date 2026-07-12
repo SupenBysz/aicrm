@@ -168,6 +168,7 @@ func deviceBindingHandlerServer(
 		HTTPAddr: "127.0.0.1:18087", WriteEnabled: true,
 		InternalToken: "device-binding-internal", AuthTokenSecret: deviceTestAuthSecret,
 	}, &fakeReader{}, control, authorizer)
+	installTrustedTokenTestReadiness(server)
 	server.confirmationRuntime = runtime
 	return server
 }
@@ -454,7 +455,10 @@ func TestDeviceBindingExpiredForceConfirmationFailsClosedWithoutAuditReplay(t *t
 	path := unbindExecutorDevicePath(executorID)
 	body := fmt.Sprintf(`{"deviceId":%q,"expectedRevision":5,"confirmationToken":"expired-confirmation-token","force":true}`,
 		device.deviceID)
-	for _, expiryErr := range []error{trustedtoken.ErrExpired, store.ErrOperationConfirmationTokenExpired} {
+	for _, expiryErr := range []error{
+		trustedtoken.ErrExpired, trustedtoken.ErrKeyWindowMismatch,
+		trustedtoken.ErrKeyRetired, store.ErrOperationConfirmationTokenExpired,
+	} {
 		control := &fakeDeviceBindingControl{forceReplays: []deviceBindingReplay{{
 			result: store.DeviceBindingResult{Binding: store.DeviceBindingProjection{Revision: 6}}, handled: true,
 		}}}

@@ -77,6 +77,7 @@ func credentialRevocationHandlerServer(
 		HTTPAddr: "127.0.0.1:18087", WriteEnabled: true,
 		InternalToken: "credential-revocation-internal", AuthTokenSecret: deviceTestAuthSecret,
 	}, &fakeReader{}, control, authorizer)
+	installTrustedTokenTestReadiness(server)
 	server.revocationRuntime = runtime
 	return server
 }
@@ -403,6 +404,8 @@ func TestCredentialRevocationACKStrictProofReplayExpiryAndMappings(t *testing.T)
 		{"exact sequence replay conflict", store.ErrDeviceProofReplayed, http.StatusConflict, deviceauth.DeviceProofReplayedCode},
 		{"expired command", trustedtoken.ErrExpired, http.StatusGone, "credential_revocation_gone"},
 		{"rotated command key", trustedtoken.ErrUnknownKey, http.StatusGone, "credential_revocation_gone"},
+		{"command key window", trustedtoken.ErrKeyWindowMismatch, http.StatusGone, "credential_revocation_gone"},
+		{"command key retired", trustedtoken.ErrKeyRetired, http.StatusGone, "credential_revocation_gone"},
 		{"wrong command claims", store.ErrCredentialRevocationTicketMismatch, http.StatusForbidden, credentialRevocationProofInvalidCode},
 		{"already ACKed differently", store.ErrCredentialRevocationACKRecorded, http.StatusConflict, "credential_revocation_conflict"},
 	} {
@@ -433,6 +436,8 @@ func TestCredentialRevocationCreateErrorMappings(t *testing.T) {
 		{"active tasks", store.ErrCredentialRevocationActiveWork, http.StatusConflict, "executor_has_active_tasks"},
 		{"revision", store.ErrRevisionConflict, http.StatusConflict, "revision_conflict"},
 		{"expired confirmation", trustedtoken.ErrExpired, http.StatusGone, "operation_confirmation_gone"},
+		{"confirmation key window", trustedtoken.ErrKeyWindowMismatch, http.StatusGone, "operation_confirmation_gone"},
+		{"confirmation key retired", trustedtoken.ErrKeyRetired, http.StatusGone, "operation_confirmation_gone"},
 		{"confirmation mismatch", trustedtoken.ErrInvalidSignature, http.StatusForbidden, "operation_confirmation_mismatch"},
 		{"not found", store.ErrNotFound, http.StatusNotFound, "not_found"},
 		{"internal redacted", errors.New("postgresql://secret /credential/home"), http.StatusInternalServerError, "credential_revocation_failed"},
@@ -460,6 +465,7 @@ func TestReadyzRequiresCredentialRevocationRuntime(t *testing.T) {
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.activationRuntime = &fakeDesktopActivationRuntime{}
 	server.desktopCommandRuntime = &fakeDesktopAuthorizationCommandRuntime{}
+	installTrustedTokenTestReadiness(server)
 
 	recorder := httptest.NewRecorder()
 	server.buildMux().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
