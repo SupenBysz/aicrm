@@ -17,6 +17,7 @@
     "test:codex-account-fingerprint": "node --test src/main/codex-account-fingerprint.test.mjs",
     "test:desktop-trusted-token-keyring": "node --test src/main/desktop-trusted-token-keyring.test.mjs",
     "test:desktop-trusted-token-verifier": "node --test src/main/desktop-trusted-token-verifier.test.mjs",
+    "test:desktop-trusted-command-journal": "node --test src/main/desktop-trusted-command-journal.test.mjs",
     "test:desktop-device-identity": "node --test src/main/desktop-device-identity.test.mjs",
     "test:desktop-device-registration": "node --test src/main/desktop-device-registration-client.test.mjs",
     "test:desktop-device-heartbeat": "node --test src/main/desktop-device-heartbeat-client.test.mjs",
