@@ -10,6 +10,9 @@
 > - `docs/kyai_crm_data_model.md`
 > - `docs/kyai_crm_permission_matrix.md`
 > - `docs/kyai_crm_admin_pages.md`
+> - `docs/kyai_crm_v9_execution_architecture.md`（Post-Phase1 v9.1 覆盖扩展）
+
+> 覆盖说明：第 1–20 节保留为 Phase 1 API 基线。Matrix Account、Agent Executor、可信 Desktop 和异步脚本生成的新增合同由第 21 节建立索引，并以三份 v9.1 详细合同为准。
 
 ---
 
@@ -149,6 +152,28 @@ X-KY-Request-Id: <uuid>
 | `conflict` | 409 | 数据冲突 |
 | `rate_limited` | 429 | 请求过于频繁 |
 | `internal_error` | 500 | 服务内部错误 |
+
+---
+
+### 2.7 Command 幂等与请求哈希
+
+Post-Phase1 v9.1 中由普通用户发起的创建、状态推进、取消、重试、刷新和其他 Command 必须携带 `Idempotency-Key`。服务端在合同规定的 scope 内同时保存 key、canonical request hash 和原响应引用：相同 key/hash 返回原结果，不重复执行；相同 key 不同 hash 返回 409 `idempotency_key_reused`。
+
+异步 Command 固定返回 202 和已创建的资源投影，不返回 nullable task ID，也不在同一路径混合 200/202 结果类型。用户 Command 使用幂等键；Desktop 设备签名端点使用持久 sequence/nonce/request ledger，不以用户幂等键替代重放保护。
+
+### 2.8 Revision 与 CAS
+
+可并发修改的资源必须携带合同指定的 `expectedRevision` 或 `expectedSequence`。服务端在同一事务做 compare-and-swap；冲突返回 409 和可安全公开的最新 revision，不接受客户端以最后写入覆盖状态机、绑定、授权、激活或清理结果。
+
+### 2.9 Event history 与 SSE
+
+持久事件历史使用 `after` cursor，并返回 `{items,nextSequence,hasMore}`。SSE 使用 `Last-Event-ID`，其优先级高于 query `after`；每个持久事件占唯一单调 sequence，15 秒发送一次无 id heartbeat。连接级鉴权失败或权限失效事件不得伪造成持久业务事件。
+
+SSE 只能由 Host authenticated request client 建立并注入认证 Header；Plugin 不得直连、不得把 Bearer 或一次性 token 放入 URL/query，也不得自行消费 NATS。
+
+### 2.10 专用信任平面
+
+普通用户 API 使用 Bearer 与 workspace context。Internal API、Desktop command/claim/proof/ACK 和一次性票据端点必须使用各自锁定的 token、设备签名和网络边界，不能接受普通 Bearer body 模拟已授权、已验签、已完成或 ready。所有平面继续使用统一成功/错误 envelope，但禁止响应凭据、文件路径、Cookie/Storage、原始 App Server 输出、未脱敏 DOM 或截图。
 
 ---
 
@@ -1969,10 +1994,15 @@ enterprise.workbench.view
 | `/api/v1/notifications*` | `ky-membership-service`，后续可拆至 `ky-notification-service` |
 | `/api/v1/announcements*` | `ky-membership-service`，后续可拆至 `ky-notification-service` |
 | `/api/v1/ai-models*` | `ky-ai-model-service` |
+| `/api/v1/matrix-account*` | `ky-matrix-account-service` |
+| `/api/v1/ai-executors*` | `ky-agent-executor-service`（完成后续单写者 cutover 后；P1 仅 shadow read，此前由 `ky-ai-model-service` legacy handler fail-closed/兼容） |
+| `/api/v1/ai-executor-*` | `ky-agent-executor-service`（P1 仅建立骨架/shadow read，生产写入须通过后续门禁与 cutover） |
+| `/internal/v1/executor-bindings*` | `ky-agent-executor-service`（受控内网） |
+| `/internal/v1/executor-tasks*` | `ky-agent-executor-service`（受控内网） |
 
 ---
 
-## 20. 第一阶段 API 验收标准
+## 20. Phase 1 API 验收标准
 
 1. 所有登录后接口必须校验 token。
 2. 所有工作区接口必须校验 `X-KY-Workspace-*`。
@@ -1986,3 +2016,46 @@ enterprise.workbench.view
 10. AI 配置接口只允许平台授权角色访问和修改。
 11. 明文 API Key 不允许出现在响应中。
 12. 邀请 token 查询和接受流程可闭环。
+
+---
+
+## 21. Post-Phase1 v9.1 Matrix / Executor API 索引
+
+本节只建立资源、所有权和安全平面索引，不复制第二份请求 body 或状态机合同。精确字段、权限、错误码、revision、幂等 scope、ticket/proof 和事件 schema 以以下文档为准：
+
+- `docs/matrix_account_ai_onboarding_contract.md`
+- `docs/kyai_crm_matrix_account_requirements.md`
+- `docs/kyai_crm_ai_executor_authorization_requirements.md`
+- `docs/kyai_crm_v9_execution_architecture.md`
+
+### 21.1 Matrix canonical 资源
+
+- LoginAttempt：创建、snapshot、event history、持久 SSE、刷新二维码、重试、取消、打开/恢复窗口和绑定确认。
+- Account capability run：把 `executeAccountCapability` 映射为版本化 capability 运行资源。
+- Script generation run：按 WebSpace 或 Script 创建异步 run，读取资源/event/SSE/terminal，并以 revision CAS 取消。
+- Contract test：唯一入口为 `/api/v1/matrix-account-login-script-contracts/{contractId}/tests`，只能写测试记录；candidate 激活另走 revision CAS。
+
+Matrix 公共 API 由 `ky-matrix-account-service` 拥有。不存在公共 `complete` API；可信 snapshot/cleanup proof 由专用 Desktop PoP 端点处理，服务端 receipt 只能在内部绑定或终止事务消费。
+
+### 21.2 Agent Executor canonical 资源
+
+- Executor、workspace grant、eligible executor/model 安全投影。
+- Authorization session、user action、event/SSE、handoff、claim、proof、activation/revocation ACK。
+- Device registration/binding、heartbeat、catalog/readiness/credential verification proof。
+- Executor task、event/SSE、terminal projection 和 cancel。
+
+这些资源由 `ky-agent-executor-service` 拥有；`ky-ai-model-service` 只保留 API Provider/API Model 与迁移期 legacy provider。旧直接授权/状态写入口在兼容周期按详细合同返回 426/410，所有 sunset 410 使用 `legacy_endpoint_gone`。
+
+### 21.3 Executor internal API
+
+固定为：
+
+```text
+POST /internal/v1/executor-bindings/resolve
+POST /internal/v1/executor-tasks
+GET  /internal/v1/executor-tasks/{taskId}
+GET  /internal/v1/executor-tasks/{taskId}/result
+POST /internal/v1/executor-tasks/{taskId}/cancel
+```
+
+仅允许 loopback/受控内网并校验 `X-KY-Internal-Token` 与 `X-KY-Request-Id`。响应只返回冻结 binding、任务状态或安全结果投影，不返回凭据、路径、账号原文或原始 Codex/App Server 输出。

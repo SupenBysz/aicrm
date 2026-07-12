@@ -10,6 +10,8 @@
 - 部门、团队是 workspace 内部管理范围，不是独立 workspace。
 - 前端隐藏不是安全边界，后端必须重新校验权限和数据范围。
 - 工作区切换后必须清理或隔离前端缓存，避免权限串用。
+- 菜单权限、页面权限和操作权限是不同维度，menuKey 不能代替 page/action permission。
+- actor RBAC、资源的 workspace grant 与受信设备 proof 是正交条件；需要其中多项时必须全部满足。
 
 ## 工作区上下文
 
@@ -71,6 +73,25 @@ current_team_scope
 - 每个列表/详情查询应用数据范围。
 - 没有数据范围时返回权限拒绝或明确空范围结果，不用普通空列表掩盖权限问题。
 - 审计日志记录 actor、workspace、action、resource、result。
+- 服务端重新校验资源是否发布到当前 workspace；前端下拉选项或缓存中的 grant 不是授权事实。
+- 设备签名端点校验 operation、device、purpose、revision、expiry 和 replay ledger；普通 Bearer body 不能模拟设备 proof。
+- internal service credential 只证明服务身份，不能替代原 actor、workspace、permission 和 data scope 决策。
+
+## 资源发布与设备信任
+
+跨 workspace 发布的执行器、模型、模板或其他平台资源必须使用显式 grant：
+
+- grant 绑定资源、workspace、状态和 revision，更新使用 CAS。
+- 平台管理权限不自动把资源发布给 agency/enterprise。
+- agency/enterprise 默认只读取已发布资源的 ID、名称、运行类型和安全能力摘要。
+- 账号标签、设备详情、凭据、路径、授权会话和原始探测结果不得进入下级 workspace 投影。
+
+受信 Desktop 操作还必须满足：
+
+- 用户 Bearer 只证明 actor/session，并可按合同创建业务操作、registration challenge 或设备绑定请求；它不能直接声明设备可信，也不能替代 proof-of-possession。
+- 设备使用 proof-of-possession 完成登记，并以服务端单次 ticket 执行具体 Command。
+- ticket/proof 绑定的 audience 和 purpose 不得跨领域复用。
+- rebind、force revoke、敏感导出等高危动作需要独立权限、二次确认和高危审计。
 
 ## 数据范围
 
@@ -100,8 +121,11 @@ custom
 
 - 属于哪个 workspace type？
 - 菜单权限、页面权限、操作权限是否分别定义？
+- menuKey 是否保持唯一真相源，没有拿 page permission 形成第二菜单键？
 - 权限点是否进入 seed/migration？
 - bootstrap 是否返回对应 permission/actionPermission/menuKey？
 - 前端路由、菜单、按钮是否按权限消费？
 - 后端接口是否有权限和数据范围校验？
+- 资源 grant、设备 proof、expected revision 是否按接口要求与 actor 权限做 AND 校验？
+- 下级 workspace 的响应是否只有安全摘要，没有设备、凭据、路径或授权会话？
 - 工作区切换后缓存 key 是否隔离？

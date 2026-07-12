@@ -1,6 +1,7 @@
 # AiCRM Desktop 客户端事件通讯规范
 
 > 文档状态：建议规范 / 待按阶段落地
+> 覆盖状态：第 1–16 节保留既有渐进基线；第 17 节为 Post-Phase1 v9.1 锁定扩展
 > 项目名称：KyaiCRM / AiCRM Desktop
 > 编写日期：2026-07-07
 > 适用范围：`apps/aicrm-desktop`、`apps/ky-admin-host` 中桌面客户端桥接能力、窗口能力、会话能力、网络日志能力、后续登录与工作区业务事件
@@ -11,6 +12,7 @@
 > - `apps/aicrm-desktop/src/preload/bridge.ts`
 > - `apps/aicrm-desktop/src/preload/window-chrome.ts`
 > - `apps/ky-admin-host/src/desktop-client.ts`
+> - `docs/kyai_crm_v9_execution_architecture.md`（Post-Phase1 v9.1 扩展）
 
 ---
 
@@ -139,6 +141,7 @@ window.aicrm.network.clear()
 1. `window:state-changed` 当前直接发送 `DesktopWindowState`，短期保留，不强制改 envelope。
 2. `preload/window-chrome.ts` 当前为了自定义窗口按钮会直接订阅 `window:state-changed`，可以保留为 preload 内部实现。
 3. Web 后台通过 `window.aicrm?.app?.getVersion` 做客户端模式判断，短期保留。
+4. Matrix Account、Agent Executor、App Server、authenticated SSE 与 NATS 的新增通信不得套用本节 legacy bridge 推导，统一按第 17 节执行。
 
 ---
 
@@ -619,6 +622,8 @@ userId
 workspaceId
 ```
 
+v9.1 的 command ticket、claim/proof/receipt、设备签名、App Server 原始输出、路径、DOM、截图和二维码原文还必须满足第 17 节的专用信任平面规则。
+
 ---
 
 ## 11. 版本与兼容
@@ -659,6 +664,7 @@ export interface DesktopCapabilities {
 2. 新增参数必须可选或新增方法，不破坏旧调用。
 3. 事件 payload 新增字段可以兼容，重命名/删除字段必须升版本。
 4. Web 必须能在非桌面浏览器环境正常运行。
+5. v9.1 Bridge v2 与 legacy Bridge 的兼容窗口、结构化失败和移除条件按第 17 节执行，不能把保留旧 ABI 理解为允许继续执行不可信授权或状态回写。
 
 ---
 
@@ -781,3 +787,51 @@ React 是否 cleanup？
 5. 新增复杂事件优先使用 envelope。
 6. 纯 Web 业务联动优先使用 Web Local Event。
 7. 网络日志和调试能力必须遵守生产模式与敏感信息脱敏规则。
+8. Matrix Account、Agent Executor、App Server、SSE 与 NATS 扩展必须满足第 17 节，Renderer 不得成为可信结果中继或服务端事件消费者。
+
+---
+
+## 17. Post-Phase1 v9.1 Desktop、SSE 与 NATS 扩展
+
+### 17.1 四个通信平面
+
+| 平面 | 所有者与用途 | 禁止 |
+| --- | --- | --- |
+| Desktop IPC Bridge | Main/Preload/Host adapter；执行本地 Command、Query 和 Native Event | Plugin 直连 `window.aicrm`、任意 channel、任意路径 |
+| Host authenticated SSE | Host request client；消费 LoginAttempt、authorization session、generation run 和 task 持久事件 | URL/query token、Plugin 自建连接、Native Event 代替业务真相 |
+| Server internal API | Matrix 与 Agent Executor 的受控同步决策/任务接口 | 公共 Nginx 暴露、普通 Bearer 模拟 internal caller |
+| Server NATS | transactional outbox 发布的 at-least-once 安全引用 | Renderer 消费、携带凭据/DOM/截图/原始输出、代替数据库状态 |
+
+四个平面不得混用。数据库与服务端资源是业务真相；Native Event 只表达本地临时态，NATS 只负责服务间唤醒和安全引用传递。
+
+### 17.2 Bridge v2 Command Ticket
+
+- 有副作用的本地操作必须由服务端签发单次 command/claim ticket，至少绑定 `audience`、`purpose`、`operationId`、`deviceId`、目标 runtime/resource revision、expiry 与 nonce。
+- Main 必须在执行前验签、校验目标仍是当前 revision 并原子消费；过期、重复、跨设备、跨 purpose 或 stale target 一律拒绝。
+- 完成 ACK/PoP 由 Main 直接提交到对应受信端点，并以设备 Ed25519 签名覆盖完整 HTTP 请求；Renderer/Plugin 不得转发 proof、receipt、Cookie、Storage 或原始执行结果。
+- Renderer 仅提供裸 executorId、attemptId、webSpaceId、路径或本地布尔值，不能触发授权提升、credential 删除、Vault seal/restore/cleanup 或其他本地写操作。
+- Desktop-side App Server 只由 Main 通过父子进程 stdio 管理；server-side App Server 由 Agent Executor 管理。不得向 Plugin 暴露原始 JSON-RPC、socket、进程命令、CODEX_HOME 或文件路径。Desktop flow 的授权 URL 只留在 Main；server device-code 的发起人可经 `/user-action` 安全投影查看 `verificationUrl/userCode/sessionDeadlineAt`，响应必须 no-store 且不得持久化，不能来自 Desktop bridge 或原始 App Server 输出。
+
+### 17.3 Native Event 一致性
+
+- Port/Bridge 新订阅必须返回 `unsubscribe`，Host 保持单一主订阅，React/store cleanup 必须释放 listener、timer、reader 与 AbortController。
+- 非持久事件固定使用“先订阅并缓冲 → 读取带 sequence 的 snapshot → 按 sequence 排空”流程；gap、buffer overflow 或 runtime epoch 变化时重新读取 snapshot。
+- Envelope 必须版本化并携带 `operationId`、runtime session/epoch、单调 `nativeSequence` 和 opaque scope；不得携带业务 `nextActions`、binding decision、receipt、二维码 data URL、DOM、截图、凭据或账号原文。
+- Main 只维护原生 operation journal，不维护 Attempt phase、角色、权限、workspace rollout 或业务绑定决策。
+
+### 17.4 持久 SSE
+
+- Host authenticated request client 建立 SSE 并注入 Authorization/workspace Header；Plugin 只消费注入的 Port/store，不接触 token 或底层 reader。
+- 页面先读取服务端 snapshot，再以 snapshot sequence 读取 history/SSE；`Last-Event-ID` 优先于 `after`，每个持久事件占唯一 sequence，15 秒无 id heartbeat。
+- 断线、切 workspace、路由卸载或权限失效必须 abort reader 并释放订阅；重连按 cursor 补齐，不能以轮询结果倒退状态机。
+- 终端 ANSI projection 与结构化事件来自同一脱敏 task event source；xterm.js 只读展示，不形成 PTY/TUI 或第二控制通道。
+
+### 17.5 NATS 与 outbox
+
+- 发布方在业务事务内写 outbox，dispatcher 事务后发送；消费者按 `eventId` 和资源 ID 幂等，成功物化本地状态后才 ACK。
+- Payload 只包含事件 ID、opaque 资源 ID、workspace type/id、状态与时间等安全引用；消费者需要结果时再调用受控 internal API。
+- NATS 丢失、重复、乱序或消费者崩溃由数据库状态、request registry 与 reconciler 收敛。Renderer、Preload 与 Plugin 永不连接 NATS。
+
+### 17.6 兼容与移除
+
+legacy Bridge 最多保留一个明确的平台发布版本，只能返回结构化兼容错误或只读安全投影；不得在兼容名义下继续探测全局凭据、启动旧授权命令或接受 Renderer 状态回写。Bridge v2、Host adapter、设备签名和对应 E2E 全部通过后，下一版本删除 legacy channel/DTO/handler，并保留墓碑测试防止恢复。

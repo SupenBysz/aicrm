@@ -9,6 +9,9 @@
 > - `docs/kyai_crm_multi_tenant_identity_requirements.md`
 > - `docs/kyai_crm_architecture.md`
 > - `docs/kyai_crm_data_model.md`
+> - `docs/kyai_crm_v9_execution_architecture.md`（Post-Phase1 v9.1 覆盖扩展）
+
+> 覆盖说明：第 1–13 节是 Phase 1 权限基线。Matrix Account、Agent Executor、可信 Desktop 与 AI 脚本维护的新增权限、grant 和设备证明规则由第 14 节补充；发生交叉范围冲突时以对应 v9.1 详细合同为准。
 
 ---
 
@@ -643,3 +646,90 @@ notificationScope
 - 每个接口的 required permission。
 - 每个查询的数据范围规则。
 - seed 中内置角色与权限的绑定关系。
+
+---
+
+## 14. Post-Phase1 v9.1 Matrix 与 Executor 权限扩展
+
+### 14.1 三个正交授权条件
+
+v9.1 所有接口先校验 actor RBAC、当前 workspace 和数据范围；只有操作涉及对应资源或本地受信能力时，才叠加 grant 与 device proof：
+
+```text
+actor RBAC permission
++ workspace executor grant / resource publication（脚本选择、生成或执行）
++ Desktop device proof（本地受信操作）
+```
+
+- Platform executor 管理和纯安全查询不因本公式无条件要求 workspace grant 或 Desktop proof。多项条件适用时必须全部满足，任一项不能替代另一项。
+- 普通 Bearer body 不能模拟 Desktop proof，设备签名也不能绕过 actor RBAC；需要 workspace grant 的脚本操作也不能绕过 grant。
+- Matrix 查询/写入还必须在 store/query 层应用当前 workspace 数据范围；列表 `items` 与 `total` 使用同一 predicate。
+- Executor 公共管理 API 只属于 platform workspace；agency/enterprise 不能直接读取 executor 私有资源。
+
+### 14.2 Matrix Account 权限
+
+菜单唯一使用：
+
+```text
+menu.platform.matrix_accounts
+menu.agency.matrix_accounts
+menu.enterprise.matrix_accounts
+```
+
+页面与账号操作：
+
+```text
+<workspace>.matrix_accounts.view
+<workspace>.matrix_accounts.create
+<workspace>.matrix_accounts.update
+<workspace>.matrix_accounts.update_status
+<workspace>.matrix_accounts.delete
+<workspace>.matrix_accounts.login
+<workspace>.matrix_accounts.open
+<workspace>.matrix_accounts.check
+<workspace>.matrix_accounts.clear_session
+```
+
+脚本、WebSpace 与敏感调试：
+
+```text
+<workspace>.matrix_account_scripts.view
+<workspace>.matrix_account_scripts.manage
+<workspace>.matrix_account_web_spaces.debug
+<workspace>.matrix_account_sensitive_debug.view
+<workspace>.matrix_account_sensitive_debug.export
+<workspace>.matrix_account_login_scripts.view
+<workspace>.matrix_account_login_scripts.update
+<workspace>.matrix_account_login_scripts.regenerate
+<workspace>.matrix_account_login_scripts.activate_version
+<workspace>.matrix_account_login_scripts.assign_executor
+<workspace>.matrix_account_login_scripts.assign_model
+```
+
+组合权限固定使用 AND：generation/contract test 需要 `view + regenerate`；修改 executor 需要 `update + assign_executor`；修改 model 需要 `update + assign_model`；同时修改需要三个权限全部成立，并再次校验 workspace grant 与 catalog。
+
+### 14.3 Agent Executor 权限
+
+```text
+platform.ai_executors.view
+platform.ai_executors.create
+platform.ai_executors.update
+platform.ai_executors.authorize
+platform.ai_executors.change_account
+platform.ai_executors.bind_device
+platform.ai_executors.rebind_device
+platform.ai_executors.force_revoke
+platform.ai_executor_tasks.view
+platform.ai_executor_tasks.create
+platform.ai_executor_tasks.cancel
+```
+
+AI 配置菜单的唯一真相仍为 `menu.platform.ai_configuration`。`platform.ai_executors.view` 是页面权限，不能作为 `menuKey`，也不能保留 `ai.executors.view` 等第二套菜单 key。
+
+默认角色 seed 与 API 逐项授权以 `docs/kyai_crm_ai_executor_authorization_requirements.md` §20.7 为准：`platform_owner` 拥有全部 executor 权限；`platform_admin` 不含 `force_revoke/rebind_device`；`platform_operator` 默认只读。Platform/agency/enterprise owner/admin 默认拥有对应脚本的 `assign_executor/assign_model`，operator/readonly/member 默认没有；rebind 和 force revoke 只属于 `platform_owner`。
+
+### 14.4 安全投影与下级工作区
+
+Agency/enterprise 只能经 Matrix API 读取已经发布给当前 workspace 的安全摘要：executor ID、名称、runtime、readiness 与脚本维护能力。不得读取账号标签、设备详情、公钥、凭据/credential revision、路径、授权会话、challenge、user code、原始任务输出或敏感诊断。
+
+详情、Session、WebSpace、Generation Run 和 Executor Task 越权查询统一按对应领域合同返回 404 或 403；凡可能形成资源 ID 探测的 Matrix 资源统一返回 404。
