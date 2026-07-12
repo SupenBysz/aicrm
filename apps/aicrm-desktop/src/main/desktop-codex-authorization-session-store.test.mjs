@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   chmod,
   link,
@@ -33,12 +34,8 @@ const ACK_REFERENCE = "b".repeat(64);
 const ACK_HASH = "c".repeat(64);
 const CLAIM_TOKEN = "claimTokenCanary.header.signature";
 const ACTIVATION_TOKEN = "activationTokenCanary.header.signature";
-const CLAIM_EXPIRES_AT = "2026-07-13T10:05:00.000Z";
-const ACTIVATION_EXPIRES_AT = "2026-07-13T10:10:00.000Z";
-const OUTBOUND_RECOVERY_ATTEMPT = {
-  exactOutboundJournalRecoveryAttempted: true,
-  activationLeaseFenceRecoveryAttempted: true
-};
+const CLAIM_EXPIRES_AT = "2026-07-13T10:05:00Z";
+const ACTIVATION_EXPIRES_AT = "2026-07-13T10:10:00.123456789Z";
 const RAW_LOGIN_ID = "raw-login-id-must-never-persist";
 const RAW_AUTH_URL = "https://auth.openai.com/codex/callback?secret=must-never-persist";
 const RAW_USER_CODE = "ABCD-EFGH-MUST-NEVER-PERSIST";
@@ -72,27 +69,159 @@ class FakeSafeStorage {
   }
 }
 
+function activationLeaseRequestReference(record) {
+  const requestPath =
+    `/api/v1/ai-executor-authorization-sessions/${record.sessionId}` +
+    `/desktop-activations/${record.activationId}/lease-renewals`;
+  return createHash("sha256")
+    .update(
+      `AICRM-TRUSTED-REQUEST-V1\ncredential_activation_lease_renewal\n${requestPath}`,
+      "utf8"
+    )
+    .digest("hex");
+}
+
+function activationLeaseSemanticKey(record) {
+  return createHash("sha256")
+    .update(
+      `AICRM-ACTIVATION-LEASE-FENCE-V1\n${record.sessionId}\n${record.activationId}`,
+      "utf8"
+    )
+    .digest("hex");
+}
+
+function activationLeaseFenceRecord(record, overrides = {}) {
+  return {
+    version: 1,
+    generation: 7,
+    status: "fresh",
+    semanticKey: activationLeaseSemanticKey(record),
+    sessionId: record.sessionId,
+    executorId: record.executorId,
+    operationId: record.activationOperationId,
+    activationId: record.activationId,
+    credentialRevision: record.credentialRevision,
+    leaseEpoch: record.leaseEpoch,
+    sourceCredentialRevision: record.sourceCredentialRevision,
+    revocationEpoch: record.revocationEpoch,
+    bindingDigest: record.bindingDigest,
+    tokenHash: createHash("sha256").update(record.activationToken, "utf8").digest("hex"),
+    requestReference: activationLeaseRequestReference(record),
+    requestHash: "e".repeat(64),
+    renewedAt: "2026-07-13T10:00:00Z",
+    leaseExpiresAt: "2026-07-13T10:00:30Z",
+    replayed: false,
+    recovered: false,
+    createdAt: "2026-07-13T10:00:00.000Z",
+    updatedAt: "2026-07-13T10:00:00.000Z",
+    removedAt: null,
+    ...overrides
+  };
+}
+
+class FakeActivationLeaseFenceReader {
+  constructor({ autoInstall = true, requireFreshHandler = null } = {}) {
+    this.autoInstall = autoInstall;
+    this.requireFreshHandler = requireFreshHandler;
+    this.records = new Map();
+    this.readCalls = [];
+    this.requireFreshCalls = [];
+  }
+
+  install(record, overrides = {}) {
+    const fence = activationLeaseFenceRecord(record, overrides);
+    this.records.set(fence.activationId, structuredClone(fence));
+    return structuredClone(fence);
+  }
+
+  async read(activationId) {
+    this.readCalls.push(activationId);
+    const current = this.records.get(activationId);
+    return current ? structuredClone(current) : null;
+  }
+
+  async requireFresh(expected) {
+    this.requireFreshCalls.push(structuredClone(expected));
+    if (this.requireFreshHandler) {
+      return structuredClone(await this.requireFreshHandler(expected, this));
+    }
+    const current = this.records.get(expected.activationId);
+    if (!current || JSON.stringify(current) !== JSON.stringify(expected)) {
+      throw new Error("activation lease fence CAS mismatch");
+    }
+    return structuredClone(current);
+  }
+}
+
+function recoveryCapability(record, successor = null, overrides = {}) {
+  return {
+    sessionId: record.sessionId,
+    executorId: record.executorId,
+    deviceId: record.deviceId,
+    generation: record.generation,
+    claimRequestReference: record.claimRequestReference,
+    claimRequestHash: record.claimRequestHash,
+    proofRequestReference: record.proofRequestReference,
+    proofRequestHash: record.proofRequestHash,
+    ackRequestReference: record.ackRequestReference,
+    ackRequestHash: record.ackRequestHash,
+    activationOperationId: record.activationOperationId,
+    activationId: record.activationId,
+    credentialRevision: record.credentialRevision,
+    leaseEpoch: record.leaseEpoch,
+    sourceCredentialRevision: record.sourceCredentialRevision,
+    revocationEpoch: record.revocationEpoch,
+    bindingDigest: record.bindingDigest,
+    outboundJournalReconciled: true,
+    successor,
+    ...overrides
+  };
+}
+
+class FakeRecoveryReconciler {
+  constructor(handler = (record) => recoveryCapability(record)) {
+    this.handler = handler;
+    this.calls = [];
+  }
+
+  async reconcile(record) {
+    this.calls.push(record);
+    return this.handler(record);
+  }
+}
+
 async function fixture(overrides = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-codex-auth-session-"));
   const root = path.join(base, "sessions");
   const safeStorage = overrides.safeStorage ?? new FakeSafeStorage();
-  let time = Date.parse("2026-07-13T10:00:00.000Z");
+  const reconciler = overrides.reconciler ?? new FakeRecoveryReconciler();
+  const activationLeaseFenceReader =
+    overrides.activationLeaseFenceReader ?? new FakeActivationLeaseFenceReader();
+  let time = Date.parse(overrides.startTime ?? "2026-07-13T10:00:00.000Z");
   const options = {
     root,
     safeStorage,
-    now: () => new Date(time++),
+    reconciler,
+    activationLeaseFenceReader,
+    now: overrides.now ?? (() => new Date(time++)),
     faultInjector: overrides.faultInjector,
     renameFile: overrides.renameFile,
     syncDirectory: overrides.syncDirectory
   };
+  const store = new DesktopCodexAuthorizationSessionStore(options);
+  leaseReadersByStore.set(store, activationLeaseFenceReader);
   return {
     base,
     root,
     safeStorage,
+    reconciler,
+    activationLeaseFenceReader,
     options,
-    store: new DesktopCodexAuthorizationSessionStore(options)
+    store
   };
 }
+
+const leaseReadersByStore = new WeakMap();
 
 function initial(overrides = {}) {
   return {
@@ -106,6 +235,13 @@ function initial(overrides = {}) {
 }
 
 async function advance(store, current, status, changes = {}) {
+  const leaseReader = leaseReadersByStore.get(store);
+  if (
+    leaseReader?.autoInstall &&
+    (status === "credential_promotion_starting" || status === "activation_ack_starting")
+  ) {
+    leaseReader.install(current);
+  }
   return store.transition(current, {
     ...desktopCodexAuthorizationSessionData(current),
     status,
@@ -171,7 +307,10 @@ async function progressToAckStarting(store, current) {
       totalBytes: 4096
     }
   });
-  return advance(store, current, "activation_ack_starting");
+  return advance(store, current, "activation_ack_starting", {
+    ackRequestReference: ACK_REFERENCE,
+    ackRequestHash: ACK_HASH
+  });
 }
 
 test("full success chain is monotonic, encrypted, and exposes only the documented safe snapshot", async (t) => {
@@ -225,7 +364,27 @@ test("full success chain is monotonic, encrypted, and exposes only the documente
       totalBytes: 4096
     }
   });
-  record = await advance(current.store, record, "activation_ack_starting");
+  await assert.rejects(
+    async () => advance(current.store, record, "activation_ack_starting"),
+    { code: "desktop_codex_authorization_unsafe" }
+  );
+  record = await advance(current.store, record, "activation_ack_starting", {
+    ackRequestReference: ACK_REFERENCE,
+    ackRequestHash: ACK_HASH
+  });
+  assert.equal(record.ackRequestReference, ACK_REFERENCE);
+  assert.equal(record.ackRequestHash, ACK_HASH);
+  await assert.rejects(
+    current.store.transition(record, {
+      ...desktopCodexAuthorizationSessionData(record),
+      status: "activation_ack_response_received",
+      lastProgressStatus: "activation_ack_response_received",
+      ackRequestReference: "d".repeat(64),
+      ackRequestHash: "e".repeat(64),
+      sessionRevision: 4
+    }),
+    { code: "desktop_codex_authorization_conflict" }
+  );
   record = await advance(current.store, record, "activation_ack_response_received", {
     ackRequestReference: ACK_REFERENCE,
     ackRequestHash: ACK_HASH,
@@ -360,6 +519,8 @@ for (const faultPoint of [
     const restarted = new DesktopCodexAuthorizationSessionStore({
       root: current.root,
       safeStorage: current.safeStorage,
+      reconciler: current.reconciler,
+      activationLeaseFenceReader: current.activationLeaseFenceReader,
       now: current.options.now
     });
     const recovered = await restarted.read(accepted.sessionId);
@@ -370,6 +531,124 @@ for (const faultPoint of [
   });
 }
 
+test("divergent temporary evidence is rejected in place and never deleted", async (t) => {
+  let armed = false;
+  const current = await fixture({
+    faultInjector: (point) => {
+      if (armed && point === "after_temporary_fsync") {
+        armed = false;
+        throw new Error("leave generation two evidence");
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const accepted = await current.store.create(initial());
+  armed = true;
+  await assert.rejects(
+    advance(current.store, accepted, "handoff_claim_starting", {
+      claimRequestReference: CLAIM_REFERENCE,
+      claimRequestHash: CLAIM_HASH
+    }),
+    { code: "desktop_codex_authorization_corrupt" }
+  );
+  const temporary = path.join(current.root, "authsession_1.sec.tmp");
+  const raw = await readFile(temporary);
+  const divergent = JSON.parse(
+    current.safeStorage.decryptString(raw.subarray(ENVELOPE_MAGIC.length))
+  );
+  divergent.claimRequestReference = "d".repeat(64);
+  divergent.claimRequestHash = "e".repeat(64);
+  const divergentRaw = Buffer.concat([
+    ENVELOPE_MAGIC,
+    current.safeStorage.encryptString(JSON.stringify(divergent))
+  ]);
+  await writeFile(temporary, divergentRaw, { mode: 0o600 });
+  const restarted = new DesktopCodexAuthorizationSessionStore({
+    ...current.options,
+    faultInjector: undefined
+  });
+  await assert.rejects(restarted.read(accepted.sessionId), {
+    code: "desktop_codex_authorization_corrupt"
+  });
+  assert.deepEqual(await readFile(temporary), divergentRaw);
+});
+
+test("repair rejects a gapped historical commit chain and a non-accepted generation-one orphan", async (t) => {
+  await t.test("gapped old commit", async (t) => {
+    const current = await fixture();
+    t.after(() => rm(current.base, { recursive: true, force: true }));
+    let record = await current.store.create(initial());
+    const generationOne = await readFile(path.join(current.root, "authsession_1.sec"));
+    record = await advance(current.store, record, "handoff_claim_starting", {
+      claimRequestReference: CLAIM_REFERENCE,
+      claimRequestHash: CLAIM_HASH
+    });
+    record = await advance(current.store, record, "handoff_claimed", {
+      claimToken: CLAIM_TOKEN,
+      claimExpiresAt: CLAIM_EXPIRES_AT,
+      sessionRevision: 2
+    });
+    await writeFile(
+      path.join(current.root, "authsession_1.sec.commit-1"),
+      generationOne,
+      { mode: 0o600 }
+    );
+    const restarted = new DesktopCodexAuthorizationSessionStore(current.options);
+    await assert.rejects(restarted.read(record.sessionId), {
+      code: "desktop_codex_authorization_corrupt"
+    });
+    assert.equal(
+      (await readdir(current.root)).includes("authsession_1.sec.commit-1"),
+      true
+    );
+  });
+
+  await t.test("generation one must be accepted", async (t) => {
+    const current = await fixture();
+    t.after(() => rm(current.base, { recursive: true, force: true }));
+    await current.store.create(initial());
+    const target = path.join(current.root, "authsession_1.sec");
+    const raw = await readFile(target);
+    const forged = JSON.parse(
+      current.safeStorage.decryptString(raw.subarray(ENVELOPE_MAGIC.length))
+    );
+    forged.status = "indeterminate";
+    forged.localFailureCode = "desktop_effect_outcome_indeterminate";
+    await rm(target);
+    await writeFile(
+      path.join(current.root, "authsession_1.sec.commit-1"),
+      Buffer.concat([
+        ENVELOPE_MAGIC,
+        current.safeStorage.encryptString(JSON.stringify(forged))
+      ]),
+      { mode: 0o600 }
+    );
+    const restarted = new DesktopCodexAuthorizationSessionStore(current.options);
+    await assert.rejects(restarted.read("authsession_1"), {
+      code: "desktop_codex_authorization_corrupt"
+    });
+  });
+});
+
+test("unknown filesystem and fault errors are normalized without leaking host paths", async (t) => {
+  const pathCanary = "/Volumes/private/customer/authsession_1.sec";
+  const current = await fixture({
+    faultInjector(point) {
+      if (point === "after_commit_shadow_fsync") {
+        throw new Error(`EIO while syncing ${pathCanary}`);
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  await assert.rejects(current.store.create(initial()), (error) => {
+    assert.equal(error.code, "desktop_codex_authorization_corrupt");
+    assert.equal(error.message, "Codex 授权恢复操作失败");
+    assert.equal(String(error).includes(pathCanary), false);
+    assert.equal(String(error.stack).includes(pathCanary), false);
+    return true;
+  });
+});
+
 test("restart never re-enters an effect fence without a durable successor", async (t) => {
   const early = await fixture();
   t.after(() => rm(early.base, { recursive: true, force: true }));
@@ -379,7 +658,7 @@ test("restart never re-enters an effect fence without a durable successor", asyn
     claimRequestHash: CLAIM_HASH
   });
   const earlyRestart = new DesktopCodexAuthorizationSessionStore(early.options);
-  const indeterminate = await earlyRestart.recover(record.sessionId, OUTBOUND_RECOVERY_ATTEMPT);
+  const indeterminate = await earlyRestart.recover(record.sessionId);
   assert.equal(indeterminate.status, "indeterminate");
   assert.equal(indeterminate.lastProgressStatus, "handoff_claim_starting");
   assert.equal(indeterminate.localFailureCode, "desktop_effect_outcome_indeterminate");
@@ -391,7 +670,7 @@ test("restart never re-enters an effect fence without a durable successor", asyn
   assert.equal(record.claimToken, CLAIM_TOKEN);
   assert.equal(record.activationToken, ACTIVATION_TOKEN);
   const lateRestart = new DesktopCodexAuthorizationSessionStore(late.options);
-  const lateIndeterminate = await lateRestart.recover(record.sessionId, OUTBOUND_RECOVERY_ATTEMPT);
+  const lateIndeterminate = await lateRestart.recover(record.sessionId);
   assert.equal(lateIndeterminate.status, "indeterminate");
   assert.equal(lateIndeterminate.claimToken, null);
   assert.equal(lateIndeterminate.activationToken, null);
@@ -419,6 +698,8 @@ test("ACK response durable fence closes the server-response/local-terminal crash
   t.after(() => rm(current.base, { recursive: true, force: true }));
   let record = await current.store.create(initial());
   record = await progressToAckStarting(current.store, record);
+  assert.equal(record.ackRequestReference, ACK_REFERENCE);
+  assert.equal(record.ackRequestHash, ACK_HASH);
   armed = true;
   await assert.rejects(
     advance(current.store, record, "activation_ack_response_received", {
@@ -431,9 +712,11 @@ test("ACK response durable fence closes the server-response/local-terminal crash
   const restarted = new DesktopCodexAuthorizationSessionStore({
     root: current.root,
     safeStorage: current.safeStorage,
+    reconciler: current.reconciler,
+    activationLeaseFenceReader: current.activationLeaseFenceReader,
     now: current.options.now
   });
-  const recovered = await restarted.recover(record.sessionId, OUTBOUND_RECOVERY_ATTEMPT);
+  const recovered = await restarted.recover(record.sessionId);
   assert.equal(recovered.status, "activation_ack_response_received");
   assert.equal(recovered.ackRequestReference, ACK_REFERENCE);
   assert.equal(recovered.claimToken, CLAIM_TOKEN);
@@ -526,14 +809,21 @@ test("claim and activation expiries are mandatory by phase, canonical, immutable
   await assert.rejects(async () => current.store.transition(record, claimedWithoutExpiry), {
     code: "desktop_codex_authorization_unsafe"
   });
-  await assert.rejects(
-    async () =>
-      current.store.transition(record, {
-        ...claimedWithoutExpiry,
-        claimExpiresAt: "2026-07-13T10:05:00Z"
-      }),
-    { code: "desktop_codex_authorization_unsafe" }
-  );
+  for (const invalid of [
+    "2026-07-13T10:05:00.120Z",
+    "2026-07-13T10:05:00.1234567891Z",
+    "2026-07-13T10:05:00z",
+    "2026-07-13T18:05:00+08:00"
+  ]) {
+    await assert.rejects(
+      async () =>
+        current.store.transition(record, {
+          ...claimedWithoutExpiry,
+          claimExpiresAt: invalid
+        }),
+      { code: "desktop_codex_authorization_unsafe" }
+    );
+  }
   record = await current.store.transition(record, {
     ...claimedWithoutExpiry,
     claimExpiresAt: CLAIM_EXPIRES_AT
@@ -641,32 +931,321 @@ test("a pre-expiry encrypted record is rejected as a non-migratable corrupt tupl
   });
 });
 
-test("recovery finalization is forbidden until outbound journal and lease fence attempts complete", async (t) => {
-  const current = await fixture();
-  t.after(() => rm(current.base, { recursive: true, force: true }));
-  let record = await current.store.create(initial());
-  record = await advance(current.store, record, "handoff_claim_starting", {
+test("only an injected exact reconciler capability may resolve or terminalize an effect fence", async (t) => {
+  const failurePath = "/Users/private/codex-journals/authsession_1.sec";
+  const failedReconciler = new FakeRecoveryReconciler(async () => {
+    throw new Error(`outbound failed at ${failurePath}`);
+  });
+  const failed = await fixture({ reconciler: failedReconciler });
+  t.after(() => rm(failed.base, { recursive: true, force: true }));
+  let record = await failed.store.create(initial());
+  record = await advance(failed.store, record, "handoff_claim_starting", {
     claimRequestReference: CLAIM_REFERENCE,
     claimRequestHash: CLAIM_HASH
   });
-  assert.throws(() => current.store.recover(record.sessionId), {
-    code: "desktop_codex_authorization_unsafe"
+  await assert.rejects(failed.store.recover(record.sessionId), (error) => {
+    assert.equal(error.code, "desktop_codex_authorization_conflict");
+    assert.equal(String(error.message).includes(failurePath), false);
+    return true;
   });
-  assert.throws(
-    () =>
-      current.store.recover(record.sessionId, {
-        exactOutboundJournalRecoveryAttempted: true,
-        activationLeaseFenceRecoveryAttempted: false
-      }),
-    { code: "desktop_codex_authorization_unsafe" }
+  assert.equal((await failed.store.read(record.sessionId)).status, "handoff_claim_starting");
+
+  const mismatchedReconciler = new FakeRecoveryReconciler((value) => ({
+    ...recoveryCapability(value),
+    generation: value.generation + 1
+  }));
+  const mismatched = await fixture({ reconciler: mismatchedReconciler });
+  t.after(() => rm(mismatched.base, { recursive: true, force: true }));
+  record = await mismatched.store.create(initial());
+  record = await advance(mismatched.store, record, "handoff_claim_starting", {
+    claimRequestReference: CLAIM_REFERENCE,
+    claimRequestHash: CLAIM_HASH
+  });
+  await assert.rejects(mismatched.store.recover(record.sessionId), {
+    code: "desktop_codex_authorization_conflict"
+  });
+  assert.equal((await mismatched.store.read(record.sessionId)).generation, record.generation);
+
+  const successorReconciler = new FakeRecoveryReconciler((value) =>
+    recoveryCapability(value, {
+      ...desktopCodexAuthorizationSessionData(value),
+      status: "handoff_claimed",
+      lastProgressStatus: "handoff_claimed",
+      claimToken: CLAIM_TOKEN,
+      claimExpiresAt: CLAIM_EXPIRES_AT,
+      sessionRevision: 2
+    })
   );
-  assert.throws(
-    () => current.store.recoverAll({ exactOutboundJournalRecoveryAttempted: true }),
-    { code: "desktop_codex_authorization_unsafe" }
+  const recovered = await fixture({ reconciler: successorReconciler });
+  t.after(() => rm(recovered.base, { recursive: true, force: true }));
+  record = await recovered.store.create(initial());
+  record = await advance(recovered.store, record, "handoff_claim_starting", {
+    claimRequestReference: CLAIM_REFERENCE,
+    claimRequestHash: CLAIM_HASH
+  });
+  const claimed = await recovered.store.recover(record.sessionId);
+  assert.equal(claimed.status, "handoff_claimed");
+  assert.equal(claimed.generation, record.generation + 1);
+  assert.equal(claimed.claimToken, CLAIM_TOKEN);
+  assert.equal(successorReconciler.calls.length, 1);
+});
+
+test("wrong activation capability or exact lease-fence record never terminalizes an activation effect", async (t) => {
+  const wrongActivationReconciler = new FakeRecoveryReconciler((record) =>
+    recoveryCapability(record, null, { activationId: "activation_wrong" })
   );
-  assert.equal((await current.store.read(record.sessionId)).status, "handoff_claim_starting");
-  const finalized = await current.store.recover(record.sessionId, OUTBOUND_RECOVERY_ATTEMPT);
-  assert.equal(finalized.status, "indeterminate");
+  const wrongActivation = await fixture({ reconciler: wrongActivationReconciler });
+  t.after(() => rm(wrongActivation.base, { recursive: true, force: true }));
+  let record = await wrongActivation.store.create(initial());
+  record = await progressToAckStarting(wrongActivation.store, record);
+  await assert.rejects(wrongActivation.store.recover(record.sessionId), {
+    code: "desktop_codex_authorization_conflict"
+  });
+  let preserved = await wrongActivation.store.read(record.sessionId);
+  assert.equal(preserved.status, "activation_ack_starting");
+  assert.equal(preserved.generation, record.generation);
+
+  for (const [label, overrides] of [
+    ["token hash", { tokenHash: "f".repeat(64) }],
+    ["request hash", { requestHash: "not-a-digest" }],
+    [
+      "future server pair",
+      {
+        renewedAt: "2026-07-13T10:01:00Z",
+        leaseExpiresAt: "2026-07-13T10:01:30Z"
+      }
+    ]
+  ]) {
+    await t.test(label, async (t) => {
+      const current = await fixture();
+      t.after(() => rm(current.base, { recursive: true, force: true }));
+      let effect = await current.store.create(initial());
+      effect = await progressToActivationPending(current.store, effect);
+      effect = await advance(current.store, effect, "credential_promotion_starting");
+      current.activationLeaseFenceReader.install(effect, overrides);
+      await assert.rejects(current.store.recover(effect.sessionId), {
+        code: "desktop_codex_authorization_conflict"
+      });
+      const exact = await current.store.read(effect.sessionId);
+      assert.equal(exact.status, "credential_promotion_starting");
+      assert.equal(exact.generation, effect.generation);
+    });
+  }
+});
+
+test("a stale but unexpired generation returned by requireFresh cannot authorize a future effect", async (t) => {
+  const leaseReader = new FakeActivationLeaseFenceReader({
+    autoInstall: false,
+    requireFreshHandler(expected) {
+      return { ...expected, generation: expected.generation - 1 };
+    }
+  });
+  const current = await fixture({ activationLeaseFenceReader: leaseReader });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let record = await current.store.create(initial());
+  record = await progressToActivationPending(current.store, record);
+  leaseReader.install(record, { generation: 8 });
+  await assert.rejects(
+    advance(current.store, record, "credential_promotion_starting"),
+    { code: "desktop_codex_authorization_conflict" }
+  );
+  const preserved = await current.store.read(record.sessionId);
+  assert.equal(preserved.status, "activation_pending");
+  assert.equal(preserved.generation, record.generation);
+  assert.equal(leaseReader.requireFreshCalls.length, 1);
+});
+
+test("idempotent promotion-starting retry rechecks the exact fresh lease", async (t) => {
+  let now = Date.parse("2026-07-13T10:00:00.000Z");
+  const leaseReader = new FakeActivationLeaseFenceReader({ autoInstall: false });
+  const current = await fixture({
+    activationLeaseFenceReader: leaseReader,
+    now: () => new Date(now)
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let expected = await current.store.create(initial());
+  expected = await progressToActivationPending(current.store, expected);
+  const desired = {
+    ...desktopCodexAuthorizationSessionData(expected),
+    status: "credential_promotion_starting",
+    lastProgressStatus: "credential_promotion_starting"
+  };
+  leaseReader.install(expected);
+  const starting = await current.store.transition(expected, desired);
+  assert.equal(starting.status, "credential_promotion_starting");
+  assert.equal(leaseReader.requireFreshCalls.length, 1);
+
+  now = Date.parse("2026-07-13T10:01:00.000Z");
+  await assert.rejects(current.store.transition(expected, desired), {
+    code: "desktop_codex_authorization_conflict"
+  });
+  assert.equal(leaseReader.requireFreshCalls.length, 2);
+  const preserved = await current.store.read(expected.sessionId);
+  assert.equal(preserved.status, "credential_promotion_starting");
+  assert.equal(preserved.generation, starting.generation);
+  assert.deepEqual(desktopCodexAuthorizationSessionData(preserved), desired);
+});
+
+test("idempotent ACK-starting retry rejects a recovery-required lease", async (t) => {
+  const leaseReader = new FakeActivationLeaseFenceReader({ autoInstall: false });
+  const current = await fixture({ activationLeaseFenceReader: leaseReader });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let expected = await current.store.create(initial());
+  expected = await progressToActivationPending(current.store, expected);
+  leaseReader.install(expected);
+  expected = await advance(current.store, expected, "credential_promotion_starting");
+  expected = await advance(current.store, expected, "credential_durable", {
+    promotionReceipt: {
+      executorId: "executor_1",
+      revision: 3,
+      operationId: "activation_operation_1",
+      digestAlgorithm: "aicrm-credential-tree-rfc8785-nfc-v1",
+      digest: CREDENTIAL_DIGEST,
+      fileCount: 12,
+      totalBytes: 4096
+    }
+  });
+  const desired = {
+    ...desktopCodexAuthorizationSessionData(expected),
+    status: "activation_ack_starting",
+    lastProgressStatus: "activation_ack_starting",
+    ackRequestReference: ACK_REFERENCE,
+    ackRequestHash: ACK_HASH
+  };
+  leaseReader.install(expected);
+  const starting = await current.store.transition(expected, desired);
+  assert.equal(starting.status, "activation_ack_starting");
+  const freshChecks = leaseReader.requireFreshCalls.length;
+
+  leaseReader.install(starting, {
+    status: "recovery_required",
+    recovered: true
+  });
+  await assert.rejects(current.store.transition(expected, desired), {
+    code: "desktop_codex_authorization_conflict"
+  });
+  assert.equal(leaseReader.requireFreshCalls.length, freshChecks + 1);
+  const preserved = await current.store.read(expected.sessionId);
+  assert.equal(preserved.status, "activation_ack_starting");
+  assert.equal(preserved.generation, starting.generation);
+  assert.deepEqual(desktopCodexAuthorizationSessionData(preserved), desired);
+});
+
+test("an ACK response recovered after lease expiry converges without authorizing another effect", async (t) => {
+  let now = Date.parse("2026-07-13T10:00:00.000Z");
+  const reconciler = new FakeRecoveryReconciler((record) =>
+    recoveryCapability(record, {
+      ...desktopCodexAuthorizationSessionData(record),
+      status: "activation_ack_response_received",
+      lastProgressStatus: "activation_ack_response_received",
+      sessionRevision: 4
+    })
+  );
+  const current = await fixture({ reconciler, now: () => new Date(now++) });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let record = await current.store.create(initial());
+  record = await progressToAckStarting(current.store, record);
+  current.activationLeaseFenceReader.install(record, {
+    status: "recovery_required",
+    recovered: true
+  });
+  const freshChecksBeforeRecovery = current.activationLeaseFenceReader.requireFreshCalls.length;
+  now = Date.parse("2026-07-13T10:01:00.000Z");
+
+  const recovered = await current.store.recover(record.sessionId);
+  assert.equal(recovered.status, "activation_ack_response_received");
+  assert.equal(recovered.claimToken, CLAIM_TOKEN);
+  assert.equal(recovered.activationToken, ACTIVATION_TOKEN);
+  const acked = await advance(current.store, recovered, "activation_acked", {
+    claimToken: null,
+    activationToken: null
+  });
+  assert.equal(acked.status, "activation_acked");
+  assert.equal(
+    current.activationLeaseFenceReader.requireFreshCalls.length,
+    freshChecksBeforeRecovery
+  );
+});
+
+test("past credential promotion converges on an expired exact fence but its next effect needs renewal", async (t) => {
+  let now = Date.parse("2026-07-13T10:00:00.000Z");
+  const reconciler = new FakeRecoveryReconciler((record) =>
+    recoveryCapability(record, {
+      ...desktopCodexAuthorizationSessionData(record),
+      status: "credential_durable",
+      lastProgressStatus: "credential_durable",
+      promotionReceipt: {
+        executorId: record.executorId,
+        revision: record.credentialRevision,
+        operationId: record.activationOperationId,
+        digestAlgorithm: "aicrm-credential-tree-rfc8785-nfc-v1",
+        digest: record.bindingDigest,
+        fileCount: 12,
+        totalBytes: 4096
+      }
+    })
+  );
+  const leaseReader = new FakeActivationLeaseFenceReader();
+  const current = await fixture({
+    reconciler,
+    activationLeaseFenceReader: leaseReader,
+    now: () => new Date(now++)
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let record = await current.store.create(initial());
+  record = await progressToActivationPending(current.store, record);
+  record = await advance(current.store, record, "credential_promotion_starting");
+  now = Date.parse("2026-07-13T10:01:00.000Z");
+
+  const durable = await current.store.recover(record.sessionId);
+  assert.equal(durable.status, "credential_durable");
+  leaseReader.autoInstall = false;
+  await assert.rejects(
+    advance(current.store, durable, "activation_ack_starting", {
+      ackRequestReference: ACK_REFERENCE,
+      ackRequestHash: ACK_HASH
+    }),
+    { code: "desktop_codex_authorization_conflict" }
+  );
+  assert.equal((await current.store.read(record.sessionId)).status, "credential_durable");
+
+  leaseReader.install(durable, {
+    generation: 8,
+    renewedAt: "2026-07-13T10:01:00Z",
+    leaseExpiresAt: "2026-07-13T10:01:30Z",
+    updatedAt: "2026-07-13T10:01:00.000Z"
+  });
+  const ackStarting = await advance(current.store, durable, "activation_ack_starting", {
+    ackRequestReference: ACK_REFERENCE,
+    ackRequestHash: ACK_HASH
+  });
+  assert.equal(ackStarting.status, "activation_ack_starting");
+});
+
+test("recoverAll reconciles every effect fence before terminalizing any session", async (t) => {
+  const reconciler = new FakeRecoveryReconciler((record) => {
+    if (record.sessionId === "authsession_2") throw new Error("lease fence failed");
+    return recoveryCapability(record);
+  });
+  const current = await fixture({ reconciler });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let first = await current.store.create(initial());
+  first = await advance(current.store, first, "handoff_claim_starting", {
+    claimRequestReference: CLAIM_REFERENCE,
+    claimRequestHash: CLAIM_HASH
+  });
+  let second = await current.store.create(
+    initial({ sessionId: "authsession_2", handoffId: "handoff_2" })
+  );
+  second = await advance(current.store, second, "handoff_claim_starting", {
+    claimRequestReference: "d".repeat(64),
+    claimRequestHash: "e".repeat(64)
+  });
+  await assert.rejects(current.store.recoverAll(), {
+    code: "desktop_codex_authorization_conflict"
+  });
+  assert.equal((await current.store.read(first.sessionId)).status, "handoff_claim_starting");
+  assert.equal((await current.store.read(second.sessionId)).status, "handoff_claim_starting");
 });
 
 test("corrupt ciphertext, symlink, hardlink, loose directory mode, and plaintext safeStorage fail closed", async (t) => {

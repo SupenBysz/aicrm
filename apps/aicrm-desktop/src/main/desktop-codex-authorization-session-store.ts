@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { constants as fsConstants, type Stats } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { CodexAuthorizationSnapshot } from "../shared/types.ts";
+import type { DesktopActivationLeaseFenceRecord } from "./desktop-activation-lease-fence-store.ts";
 import type { SafeStorageLike } from "./desktop-device-identity.ts";
 import { DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM } from "./desktop-credential-tree-digest.ts";
 
@@ -136,7 +138,9 @@ export class DesktopCodexAuthorizationSessionStoreError extends Error {
 
   constructor(code: DesktopCodexAuthorizationSessionStoreErrorCode, message: string) {
     super(message);
+    this.name = "DesktopCodexAuthorizationSessionStoreError";
     this.code = code;
+    this.stack = `${this.name}: ${message}`;
   }
 }
 
@@ -149,6 +153,8 @@ export type DesktopCodexAuthorizationSessionFaultPoint =
 export interface DesktopCodexAuthorizationSessionStoreOptions {
   root: string;
   safeStorage: SafeStorageLike;
+  reconciler: DesktopCodexAuthorizationRecoveryReconciler;
+  activationLeaseFenceReader: DesktopCodexActivationLeaseFenceReader;
   now?: () => Date;
   faultInjector?: (
     point: DesktopCodexAuthorizationSessionFaultPoint
@@ -158,12 +164,45 @@ export interface DesktopCodexAuthorizationSessionStoreOptions {
 }
 
 /**
- * Runtime ordering fence supplied only after Main has inspected every exact
- * outbound request journal and persisted any recoverable successor generation.
+ * Exact, session-bound proof that the injected reconciler inspected outbound
+ * journals. The session store independently reads the activation lease fence.
+ * A recovered successor is returned to this store for the generation CAS; the
+ * reconciler must never call this store recursively while reconcile is in
+ * flight.
  */
-export interface DesktopCodexRecoveryPrerequisites {
-  exactOutboundJournalRecoveryAttempted: true;
-  activationLeaseFenceRecoveryAttempted: true;
+export interface DesktopCodexAuthorizationRecoveryCapability {
+  sessionId: string;
+  executorId: string;
+  deviceId: string;
+  generation: number;
+  claimRequestReference: string | null;
+  claimRequestHash: string | null;
+  proofRequestReference: string | null;
+  proofRequestHash: string | null;
+  ackRequestReference: string | null;
+  ackRequestHash: string | null;
+  activationOperationId: string | null;
+  activationId: string | null;
+  credentialRevision: number | null;
+  leaseEpoch: number | null;
+  sourceCredentialRevision: number | null;
+  revocationEpoch: number | null;
+  bindingDigest: string | null;
+  outboundJournalReconciled: true;
+  successor: DesktopCodexAuthorizationSessionData | null;
+}
+
+export interface DesktopCodexActivationLeaseFenceReader {
+  read(activationId: string): Promise<DesktopActivationLeaseFenceRecord | null>;
+  requireFresh(
+    expected: DesktopActivationLeaseFenceRecord
+  ): Promise<DesktopActivationLeaseFenceRecord>;
+}
+
+export interface DesktopCodexAuthorizationRecoveryReconciler {
+  reconcile(
+    record: Readonly<DesktopCodexAuthorizationSessionRecord>
+  ): Promise<unknown>;
 }
 
 /**
@@ -175,6 +214,8 @@ export interface DesktopCodexRecoveryPrerequisites {
 export class DesktopCodexAuthorizationSessionStore {
   private readonly root: string;
   private readonly safeStorage: SafeStorageLike;
+  private readonly reconciler: DesktopCodexAuthorizationRecoveryReconciler;
+  private readonly activationLeaseFenceReader: DesktopCodexActivationLeaseFenceReader;
   private readonly now: () => Date;
   private readonly faultInjector?: DesktopCodexAuthorizationSessionStoreOptions["faultInjector"];
   private readonly renameFile: (source: string, target: string) => Promise<void>;
@@ -186,6 +227,24 @@ export class DesktopCodexAuthorizationSessionStore {
       throw sessionError("desktop_codex_authorization_unsafe", "Codex 授权恢复目录无效");
     }
     this.safeStorage = options.safeStorage;
+    if (!options.reconciler || typeof options.reconciler.reconcile !== "function") {
+      throw sessionError(
+        "desktop_codex_authorization_unsafe",
+        "Codex 授权恢复 reconciler 不可用"
+      );
+    }
+    this.reconciler = options.reconciler;
+    if (
+      !options.activationLeaseFenceReader ||
+      typeof options.activationLeaseFenceReader.read !== "function" ||
+      typeof options.activationLeaseFenceReader.requireFresh !== "function"
+    ) {
+      throw sessionError(
+        "desktop_codex_authorization_unsafe",
+        "Codex 授权 activation lease fence reader 不可用"
+      );
+    }
+    this.activationLeaseFenceReader = options.activationLeaseFenceReader;
     this.now = options.now ?? (() => new Date());
     this.faultInjector = options.faultInjector;
     this.renameFile = options.renameFile ?? rename;
@@ -196,7 +255,7 @@ export class DesktopCodexAuthorizationSessionStore {
     input: CreateDesktopCodexAuthorizationSessionInput
   ): Promise<DesktopCodexAuthorizationSessionRecord> {
     const initial = validateCreateInput(input);
-    return this.exclusive(async () => {
+    return this.publicBoundary(this.exclusive(async () => {
       this.assertSecureStorage();
       await this.ensureRoot();
       await this.repairPending(initial.sessionId);
@@ -222,22 +281,22 @@ export class DesktopCodexAuthorizationSessionStore {
       });
       await this.writeAtomic(record);
       return cloneRecord(record);
-    });
+    }));
   }
 
   read(sessionId: string): Promise<DesktopCodexAuthorizationSessionRecord | null> {
     assertSafeId(sessionId);
-    return this.exclusive(async () => {
+    return this.publicBoundary(this.exclusive(async () => {
       this.assertSecureStorage();
       await this.ensureRoot();
       await this.repairPending(sessionId);
       const current = await this.readTarget(sessionId);
       return current ? cloneRecord(current) : null;
-    });
+    }));
   }
 
   list(): Promise<DesktopCodexAuthorizationSessionRecord[]> {
-    return this.exclusive(async () => {
+    return this.publicBoundary(this.exclusive(async () => {
       this.assertSecureStorage();
       await this.ensureRoot();
       const sessionIds = await this.listSessionIdsLocked();
@@ -248,7 +307,7 @@ export class DesktopCodexAuthorizationSessionStore {
         if (record) records.push(cloneRecord(record));
       }
       return records;
-    });
+    }));
   }
 
   transition(
@@ -263,12 +322,12 @@ export class DesktopCodexAuthorizationSessionStore {
         "Codex 授权会话 CAS 目标不匹配"
       );
     }
-    return this.exclusive(async () => {
+    return this.publicBoundary(this.exclusive(async () => {
       this.assertSecureStorage();
       await this.ensureRoot();
       await this.repairPending(expectedRecord.sessionId);
       return this.transitionLocked(expectedRecord, desired);
-    });
+    }));
   }
 
   terminalize(
@@ -294,29 +353,33 @@ export class DesktopCodexAuthorizationSessionStore {
   }
 
   /**
-   * Final startup step only. The future orchestrator MUST first inspect/replay
-   * the exact outbound journal for claim/proof/ACK, reconcile the dedicated
-   * DesktopActivationLeaseFenceStore, and persist any recovered successor.
+   * Final startup step only. The store invokes its injected reconciler to
+   * inspect/replay the exact outbound journal for claim/proof/ACK. This store
+   * independently reads and verifies the dedicated activation lease store; the
+   * reconciler cannot self-report lease truth. It returns only an exact
+   * session/generation/reference-bound capability and optional successor; only
+   * this store may persist that successor.
    * This store retains immutable token expiries; evolving latestRenewedAt and
    * latestLeaseExpiresAt deliberately remain in that dedicated lease fence.
-   * Calling this before both attempts could destroy a replayable network-effect
-   * fence, so a runtime ordering credential is mandatory.
-   * Filesystem commit repair runs first; only a still-unresolved effect fence
-   * is then terminalized as indeterminate.
+   * Filesystem commit repair runs first. Reconciler rejection or a mismatched
+   * capability leaves the fence untouched; only a successful, exact capability
+   * with no successor permits terminalization as indeterminate.
    */
   recover(
-    sessionId: string,
-    attempt: DesktopCodexRecoveryPrerequisites
+    sessionId: string
   ): Promise<DesktopCodexAuthorizationSessionRecord | null> {
     assertSafeId(sessionId);
-    assertOutboundJournalRecoveryAttempt(attempt);
-    return this.exclusive(async () => {
+    return this.publicBoundary(this.exclusive(async () => {
       this.assertSecureStorage();
       await this.ensureRoot();
       await this.repairPending(sessionId);
       const current = await this.readTarget(sessionId);
       if (!current || !effectOutcomeUnknown(current)) {
         return current ? cloneRecord(current) : null;
+      }
+      const capability = await this.reconcileEffect(current);
+      if (capability.successor !== null) {
+        return this.transitionLocked(current, capability.successor);
       }
       return this.transitionLocked(current, {
         ...desktopCodexAuthorizationSessionData(current),
@@ -325,43 +388,117 @@ export class DesktopCodexAuthorizationSessionStore {
         activationToken: null,
         localFailureCode: INDETERMINATE_FAILURE_CODE
       });
-    });
+    }));
   }
 
-  /** Same ordering contract as recover; never call before journal reconciliation. */
-  recoverAll(
-    attempt: DesktopCodexRecoveryPrerequisites
-  ): Promise<DesktopCodexAuthorizationSessionRecord[]> {
-    assertOutboundJournalRecoveryAttempt(attempt);
-    return this.exclusive(async () => {
+  /** Same injected-reconciler ordering contract as recover. */
+  recoverAll(): Promise<DesktopCodexAuthorizationSessionRecord[]> {
+    return this.publicBoundary(this.exclusive(async () => {
       this.assertSecureStorage();
       await this.ensureRoot();
-      const recovered: DesktopCodexAuthorizationSessionRecord[] = [];
+      const records: DesktopCodexAuthorizationSessionRecord[] = [];
       for (const sessionId of await this.listSessionIdsLocked()) {
         await this.repairPending(sessionId);
         const current = await this.readTarget(sessionId);
-        if (!current) continue;
-        if (effectOutcomeUnknown(current)) {
+        if (current) records.push(current);
+      }
+
+      // Two pass: no session is terminalized until every effect fence has a
+      // successful exact outbound+lease reconciliation capability.
+      const capabilities = new Map<string, DesktopCodexAuthorizationRecoveryCapability>();
+      for (const record of records) {
+        if (effectOutcomeUnknown(record)) {
+          capabilities.set(record.sessionId, await this.reconcileEffect(record));
+        }
+      }
+
+      const recovered: DesktopCodexAuthorizationSessionRecord[] = [];
+      for (const record of records) {
+        const capability = capabilities.get(record.sessionId);
+        if (!capability) {
+          recovered.push(cloneRecord(record));
+        } else if (capability.successor !== null) {
+          recovered.push(await this.transitionLocked(record, capability.successor));
+        } else {
           recovered.push(
-            await this.transitionLocked(current, {
-              ...desktopCodexAuthorizationSessionData(current),
+            await this.transitionLocked(record, {
+              ...desktopCodexAuthorizationSessionData(record),
               status: "indeterminate",
               claimToken: null,
               activationToken: null,
               localFailureCode: INDETERMINATE_FAILURE_CODE
             })
           );
-        } else {
-          recovered.push(cloneRecord(current));
         }
       }
       return recovered;
-    });
+    }));
   }
 
   async snapshot(sessionId: string): Promise<CodexAuthorizationSnapshot | null> {
-    const record = await this.read(sessionId);
-    return record ? projectDesktopCodexAuthorizationSnapshot(record) : null;
+    return this.publicBoundary((async () => {
+      const record = await this.read(sessionId);
+      return record ? projectDesktopCodexAuthorizationSnapshot(record) : null;
+    })());
+  }
+
+  private async reconcileEffect(
+    record: DesktopCodexAuthorizationSessionRecord
+  ): Promise<DesktopCodexAuthorizationRecoveryCapability> {
+    let raw: unknown;
+    try {
+      raw = await this.reconciler.reconcile(cloneRecord(record));
+    } catch {
+      throw sessionError(
+        "desktop_codex_authorization_conflict",
+        "Codex 授权恢复前置对账失败"
+      );
+    }
+    const capability = validateRecoveryCapability(raw, record);
+    if (progressIndex(record.lastProgressStatus) >= 9) {
+      await this.loadExactActivationLeaseFence(record, false);
+    }
+    return capability;
+  }
+
+  private async loadExactActivationLeaseFence(
+    record: DesktopCodexAuthorizationSessionRecord,
+    requireFresh: boolean
+  ): Promise<DesktopActivationLeaseFenceRecord> {
+    if (record.activationId === null || record.activationToken === null) {
+      throw activationLeaseFenceConflict();
+    }
+    let current: DesktopActivationLeaseFenceRecord | null;
+    try {
+      current = await this.activationLeaseFenceReader.read(record.activationId);
+    } catch {
+      throw activationLeaseFenceConflict();
+    }
+    const observedAt = this.now();
+    if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime())) {
+      throw activationLeaseFenceConflict();
+    }
+    const exact = validateExactActivationLeaseFence(current, record, observedAt, false);
+    if (!requireFresh) return exact;
+    let fresh: DesktopActivationLeaseFenceRecord;
+    try {
+      fresh = await this.activationLeaseFenceReader.requireFresh(exact);
+    } catch {
+      throw activationLeaseFenceConflict();
+    }
+    const verified = validateExactActivationLeaseFence(fresh, record, observedAt, true);
+    if (!sameActivationLeaseFence(exact, verified)) throw activationLeaseFenceConflict();
+    return verified;
+  }
+
+  private publicBoundary<T>(operation: Promise<T>): Promise<T> {
+    return operation.catch((error: unknown) => {
+      if (error instanceof DesktopCodexAuthorizationSessionStoreError) throw error;
+      throw sessionError(
+        "desktop_codex_authorization_corrupt",
+        "Codex 授权恢复操作失败"
+      );
+    });
   }
 
   private async transitionLocked(
@@ -375,6 +512,12 @@ export class DesktopCodexAuthorizationSessionStore {
       sameData(current, desired) &&
       validSuccessor(expected, current)
     ) {
+      if (
+        requiresFreshLeaseForFutureEffect(current.status) ||
+        requiresFreshLeaseForFutureEffect(desired.status)
+      ) {
+        await this.loadExactActivationLeaseFence(current, true);
+      }
       await this.ensureDurableTarget(current);
       return cloneRecord(current);
     }
@@ -404,6 +547,9 @@ export class DesktopCodexAuthorizationSessionStore {
         "Codex 授权状态迁移无效"
       );
     }
+    if (requiresFreshLeaseForFutureEffect(next.status)) {
+      await this.loadExactActivationLeaseFence(current, true);
+    }
     await this.writeAtomic(next);
     return cloneRecord(next);
   }
@@ -416,7 +562,8 @@ export class DesktopCodexAuthorizationSessionStore {
     await this.faultInjector?.("after_temporary_fsync");
     await this.replaceWithRetry(
       this.temporary(validated.sessionId),
-      this.target(validated.sessionId)
+      this.target(validated.sessionId),
+      validated
     );
     await this.faultInjector?.("after_rename");
     await this.finishDurability(validated, true);
@@ -437,7 +584,7 @@ export class DesktopCodexAuthorizationSessionStore {
 
     let recovered: DesktopCodexAuthorizationSessionRecord | null = null;
     if (target === null) {
-      if (ordered.length !== 1 || ordered[0]?.generation !== 1) {
+      if (ordered.length !== 1 || !ordered[0] || !strictInitialRecord(ordered[0])) {
         throw sessionError(
           "desktop_codex_authorization_corrupt",
           "Codex 授权恢复缺少前代状态"
@@ -451,6 +598,27 @@ export class DesktopCodexAuthorizationSessionStore {
           "desktop_codex_authorization_corrupt",
           "Codex 授权同代恢复状态冲突"
         );
+      }
+      const historical = ordered.filter(
+        (candidate) => candidate.generation < target.generation
+      );
+      if (historical.length > 0) {
+        let ancestor = historical[0]!;
+        for (const candidate of historical.slice(1)) {
+          if (!validSuccessor(ancestor, candidate)) {
+            throw sessionError(
+              "desktop_codex_authorization_corrupt",
+              "Codex 授权旧代提交链不连续"
+            );
+          }
+          ancestor = candidate;
+        }
+        if (!validSuccessor(ancestor, target)) {
+          throw sessionError(
+            "desktop_codex_authorization_corrupt",
+            "Codex 授权旧代与当前目标不连续"
+          );
+        }
       }
       let cursor = target;
       for (const candidate of ordered) {
@@ -469,7 +637,11 @@ export class DesktopCodexAuthorizationSessionStore {
     if (recovered) {
       await this.ensureCommitMarker(recovered);
       await this.ensureTemporary(recovered);
-      await this.replaceWithRetry(this.temporary(sessionId), this.target(sessionId));
+      await this.replaceWithRetry(
+        this.temporary(sessionId),
+        this.target(sessionId),
+        recovered
+      );
       await this.finishDurability(recovered, false);
       return;
     }
@@ -532,7 +704,12 @@ export class DesktopCodexAuthorizationSessionStore {
     const temporary = this.temporary(record.sessionId);
     const existing = await this.readPath(temporary, record.sessionId, true);
     if (existing && sameRecord(existing, record)) return;
-    if (existing) await rm(temporary);
+    if (existing) {
+      throw sessionError(
+        "desktop_codex_authorization_corrupt",
+        "Codex 授权临时代次存在分支"
+      );
+    }
     await this.writeEnvelopeExclusive(temporary, record);
   }
 
@@ -547,8 +724,26 @@ export class DesktopCodexAuthorizationSessionStore {
       await handle.writeFile(envelope);
       if (process.platform !== "win32") await handle.chmod(0o600);
       await handle.sync();
+      const handleInfo = await handle.stat();
+      const pathInfo = await lstat(file);
+      assertSafeFile(handleInfo);
+      assertSafeFile(pathInfo);
+      if (!sameFileIdentity(handleInfo, pathInfo) || handleInfo.size !== envelope.byteLength) {
+        throw sessionError(
+          "desktop_codex_authorization_corrupt",
+          "Codex 授权写入目标已变化"
+        );
+      }
       await handle.close();
       handle = undefined;
+      const closedPathInfo = await lstat(file);
+      assertSafeFile(closedPathInfo);
+      if (!sameFileIdentity(handleInfo, closedPathInfo)) {
+        throw sessionError(
+          "desktop_codex_authorization_corrupt",
+          "Codex 授权关闭后目标已变化"
+        );
+      }
     } catch (error) {
       await handle?.close().catch(() => undefined);
       throw error;
@@ -652,7 +847,7 @@ export class DesktopCodexAuthorizationSessionStore {
       handle = await open(file, flags);
       const before = await handle.stat();
       assertSafeFile(before);
-      if (before.dev !== pathInfo.dev || before.ino !== pathInfo.ino) {
+      if (!sameFileIdentity(before, pathInfo)) {
         throw sessionError(
           "desktop_codex_authorization_corrupt",
           "Codex 授权持久化目标已变化"
@@ -699,8 +894,7 @@ export class DesktopCodexAuthorizationSessionStore {
       const after = await handle.stat();
       assertStableFile(before, after);
       if (
-        before.dev !== pathInfo.dev ||
-        before.ino !== pathInfo.ino ||
+        !sameFileIdentity(before, pathInfo) ||
         raw.byteLength !== before.size ||
         !raw.subarray(0, ENVELOPE_MAGIC.byteLength).equals(ENVELOPE_MAGIC)
       ) {
@@ -731,9 +925,20 @@ export class DesktopCodexAuthorizationSessionStore {
     }
   }
 
-  private async replaceWithRetry(source: string, target: string): Promise<void> {
+  private async replaceWithRetry(
+    source: string,
+    target: string,
+    expected: DesktopCodexAuthorizationSessionRecord
+  ): Promise<void> {
     for (let attempt = 0; ; attempt += 1) {
       try {
+        const sourceRecord = await this.readPath(source, expected.sessionId);
+        if (!sourceRecord || !sameRecord(sourceRecord, expected)) {
+          throw sessionError(
+            "desktop_codex_authorization_corrupt",
+            "Codex 授权待替换代次已变化"
+          );
+        }
         await this.renameFile(source, target);
         return;
       } catch (error) {
@@ -971,7 +1176,7 @@ function validateData(
     !nullableDigest(data.claimRequestReference) ||
     !nullableDigest(data.claimRequestHash) ||
     !nullableTicket(data.claimToken) ||
-    !nullableCanonicalTime(data.claimExpiresAt) ||
+    !nullableCanonicalServerTime(data.claimExpiresAt) ||
     !nullableDigest(data.loginIdHash) ||
     !nullableDigest(data.accountFingerprint) ||
     !nullableDigest(data.candidateBindingDigest) ||
@@ -981,7 +1186,7 @@ function validateData(
     !nullableSafeId(data.activationOperationId) ||
     !nullableSafeId(data.activationId) ||
     !nullableTicket(data.activationToken) ||
-    !nullableCanonicalTime(data.activationExpiresAt) ||
+    !nullableCanonicalServerTime(data.activationExpiresAt) ||
     !nullablePositiveRevision(data.credentialRevision) ||
     !nullablePositiveRevision(data.leaseEpoch) ||
     !nullableNonNegativeRevision(data.sourceCredentialRevision) ||
@@ -1008,6 +1213,201 @@ function hasDataShape(value: unknown): boolean {
   const expected = [...DATA_KEYS].sort();
   actual.sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function validateRecoveryCapability(
+  value: unknown,
+  record: DesktopCodexAuthorizationSessionRecord
+): DesktopCodexAuthorizationRecoveryCapability {
+  if (
+    !exactObject(value, [
+      "sessionId",
+      "executorId",
+      "deviceId",
+      "generation",
+      "claimRequestReference",
+      "claimRequestHash",
+      "proofRequestReference",
+      "proofRequestHash",
+      "ackRequestReference",
+      "ackRequestHash",
+      "activationOperationId",
+      "activationId",
+      "credentialRevision",
+      "leaseEpoch",
+      "sourceCredentialRevision",
+      "revocationEpoch",
+      "bindingDigest",
+      "outboundJournalReconciled",
+      "successor"
+    ])
+  ) {
+    throw recoveryCapabilityError();
+  }
+  const capability = value as unknown as DesktopCodexAuthorizationRecoveryCapability;
+  if (
+    capability.sessionId !== record.sessionId ||
+    capability.executorId !== record.executorId ||
+    capability.deviceId !== record.deviceId ||
+    capability.generation !== record.generation ||
+    capability.claimRequestReference !== record.claimRequestReference ||
+    capability.claimRequestHash !== record.claimRequestHash ||
+    capability.proofRequestReference !== record.proofRequestReference ||
+    capability.proofRequestHash !== record.proofRequestHash ||
+    capability.ackRequestReference !== record.ackRequestReference ||
+    capability.ackRequestHash !== record.ackRequestHash ||
+    capability.activationOperationId !== record.activationOperationId ||
+    capability.activationId !== record.activationId ||
+    capability.credentialRevision !== record.credentialRevision ||
+    capability.leaseEpoch !== record.leaseEpoch ||
+    capability.sourceCredentialRevision !== record.sourceCredentialRevision ||
+    capability.revocationEpoch !== record.revocationEpoch ||
+    capability.bindingDigest !== record.bindingDigest ||
+    capability.outboundJournalReconciled !== true
+  ) {
+    throw recoveryCapabilityError();
+  }
+  let successor: DesktopCodexAuthorizationSessionData | null = null;
+  if (capability.successor !== null) {
+    try {
+      successor = validateData(capability.successor);
+    } catch {
+      throw recoveryCapabilityError();
+    }
+    if (successor.sessionId !== record.sessionId) throw recoveryCapabilityError();
+  }
+  return {
+    sessionId: capability.sessionId,
+    executorId: capability.executorId,
+    deviceId: capability.deviceId,
+    generation: capability.generation,
+    claimRequestReference: capability.claimRequestReference,
+    claimRequestHash: capability.claimRequestHash,
+    proofRequestReference: capability.proofRequestReference,
+    proofRequestHash: capability.proofRequestHash,
+    ackRequestReference: capability.ackRequestReference,
+    ackRequestHash: capability.ackRequestHash,
+    activationOperationId: capability.activationOperationId,
+    activationId: capability.activationId,
+    credentialRevision: capability.credentialRevision,
+    leaseEpoch: capability.leaseEpoch,
+    sourceCredentialRevision: capability.sourceCredentialRevision,
+    revocationEpoch: capability.revocationEpoch,
+    bindingDigest: capability.bindingDigest,
+    outboundJournalReconciled: true,
+    successor
+  };
+}
+
+const ACTIVATION_LEASE_FENCE_RECORD_KEYS = [
+  "version",
+  "generation",
+  "status",
+  "semanticKey",
+  "sessionId",
+  "executorId",
+  "operationId",
+  "activationId",
+  "credentialRevision",
+  "leaseEpoch",
+  "sourceCredentialRevision",
+  "revocationEpoch",
+  "bindingDigest",
+  "tokenHash",
+  "requestReference",
+  "requestHash",
+  "renewedAt",
+  "leaseExpiresAt",
+  "replayed",
+  "recovered",
+  "createdAt",
+  "updatedAt",
+  "removedAt"
+] as const;
+
+function validateExactActivationLeaseFence(
+  value: unknown,
+  record: DesktopCodexAuthorizationSessionRecord,
+  observedAt: Date,
+  requireFresh: boolean
+): DesktopActivationLeaseFenceRecord {
+  if (!exactObject(value, ACTIVATION_LEASE_FENCE_RECORD_KEYS)) {
+    throw activationLeaseFenceConflict();
+  }
+  const fence = value as unknown as DesktopActivationLeaseFenceRecord;
+  const renewedAt = Date.parse(fence.renewedAt);
+  const leaseExpiresAt = Date.parse(fence.leaseExpiresAt);
+  const activationExpiresAt = Date.parse(record.activationExpiresAt ?? "");
+  const createdAt = Date.parse(fence.createdAt);
+  const updatedAt = Date.parse(fence.updatedAt);
+  const freshShape =
+    fence.status === "fresh" && !fence.recovered && !fence.replayed;
+  const recoveryShape =
+    fence.status === "recovery_required" && (fence.recovered || fence.replayed);
+  if (
+    fence.version !== 1 ||
+    !positiveRevision(fence.generation) ||
+    (!freshShape && !recoveryShape) ||
+    (requireFresh && fence.status !== "fresh") ||
+    fence.semanticKey !==
+      activationLeaseSemanticKey(record.sessionId, record.activationId ?? "") ||
+    fence.sessionId !== record.sessionId ||
+    fence.executorId !== record.executorId ||
+    fence.operationId !== record.activationOperationId ||
+    fence.activationId !== record.activationId ||
+    fence.credentialRevision !== record.credentialRevision ||
+    fence.leaseEpoch !== record.leaseEpoch ||
+    fence.sourceCredentialRevision !== record.sourceCredentialRevision ||
+    fence.revocationEpoch !== record.revocationEpoch ||
+    fence.bindingDigest !== record.bindingDigest ||
+    fence.tokenHash !== sha256Text(record.activationToken ?? "") ||
+    !DIGEST.test(fence.requestReference) ||
+    fence.requestReference !==
+      activationLeaseRequestReference(record.sessionId, record.activationId ?? "") ||
+    !DIGEST.test(fence.requestHash) ||
+    !canonicalServerTime(fence.renewedAt) ||
+    !canonicalServerTime(fence.leaseExpiresAt) ||
+    !canonicalTime(fence.createdAt) ||
+    !canonicalTime(fence.updatedAt) ||
+    fence.removedAt !== null ||
+    !Number.isFinite(renewedAt) ||
+    !Number.isFinite(leaseExpiresAt) ||
+    !Number.isFinite(activationExpiresAt) ||
+    !Number.isFinite(createdAt) ||
+    !Number.isFinite(updatedAt) ||
+    updatedAt < createdAt ||
+    updatedAt > observedAt.getTime() ||
+    leaseExpiresAt <= renewedAt ||
+    leaseExpiresAt - renewedAt > 30_000 ||
+    leaseExpiresAt > activationExpiresAt ||
+    renewedAt > updatedAt ||
+    leaseExpiresAt > updatedAt + 30_000 ||
+    (requireFresh && leaseExpiresAt <= observedAt.getTime())
+  ) {
+    throw activationLeaseFenceConflict();
+  }
+  return { ...fence };
+}
+
+function sameActivationLeaseFence(
+  left: DesktopActivationLeaseFenceRecord,
+  right: DesktopActivationLeaseFenceRecord
+): boolean {
+  return ACTIVATION_LEASE_FENCE_RECORD_KEYS.every((key) => left[key] === right[key]);
+}
+
+function activationLeaseFenceConflict(): DesktopCodexAuthorizationSessionStoreError {
+  return sessionError(
+    "desktop_codex_authorization_conflict",
+    "Codex 授权 activation lease fence 与当前会话不匹配"
+  );
+}
+
+function recoveryCapabilityError(): DesktopCodexAuthorizationSessionStoreError {
+  return sessionError(
+    "desktop_codex_authorization_conflict",
+    "Codex 授权恢复 capability 与当前会话不匹配"
+  );
 }
 
 function validStatusShape(data: DesktopCodexAuthorizationSessionData): boolean {
@@ -1072,7 +1472,9 @@ function validStatusShape(data: DesktopCodexAuthorizationSessionData): boolean {
   ) {
     return false;
   }
-  if (!pairAt(data.ackRequestReference, data.ackRequestHash, index >= 14)) return false;
+  // The exact ACK request identity is durable before the network effect starts.
+  // Response and terminal generations may only retain this frozen pair.
+  if (!pairAt(data.ackRequestReference, data.ackRequestHash, index >= 13)) return false;
 
   if (!terminal) {
     // Claim and activation credentials remain available through the durable
@@ -1121,6 +1523,26 @@ function validSuccessor(
     current.status === current.lastProgressStatus &&
     next.lastProgressStatus === next.status &&
     nextIndex === currentIndex + 1
+  );
+}
+
+function strictInitialRecord(record: DesktopCodexAuthorizationSessionRecord): boolean {
+  return (
+    record.version === 1 &&
+    record.generation === 1 &&
+    record.status === "accepted" &&
+    record.lastProgressStatus === "accepted" &&
+    record.createdAt === record.updatedAt &&
+    sameData(
+      record,
+      initialData({
+        sessionId: record.sessionId,
+        executorId: record.executorId,
+        deviceId: record.deviceId,
+        handoffId: record.handoffId,
+        sessionRevision: record.sessionRevision
+      })
+    )
   );
 }
 
@@ -1423,8 +1845,8 @@ function nullableFailureCode(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && SAFE_CODE.test(value));
 }
 
-function nullableCanonicalTime(value: unknown): value is string | null {
-  return value === null || (typeof value === "string" && canonicalTime(value));
+function nullableCanonicalServerTime(value: unknown): value is string | null {
+  return value === null || canonicalServerTime(value);
 }
 
 function nullablePositiveRevision(value: unknown): value is number | null {
@@ -1453,10 +1875,65 @@ function canonicalNow(value: Date): string {
   return value.toISOString();
 }
 
+function activationLeaseRequestReference(sessionId: string, activationId: string): string {
+  const requestPath =
+    `/api/v1/ai-executor-authorization-sessions/${sessionId}` +
+    `/desktop-activations/${activationId}/lease-renewals`;
+  return sha256Text(
+    `AICRM-TRUSTED-REQUEST-V1\ncredential_activation_lease_renewal\n${requestPath}`
+  );
+}
+
+function activationLeaseSemanticKey(sessionId: string, activationId: string): string {
+  return sha256Text(`AICRM-ACTIVATION-LEASE-FENCE-V1\n${sessionId}\n${activationId}`);
+}
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function requiresFreshLeaseForFutureEffect(
+  status: DesktopCodexAuthorizationSessionStatus
+): boolean {
+  return status === "credential_promotion_starting" || status === "activation_ack_starting";
+}
+
 function canonicalTime(value: string): boolean {
   if (typeof value !== "string" || !CANONICAL_UTC.test(value)) return false;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+/** Go time.RFC3339Nano canonical UTC: no fraction for zero, otherwise 1-9 digits without trailing zero. */
+function canonicalServerTime(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$/.exec(
+    value
+  );
+  if (!match) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fractional] =
+    match;
+  if (fractional?.endsWith("0")) return false;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const milliseconds = Number((fractional ?? "").padEnd(3, "0").slice(0, 3) || "0");
+  if (year < 1 || hour > 23 || minute > 59 || second > 59) return false;
+  const probe = new Date(0);
+  probe.setUTCFullYear(year, month - 1, day);
+  probe.setUTCHours(hour, minute, second, milliseconds);
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day &&
+    probe.getUTCHours() === hour &&
+    probe.getUTCMinutes() === minute &&
+    probe.getUTCSeconds() === second &&
+    Number.isFinite(probe.getTime())
+  );
 }
 
 function exactObject(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
@@ -1471,24 +1948,6 @@ function assertSafeId(value: string): void {
     throw sessionError(
       "desktop_codex_authorization_unsafe",
       "Codex 授权会话标识无效"
-    );
-  }
-}
-
-function assertOutboundJournalRecoveryAttempt(
-  value: DesktopCodexRecoveryPrerequisites
-): void {
-  if (
-    !exactObject(value, [
-      "exactOutboundJournalRecoveryAttempted",
-      "activationLeaseFenceRecoveryAttempted"
-    ]) ||
-    value.exactOutboundJournalRecoveryAttempted !== true ||
-    value.activationLeaseFenceRecoveryAttempted !== true
-  ) {
-    throw sessionError(
-      "desktop_codex_authorization_unsafe",
-      "Codex 授权 outbound journal 或 lease fence 尚未完成恢复尝试"
     );
   }
 }
@@ -1515,6 +1974,7 @@ function assertStableFile(before: Stats, after: Stats): void {
     before.dev !== after.dev ||
     before.ino !== after.ino ||
     before.mode !== after.mode ||
+    before.nlink !== after.nlink ||
     before.size !== after.size ||
     before.mtimeMs !== after.mtimeMs ||
     before.ctimeMs !== after.ctimeMs
@@ -1524,6 +1984,16 @@ function assertStableFile(before: Stats, after: Stats): void {
       "Codex 授权恢复文件读取不稳定"
     );
   }
+}
+
+function sameFileIdentity(left: Stats, right: Stats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.size === right.size
+  );
 }
 
 async function syncDirectory(directory: string): Promise<boolean> {
