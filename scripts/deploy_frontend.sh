@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT_DIR/apps/ky-admin-host/dist"
 TARGET_DIR="${KY_DEPLOY_ROOT:-/data/kyai_crm}/www/ky-admin-host"
-HEALTHZ_URL="${KY_VERIFY_CONSOLE_URL:-http://127.0.0.1}/healthz"
+HEALTHZ_URL="${KY_VERIFY_CONSOLE_URL:-http://127.0.0.1:16178}/healthz"
 
 test -f "$SRC_DIR/index.html"
 

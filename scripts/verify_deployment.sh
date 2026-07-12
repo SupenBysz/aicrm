@@ -45,7 +45,7 @@ if [[ "$READYZ_ONLY" == "1" ]]; then
   exit 0
 fi
 
-check_url "${KY_VERIFY_CONSOLE_URL:-http://127.0.0.1}/healthz"
+check_url "${KY_VERIFY_CONSOLE_URL:-http://127.0.0.1:16178}/healthz"
 
 echo "Phase 1 skeleton verification notes:"
 echo "- Login, bootstrap, workspace switching, platform/agency/enterprise menus, permission denial, member invitation, notification unread count, and AI model checks require the corresponding APIs to be implemented."
