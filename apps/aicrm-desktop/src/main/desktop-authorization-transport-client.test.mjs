@@ -114,13 +114,30 @@ function claimData(overrides = {}) {
 }
 
 function response(data, { status = 200, requestId = "req_server_1", envelope = {} } = {}) {
+  const encoded = Buffer.from(JSON.stringify({ data, requestId, ...envelope }), "utf8");
   return {
     ok: status >= 200 && status < 300,
     status,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoded);
+        controller.close();
+      }
+    }),
     async text() {
-      return JSON.stringify({ data, requestId, ...envelope });
+      throw new Error("transport must read the bounded response stream");
     }
   };
+}
+
+function rejectionResponse(status, code, canary = "server-detail-must-not-escape") {
+  return response(undefined, {
+    status,
+    envelope: {
+      error: { code, message: canary },
+      debug: canary
+    }
+  });
 }
 
 function requestProjection(url, init) {
@@ -311,6 +328,358 @@ test("response loss replays the exact encrypted claim and a durable response nee
 
   await restarted.completeRequest(recovered.requestReference, recovered.requestHash);
   assert.equal(await current.journal.load(recovered.requestReference), null);
+});
+
+test("ticket-free claim recovery replays only the exact durable request under the shared lane", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const requests = [];
+  let firstPrepared;
+  await assert.rejects(
+    current.client({
+      fetch: async (url, init) => {
+        requests.push(requestProjection(url, init));
+        throw new Error("offline");
+      }
+    }).claimDesktopHandoff(claimInput(), {
+      onPrepared: async (prepared) => {
+        firstPrepared = prepared;
+      }
+    }),
+    { code: "desktop_authorization_transport_failed" }
+  );
+  assert.equal(current.signCount(), 1);
+  assert.ok(firstPrepared);
+  await assert.rejects(current.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+
+  const order = [];
+  let recoveryProjection;
+  const recoveryInput = {
+    sessionId: "session_1",
+    handoffId: "handoff_1",
+    expectedRequestReference: firstPrepared.requestReference,
+    expectedRequestHash: firstPrepared.requestHash
+  };
+  const recovered = await current.client({
+    fetch: async (url, init) => {
+      order.push("fetch");
+      requests.push(requestProjection(url, init));
+      return response(claimData());
+    }
+  }).recoverDesktopHandoffClaim(recoveryInput, {
+    onPrepared: async (prepared) => {
+      order.push("prepared");
+      recoveryProjection = prepared;
+    }
+  });
+
+  assert.deepEqual(order, ["prepared", "fetch"]);
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.equal(recovered.recovered, true);
+  assert.deepEqual(recovered.data, claimData());
+  assert.deepEqual(recoveryProjection, {
+    requestReference: firstPrepared.requestReference,
+    requestHash: firstPrepared.requestHash,
+    recovered: true,
+    responseAvailable: false
+  });
+  assert.deepEqual(Object.keys(recoveryInput).sort(), [
+    "expectedRequestHash",
+    "expectedRequestReference",
+    "handoffId",
+    "sessionId"
+  ]);
+  const safeProjection = JSON.stringify(recoveryProjection);
+  for (const canary of [HANDOFF_TICKET, requests[0].url, requests[0].body, current.base]) {
+    assert.equal(safeProjection.includes(canary), false);
+  }
+
+  let durableNetworkCalls = 0;
+  let durableProjection;
+  const durableRecovery = await current.client({
+    fetch: async () => {
+      durableNetworkCalls += 1;
+      throw new Error("must not send a durable response");
+    }
+  }).recoverDesktopHandoffClaim(recoveryInput, {
+    onPrepared: async (prepared) => {
+      durableProjection = prepared;
+    }
+  });
+  assert.equal(durableNetworkCalls, 0);
+  assert.equal(current.signCount(), 1);
+  assert.equal(durableRecovery.recovered, true);
+  assert.deepEqual(durableRecovery.data, claimData());
+  assert.deepEqual(durableProjection, {
+    requestReference: firstPrepared.requestReference,
+    requestHash: firstPrepared.requestHash,
+    recovered: true,
+    responseAvailable: true
+  });
+
+  await assert.rejects(
+    current.client().recoverDesktopHandoffClaim(recoveryInput, {
+      onPrepared: async () => {
+        throw new Error("business reconciliation unavailable");
+      }
+    }),
+    /business reconciliation unavailable/
+  );
+  await assert.rejects(current.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+  await current.client().recoverDesktopHandoffClaim(recoveryInput, {
+    onPrepared: async () => undefined
+  });
+
+  let laneReleased = false;
+  await current.lane.run(async () => {
+    laneReleased = true;
+  });
+  assert.equal(laneReleased, true);
+});
+
+test("ticket-free claim recovery rejects every mismatched fence without signing or sending", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let networkCalls = 0;
+  let prepared;
+  await assert.rejects(
+    current.client({
+      fetch: async () => {
+        networkCalls += 1;
+        throw new Error("offline");
+      }
+    }).claimDesktopHandoff(claimInput(), {
+      onPrepared: async (value) => {
+        prepared = value;
+      }
+    })
+  );
+  assert.ok(prepared);
+  assert.equal(current.signCount(), 1);
+  assert.equal(networkCalls, 1);
+  const exact = {
+    sessionId: "session_1",
+    handoffId: "handoff_1",
+    expectedRequestReference: prepared.requestReference,
+    expectedRequestHash: prepared.requestHash
+  };
+
+  await assert.rejects(
+    current.client({
+      fetch: async () => {
+        networkCalls += 1;
+        return response(claimData());
+      }
+    })
+      .recoverDesktopHandoffClaim({ ...exact, expectedRequestHash: "f".repeat(64) }),
+    { code: "desktop_authorization_transport_recovery_conflict" }
+  );
+  await assert.rejects(
+    async () =>
+      current.client().recoverDesktopHandoffClaim({
+        ...exact,
+        expectedRequestReference: "e".repeat(64)
+      }),
+    { code: "desktop_authorization_transport_recovery_conflict" }
+  );
+  await assert.rejects(
+    async () =>
+      current.client().recoverDesktopHandoffClaim({
+        ...exact,
+        sessionId: "session_wrong"
+      }),
+    { code: "desktop_authorization_transport_recovery_conflict" }
+  );
+  await assert.rejects(
+    async () =>
+      current.client().recoverDesktopHandoffClaim({
+        ...exact,
+        handoffId: "handoff_wrong"
+      }),
+    { code: "desktop_authorization_transport_recovery_conflict" }
+  );
+  await assert.rejects(
+    current.client({ loadTrustedApiBaseUrl: () => "https://other.example.test" })
+      .recoverDesktopHandoffClaim(exact),
+    { code: "desktop_authorization_transport_recovery_conflict" }
+  );
+  await assert.rejects(
+    async () =>
+      current.client().recoverDesktopHandoffClaim({
+        ...exact,
+        handoffTicket: HANDOFF_TICKET
+      }),
+    { code: "desktop_authorization_transport_contract_invalid" }
+  );
+
+  assert.equal(current.signCount(), 1);
+  assert.equal(networkCalls, 1);
+  await assert.rejects(current.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+});
+
+test("deterministic 4xx is encrypted before rejection and restarts without network", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const bodyCanary = "raw-ticket-path-and-server-detail-must-not-escape";
+  let prepared;
+  const firstError = await current.client({
+    fetch: async () => rejectionResponse(409, "handoff_already_claimed", bodyCanary)
+  }).claimDesktopHandoff(claimInput(), {
+    onPrepared: async (value) => {
+      prepared = value;
+    }
+  }).then(
+    () => assert.fail("expected deterministic rejection"),
+    (error) => error
+  );
+  assert.deepEqual(
+    {
+      code: firstError.code,
+      status: firstError.status,
+      serverCode: firstError.serverCode,
+      message: firstError.message
+    },
+    {
+      code: "desktop_authorization_transport_rejected",
+      status: 409,
+      serverCode: "handoff_already_claimed",
+      message: "服务端拒绝设备授权请求"
+    }
+  );
+  for (const canary of [bodyCanary, HANDOFF_TICKET, prepared.requestReference]) {
+    assert.equal(JSON.stringify(firstError).includes(canary), false);
+    assert.equal(firstError.message.includes(canary), false);
+  }
+  const durable = await current.journal.load(prepared.requestReference);
+  assert.equal(durable?.response?.status, 409);
+  assert.equal(current.signCount(), 1);
+  const encrypted = await readFile(path.join(current.journalRoot, `${prepared.requestReference}.sec`));
+  for (const canary of [bodyCanary, HANDOFF_TICKET, "handoff_already_claimed"]) {
+    assert.equal(encrypted.includes(Buffer.from(canary)), false);
+  }
+
+  let networkCalls = 0;
+  let restartedPrepared;
+  const restartedError = await current.client({
+    fetch: async () => {
+      networkCalls += 1;
+      throw new Error("must not send");
+    }
+  }).recoverDesktopHandoffClaim({
+    sessionId: "session_1",
+    handoffId: "handoff_1",
+    expectedRequestReference: prepared.requestReference,
+    expectedRequestHash: prepared.requestHash
+  }, {
+    onPrepared: async (value) => {
+      restartedPrepared = value;
+    }
+  }).then(
+    () => assert.fail("expected recovered deterministic rejection"),
+    (error) => error
+  );
+  assert.equal(networkCalls, 0);
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(restartedPrepared, {
+    requestReference: prepared.requestReference,
+    requestHash: prepared.requestHash,
+    recovered: true,
+    responseAvailable: true
+  });
+  assert.deepEqual(
+    {
+      code: restartedError.code,
+      status: restartedError.status,
+      serverCode: restartedError.serverCode,
+      message: restartedError.message
+    },
+    {
+      code: firstError.code,
+      status: firstError.status,
+      serverCode: firstError.serverCode,
+      message: firstError.message
+    }
+  );
+
+  await assert.rejects(
+    current.client().completeRequest(prepared.requestReference, "0".repeat(64)),
+    { code: "desktop_device_request_journal_not_completed" }
+  );
+  assert.ok(await current.journal.load(prepared.requestReference));
+  await current.client().completeRequest(prepared.requestReference, prepared.requestHash);
+  assert.equal(await current.journal.load(prepared.requestReference), null);
+});
+
+test("ambiguous HTTP outcomes and oversized bodies stay unresolved and pin the lane", async (t) => {
+  for (const status of [404, 408, 418, 425, 429, 499, 500, 503]) {
+    await t.test(`status ${status}`, async (st) => {
+      const current = await fixture();
+      st.after(() => rm(current.base, { recursive: true, force: true }));
+      await assert.rejects(
+        current.client({
+          fetch: async () => rejectionResponse(status, "retry_later")
+        }).claimDesktopHandoff(claimInput()),
+        { code: "desktop_authorization_transport_rejected", status }
+      );
+      assert.equal((await current.journal.list())[0].response, null);
+      await assert.rejects(current.lane.run(async () => undefined), {
+        code: "desktop_device_request_lane_pinned"
+      });
+    });
+  }
+
+  await t.test("oversized deterministic rejection", async (st) => {
+    const current = await fixture();
+    st.after(() => rm(current.base, { recursive: true, force: true }));
+    let pulls = 0;
+    let cancelled = false;
+    let textCalls = 0;
+    let requestSignal;
+    await assert.rejects(
+      current.client({
+        fetch: async (_url, init) => {
+          requestSignal = init.signal;
+          return {
+            ok: false,
+            status: 409,
+            body: new ReadableStream({
+              pull(controller) {
+                pulls += 1;
+                if (pulls > 10) {
+                  controller.close();
+                  return;
+                }
+                controller.enqueue(Buffer.alloc(20 << 10, 0x78));
+              },
+              cancel() {
+                cancelled = true;
+              }
+            }),
+            async text() {
+              textCalls += 1;
+              throw new Error("unbounded text aggregation is forbidden");
+            }
+          };
+        }
+      }).claimDesktopHandoff(claimInput()),
+      { code: "desktop_authorization_transport_response_invalid" }
+    );
+    assert.equal(cancelled, true);
+    assert.equal(textCalls, 0);
+    assert.equal(pulls < 10, true);
+    assert.equal(requestSignal.aborted, true);
+    assert.equal((await current.journal.list())[0].response, null);
+    await assert.rejects(current.lane.run(async () => undefined), {
+      code: "desktop_device_request_lane_pinned"
+    });
+  });
 });
 
 test("changed ticket or trusted origin fails closed without signing a replacement", async (t) => {

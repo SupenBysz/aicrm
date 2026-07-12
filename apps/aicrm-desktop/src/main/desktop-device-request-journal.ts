@@ -46,7 +46,7 @@ export type DesktopTrustedRequestKind =
   | "credential_revocation_ack";
 
 export interface DesktopDeviceRequestJournalResponse {
-  status: 200 | 201;
+  status: number;
   bodyBase64: string;
   receivedAt: string;
 }
@@ -519,10 +519,28 @@ function validateResponse(
   }
   decodeCanonicalBase64(value.bodyBase64, MAX_RESPONSE_BODY_BYTES);
   const expectedStatus = kind === "device_binding" ? 201 : 200;
-  if (value.status !== expectedStatus || !canonicalTime(value.receivedAt)) {
+  if (
+    (value.status !== expectedStatus &&
+      !isDeterministicDesktopDeviceRequestRejectionStatus(value.status)) ||
+    !canonicalTime(value.receivedAt)
+  ) {
     throw journalError("desktop_device_request_journal_corrupt", "设备请求响应日志字段无效");
   }
   return { ...value };
+}
+
+/**
+ * Only HTTP statuses locked by the AiCRM device API contract are durable
+ * business rejections. Router/proxy/custom statuses remain ambiguous because
+ * the same exact signed request must be allowed to reach a definitive outcome.
+ */
+export function isDeterministicDesktopDeviceRequestRejectionStatus(
+  value: unknown
+): value is number {
+  return (
+    Number.isInteger(value) &&
+    [400, 401, 403, 409, 410, 422, 426].includes(value as number)
+  );
 }
 
 function sameRequest(

@@ -8,7 +8,8 @@ import {
   type DesktopDeviceRequestJournalRecord,
   type DesktopDeviceRequestJournalStore,
   type DesktopTrustedRequestKind,
-  desktopTrustedRequestReference
+  desktopTrustedRequestReference,
+  isDeterministicDesktopDeviceRequestRejectionStatus
 } from "./desktop-device-request-journal.ts";
 import {
   hashAuthorizationToken,
@@ -88,6 +89,14 @@ export interface ClaimDesktopHandoffInput {
   sessionId: string;
   handoffId: string;
   handoffTicket: string;
+}
+
+/** Main-only exact recovery fence. It deliberately contains no bearer ticket. */
+export interface RecoverDesktopHandoffClaimInput {
+  sessionId: string;
+  handoffId: string;
+  expectedRequestReference: string;
+  expectedRequestHash: string;
 }
 
 export interface ClaimDesktopHandoffResponse {
@@ -198,7 +207,7 @@ interface AuthorizationRequestJournal
 interface HttpResponseLike {
   ok: boolean;
   status: number;
-  text(): Promise<string>;
+  body: ReadableStream<Uint8Array> | null;
 }
 
 type HostFetch = (url: string, init: RequestInit) => Promise<HttpResponseLike>;
@@ -293,6 +302,56 @@ export class DesktopAuthorizationTransportClient {
       },
       epoch,
       hooks
+    );
+  }
+
+  recoverDesktopHandoffClaim(
+    input: RecoverDesktopHandoffClaimInput,
+    hooks?: DesktopTrustedRequestHooks
+  ): Promise<DesktopTrustedTransportResult<ClaimDesktopHandoffResponse>> {
+    if (!exactObject(input, [
+      "sessionId",
+      "handoffId",
+      "expectedRequestReference",
+      "expectedRequestHash"
+    ])) {
+      throw contractInvalid("Desktop 认领恢复参数结构无效");
+    }
+    const sessionId = validOpaque(input.sessionId, "sessionId");
+    const handoffId = validOpaque(input.handoffId, "handoffId");
+    const expectedRequestReference = validDigest(
+      input.expectedRequestReference,
+      "expectedRequestReference"
+    );
+    const expectedRequestHash = validDigest(input.expectedRequestHash, "expectedRequestHash");
+    const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-handoffs/${handoffId}/claim`;
+    const reference = desktopTrustedRequestReference("handoff_claim", path);
+    if (reference !== expectedRequestReference) {
+      throw recoveryConflict("Desktop 认领恢复引用不匹配");
+    }
+
+    const epoch = this.cancellationEpoch;
+    let preparedHookFailed = false;
+    return this.requestLane.runPinned(
+      reference,
+      () =>
+        this.submitRecoveredHandoffClaim(
+          { handoffId, path, expectedRequestReference, expectedRequestHash },
+          epoch,
+          hooks,
+          () => {
+            preparedHookFailed = true;
+          }
+        ),
+      async () => {
+        if (preparedHookFailed) return true;
+        try {
+          const pending = await this.requestJournal.load(reference);
+          return pending !== null && pending.response === null;
+        } catch {
+          return true;
+        }
+      }
     );
   }
 
@@ -530,35 +589,156 @@ export class DesktopAuthorizationTransportClient {
       this.assertActive(epoch);
     }
 
+    return this.finishPreparedRequest(record, definition, epoch, false);
+  }
+
+  private async submitRecoveredHandoffClaim(
+    input: {
+      handoffId: string;
+      path: string;
+      expectedRequestReference: string;
+      expectedRequestHash: string;
+    },
+    epoch: number,
+    hooks: DesktopTrustedRequestHooks | undefined,
+    markPreparedHookFailed: () => void
+  ): Promise<DesktopTrustedTransportResult<ClaimDesktopHandoffResponse>> {
+    this.assertActive(epoch);
+    const origin = trustedApiOrigin(await this.loadTrustedApiBaseUrl());
+    this.assertActive(epoch);
+    const record = await this.requestJournal.load(input.expectedRequestReference);
+    this.assertActive(epoch);
+    if (!record || record.signed.requestHash !== input.expectedRequestHash) {
+      throw recoveryConflict("Desktop 认领恢复栅栏不匹配");
+    }
+
+    const authorizationPrefix = "AiCRM-Handoff ";
+    const ticket = record.authorization.startsWith(authorizationPrefix)
+      ? record.authorization.slice(authorizationPrefix.length)
+      : "";
+    if (!isTicket(ticket) || buildAuthorization("AiCRM-Handoff", ticket) !== record.authorization) {
+      throw recoveryConflict("Desktop 认领恢复授权记录无效");
+    }
+
+    const identity = await this.identityStore.getIdentity();
+    this.assertActive(epoch);
+    validateRegisteredIdentity(identity);
+    const definition: TrustedRequestDefinition<ClaimDesktopHandoffResponse> = {
+      kind: "handoff_claim",
+      path: input.path,
+      authorization: record.authorization,
+      authorizationScheme: "AiCRM-Handoff",
+      createBody: () => {
+        throw recoveryConflict("Desktop 认领恢复禁止创建新请求");
+      },
+      validateRecoveredBody: (body) => {
+        const value = parseJson(body, "认领恢复 body 无效");
+        if (!exactObject(value, ["handoffId", "claimedAt"])) {
+          throw recoveryConflict("认领恢复 body 结构不匹配");
+        }
+        const recovered = value as { handoffId: unknown; claimedAt: unknown };
+        if (
+          recovered.handoffId !== input.handoffId ||
+          !canonicalDeviceTime(recovered.claimedAt)
+        ) {
+          throw recoveryConflict("认领恢复 body 与当前操作不匹配");
+        }
+        requireCanonicalEncoding(body, {
+          handoffId: input.handoffId,
+          claimedAt: recovered.claimedAt
+        });
+      },
+      validateResponse: (value) => validateClaimResponse(value, input.handoffId)
+    };
+    validateRecoveredRecord(record, definition, identity, origin);
+
+    if (hooks) {
+      const prepared = Object.freeze({
+        requestReference: record.reference,
+        requestHash: record.signed.requestHash,
+        recovered: true,
+        responseAvailable: record.response !== null
+      }) satisfies Readonly<DesktopTrustedRequestPrepared>;
+      try {
+        await hooks.onPrepared(prepared);
+      } catch (error) {
+        markPreparedHookFailed();
+        throw error;
+      }
+      this.assertActive(epoch);
+    }
+
+    return this.finishPreparedRequest(record, definition, epoch, true);
+  }
+
+  private async finishPreparedRequest<T>(
+    record: DesktopDeviceRequestJournalRecord,
+    definition: TrustedRequestDefinition<T>,
+    epoch: number,
+    networkResultRecovered: boolean
+  ): Promise<DesktopTrustedTransportResult<T>> {
     if (record.response) {
-      const data = parseSuccessfulResponse(
-        Buffer.from(record.response.bodyBase64, "base64").toString("utf8"),
-        definition.validateResponse
-      );
-      return trustedResult(record, data, true);
+      const responseText = Buffer.from(record.response.bodyBase64, "base64").toString("utf8");
+      if (record.response.status === 200) {
+        const data = parseSuccessfulResponse(responseText, definition.validateResponse);
+        return trustedResult(record, data, true);
+      }
+      throw durableRejection(record.response.status, responseText);
     }
 
     const body = Buffer.from(record.bodyBase64, "base64");
     const response = await this.postExact(record.origin, record, body, epoch);
-    const data = parseSuccessfulResponse(response.text, definition.validateResponse);
-    this.assertActive(epoch);
-    const persisted = await this.requestJournal.recordResponse(
-      reference,
-      record.signed.requestHash,
-      {
-        status: 200,
-        bodyBase64: Buffer.from(response.text, "utf8").toString("base64"),
-        receivedAt: canonicalJournalNow(this.now(), "设备响应时间无效")
-      }
-    );
-    this.assertActive(epoch);
-    if (!persisted.response) {
-      throw transportError(
-        "desktop_authorization_transport_response_invalid",
-        "设备授权响应未持久化"
+    if (response.ok && response.status === 200) {
+      const data = parseSuccessfulResponse(response.text, definition.validateResponse);
+      this.assertActive(epoch);
+      const persisted = await this.requestJournal.recordResponse(
+        record.reference,
+        record.signed.requestHash,
+        {
+          status: 200,
+          bodyBase64: Buffer.from(response.text, "utf8").toString("base64"),
+          receivedAt: canonicalJournalNow(this.now(), "设备响应时间无效")
+        }
       );
+      this.assertActive(epoch);
+      if (!persisted.response || persisted.response.status !== 200) {
+        throw transportError(
+          "desktop_authorization_transport_response_invalid",
+          "设备授权响应未持久化"
+        );
+      }
+      return trustedResult(persisted, data, networkResultRecovered);
     }
-    return trustedResult(persisted, data, false);
+
+    if (
+      !response.ok &&
+      isDeterministicDesktopDeviceRequestRejectionStatus(response.status)
+    ) {
+      this.assertActive(epoch);
+      const persisted = await this.requestJournal.recordResponse(
+        record.reference,
+        record.signed.requestHash,
+        {
+          status: response.status,
+          bodyBase64: Buffer.from(response.text, "utf8").toString("base64"),
+          receivedAt: canonicalJournalNow(this.now(), "设备响应时间无效")
+        }
+      );
+      this.assertActive(epoch);
+      if (!persisted.response || persisted.response.status !== response.status) {
+        throw transportError(
+          "desktop_authorization_transport_response_invalid",
+          "设备拒绝响应未持久化"
+        );
+      }
+      throw durableRejection(response.status, response.text);
+    }
+
+    throw new DesktopAuthorizationTransportError(
+      "desktop_authorization_transport_rejected",
+      "服务端拒绝设备授权请求",
+      { status: response.status, serverCode: readServerCode(response.text) }
+    );
   }
 
   private async postExact(
@@ -566,7 +746,7 @@ export class DesktopAuthorizationTransportClient {
     record: DesktopDeviceRequestJournalRecord,
     body: Buffer,
     epoch: number
-  ): Promise<{ text: string }> {
+  ): Promise<{ ok: boolean; status: number; text: string }> {
     const requestId = this.requestIdFactory();
     if (!REQUEST_ID_PATTERN.test(requestId)) {
       throw transportError(
@@ -599,16 +779,18 @@ export class DesktopAuthorizationTransportClient {
         },
         body: body.toString("utf8")
       });
-      const text = await readBoundedText(response);
+      const text = await readBoundedText(response, () => controller.abort());
       this.assertActive(epoch);
-      if (!response.ok || response.status !== 200) {
-        throw new DesktopAuthorizationTransportError(
-          "desktop_authorization_transport_rejected",
-          "服务端拒绝设备授权请求",
-          { status: response.status, serverCode: readServerCode(text) }
-        );
+      if (
+        typeof response.ok !== "boolean" ||
+        !Number.isInteger(response.status) ||
+        response.status < 100 ||
+        response.status > 599 ||
+        response.ok !== (response.status >= 200 && response.status < 300)
+      ) {
+        throw invalidResponse("设备授权 HTTP 响应无效");
       }
-      return { text };
+      return { ok: response.ok, status: response.status, text };
     } catch (error) {
       if (epoch !== this.cancellationEpoch) {
         throw transportError(
@@ -951,17 +1133,46 @@ function parseSuccessfulResponse<T>(text: string, validate: (value: unknown) => 
   return validate(typed.data);
 }
 
-async function readBoundedText(response: HttpResponseLike): Promise<string> {
-  let text: string;
+async function readBoundedText(
+  response: HttpResponseLike,
+  abortResponse: () => void
+): Promise<string> {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
   try {
-    text = await response.text();
-  } catch {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) {
+        const cancellation = reader.cancel().catch(() => undefined);
+        abortResponse();
+        await cancellation;
+        throw invalidResponse("设备授权响应流无效");
+      }
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_RESPONSE_BYTES) {
+        const cancellation = reader.cancel().catch(() => undefined);
+        abortResponse();
+        await cancellation;
+        throw invalidResponse("设备授权响应过大");
+      }
+      chunks.push(value);
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(
+        Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), totalBytes)
+      );
+    } catch {
+      throw invalidResponse("设备授权响应编码无效");
+    }
+  } catch (error) {
+    if (error instanceof DesktopAuthorizationTransportError) throw error;
     throw invalidResponse("设备授权响应无法读取");
+  } finally {
+    reader.releaseLock();
   }
-  if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) {
-    throw invalidResponse("设备授权响应过大");
-  }
-  return text;
 }
 
 function readServerCode(text: string): string | undefined {
@@ -975,6 +1186,20 @@ function readServerCode(text: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function durableRejection(
+  status: number,
+  text: string
+): DesktopAuthorizationTransportError {
+  if (!isDeterministicDesktopDeviceRequestRejectionStatus(status)) {
+    return invalidResponse("设备拒绝响应状态无效");
+  }
+  return new DesktopAuthorizationTransportError(
+    "desktop_authorization_transport_rejected",
+    "服务端拒绝设备授权请求",
+    { status, serverCode: readServerCode(text) }
+  );
 }
 
 function trustedResult<T>(

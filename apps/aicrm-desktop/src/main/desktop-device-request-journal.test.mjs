@@ -249,6 +249,52 @@ test("device binding alone accepts Bearer and 201 while ticket kinds remain fixe
   );
 });
 
+test("deterministic 4xx rejections are durable while ambiguous statuses stay unresolved", async (t) => {
+  const deterministicBody = {
+    error: {
+      code: "workspace_forbidden",
+      message: "raw rejection body must remain encrypted"
+    },
+    requestId: "req_rejection_1"
+  };
+  for (const status of [400, 401, 403, 409, 410, 422, 426]) {
+    await t.test(`durable ${status}`, async (t) => {
+      const current = await fixture();
+      t.after(() => rm(current.base, { recursive: true, force: true }));
+      const record = await current.journal.createOrLoad(requestRecord());
+      const rejection = { ...response(deterministicBody), status };
+      const persisted = await current.journal.recordResponse(
+        record.reference,
+        record.signed.requestHash,
+        rejection
+      );
+      assert.deepEqual(persisted.response, rejection);
+      const encrypted = await readFile(path.join(current.root, `${record.reference}.sec`));
+      assert.equal(encrypted.includes(Buffer.from("workspace_forbidden")), false);
+      assert.deepEqual((await current.journal.load(record.reference)).response, rejection);
+      await current.journal.complete(record.reference, record.signed.requestHash);
+      assert.equal(await current.journal.load(record.reference), null);
+    });
+  }
+
+  for (const status of [201, 302, 404, 408, 418, 425, 429, 499, 500, 503]) {
+    await t.test(`ambiguous or invalid ${status}`, async (t) => {
+      const current = await fixture();
+      t.after(() => rm(current.base, { recursive: true, force: true }));
+      const record = await current.journal.createOrLoad(requestRecord());
+      await assert.rejects(
+        current.journal.recordResponse(
+          record.reference,
+          record.signed.requestHash,
+          { ...response(deterministicBody), status }
+        ),
+        { code: "desktop_device_request_journal_corrupt" }
+      );
+      assert.equal((await current.journal.load(record.reference)).response, null);
+    });
+  }
+});
+
 test("a fsynced temporary record recovers after a crash before rename", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
