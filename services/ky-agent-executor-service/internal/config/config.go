@@ -2,12 +2,16 @@ package config
 
 import (
 	"bufio"
+	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -19,22 +23,26 @@ const (
 )
 
 type Config struct {
-	HTTPAddr              string
-	RuntimeEnvFile        string
-	DatabaseURL           string
-	WriterDatabaseURL     string
-	InternalToken         string
-	AuthTokenSecret       string
-	DeviceChallengeSecret string
-	MembershipURL         string
-	WriteEnabled          bool
-	CredentialRoot        string
-	CodexBinary           string
-	SystemdRunPath        string
-	OwnerInstanceID       string
-	CodexVersion          string
-	RuntimeBindingID      string
-	RuntimeBrokerSocket   string
+	HTTPAddr                    string
+	RuntimeEnvFile              string
+	DatabaseURL                 string
+	WriterDatabaseURL           string
+	InternalToken               string
+	AuthTokenSecret             string
+	DeviceChallengeSecret       string
+	ConfirmationChallengeSecret string
+	TrustedTokenNonceSecret     string
+	TrustedTokenKeyID           string
+	TrustedTokenPrivateKey      string
+	MembershipURL               string
+	WriteEnabled                bool
+	CredentialRoot              string
+	CodexBinary                 string
+	SystemdRunPath              string
+	OwnerInstanceID             string
+	CodexVersion                string
+	RuntimeBindingID            string
+	RuntimeBrokerSocket         string
 }
 
 func Load() Config {
@@ -78,22 +86,26 @@ func Load() Config {
 		runtimeBrokerSocket = "/run/aicrm-agent-runtime.sock"
 	}
 	return Config{
-		HTTPAddr:              addr,
-		RuntimeEnvFile:        runtimeEnvFile,
-		DatabaseURL:           strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
-		WriterDatabaseURL:     strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
-		InternalToken:         internalToken,
-		AuthTokenSecret:       strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
-		DeviceChallengeSecret: strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET")),
-		MembershipURL:         membershipURL,
-		WriteEnabled:          strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
-		CredentialRoot:        credentialRoot,
-		CodexBinary:           strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
-		SystemdRunPath:        strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
-		OwnerInstanceID:       ownerInstanceID,
-		CodexVersion:          codexVersion,
-		RuntimeBindingID:      runtimeBindingID,
-		RuntimeBrokerSocket:   runtimeBrokerSocket,
+		HTTPAddr:                    addr,
+		RuntimeEnvFile:              runtimeEnvFile,
+		DatabaseURL:                 strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
+		WriterDatabaseURL:           strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
+		InternalToken:               internalToken,
+		AuthTokenSecret:             strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
+		DeviceChallengeSecret:       strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET")),
+		ConfirmationChallengeSecret: strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_CONFIRMATION_CHALLENGE_SECRET")),
+		TrustedTokenNonceSecret:     strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET")),
+		TrustedTokenKeyID:           strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID")),
+		TrustedTokenPrivateKey:      strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY")),
+		MembershipURL:               membershipURL,
+		WriteEnabled:                strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
+		CredentialRoot:              credentialRoot,
+		CodexBinary:                 strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
+		SystemdRunPath:              strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
+		OwnerInstanceID:             ownerInstanceID,
+		CodexVersion:                codexVersion,
+		RuntimeBindingID:            runtimeBindingID,
+		RuntimeBrokerSocket:         runtimeBrokerSocket,
 	}
 }
 
@@ -118,17 +130,21 @@ func (c Config) validateControlPlane() error {
 		return nil
 	}
 	for name, value := range map[string]string{
-		"KY_AGENT_EXECUTOR_DATABASE_URL":            c.DatabaseURL,
-		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL":     c.WriterDatabaseURL,
-		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":          c.InternalToken,
-		"KY_AUTH_TOKEN_SECRET":                      c.AuthTokenSecret,
-		"KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET": c.DeviceChallengeSecret,
-		"KY_MEMBERSHIP_SERVICE_URL":                 c.MembershipURL,
-		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":         c.CredentialRoot,
-		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":       c.OwnerInstanceID,
-		"KY_CODEX_VERSION":                          c.CodexVersion,
-		"KY_AGENT_EXECUTOR_RUNTIME_BINDING_ID":      c.RuntimeBindingID,
-		"KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET":   c.RuntimeBrokerSocket,
+		"KY_AGENT_EXECUTOR_DATABASE_URL":                  c.DatabaseURL,
+		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL":           c.WriterDatabaseURL,
+		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":                c.InternalToken,
+		"KY_AUTH_TOKEN_SECRET":                            c.AuthTokenSecret,
+		"KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET":       c.DeviceChallengeSecret,
+		"KY_AGENT_EXECUTOR_CONFIRMATION_CHALLENGE_SECRET": c.ConfirmationChallengeSecret,
+		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET":    c.TrustedTokenNonceSecret,
+		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID":          c.TrustedTokenKeyID,
+		"KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY":     c.TrustedTokenPrivateKey,
+		"KY_MEMBERSHIP_SERVICE_URL":                       c.MembershipURL,
+		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":               c.CredentialRoot,
+		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":             c.OwnerInstanceID,
+		"KY_CODEX_VERSION":                                c.CodexVersion,
+		"KY_AGENT_EXECUTOR_RUNTIME_BINDING_ID":            c.RuntimeBindingID,
+		"KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET":         c.RuntimeBrokerSocket,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return errors.New(name + " is required when Agent Executor writes are enabled")
@@ -140,10 +156,78 @@ func (c Config) validateControlPlane() error {
 	if c.DeviceChallengeSecret == c.AuthTokenSecret || c.DeviceChallengeSecret == c.InternalToken {
 		return errors.New("KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET must be independent")
 	}
+	if len(c.ConfirmationChallengeSecret) < 32 {
+		return errors.New("KY_AGENT_EXECUTOR_CONFIRMATION_CHALLENGE_SECRET must be at least 32 bytes")
+	}
+	if len(c.TrustedTokenNonceSecret) < 32 {
+		return errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET must be at least 32 bytes")
+	}
+	keyMaterial, err := c.TrustedTokenKeyMaterial()
+	if err != nil {
+		return err
+	}
+	for _, secret := range []string{c.AuthTokenSecret, c.InternalToken, c.DeviceChallengeSecret} {
+		if c.ConfirmationChallengeSecret == secret {
+			return errors.New("KY_AGENT_EXECUTOR_CONFIRMATION_CHALLENGE_SECRET must be independent")
+		}
+		if c.TrustedTokenPrivateKey == secret || bytes.Equal(keyMaterial.PrivateKey, []byte(secret)) {
+			return errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY must be independent")
+		}
+	}
+	for _, secret := range []string{
+		c.AuthTokenSecret, c.InternalToken, c.DeviceChallengeSecret, c.ConfirmationChallengeSecret,
+	} {
+		if c.TrustedTokenNonceSecret == secret {
+			return errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_NONCE_SECRET must be independent")
+		}
+	}
+	if c.TrustedTokenPrivateKey == c.TrustedTokenNonceSecret ||
+		bytes.Equal(keyMaterial.PrivateKey, []byte(c.TrustedTokenNonceSecret)) {
+		return errors.New("trusted-token nonce secret and private key must be independent")
+	}
+	if c.TrustedTokenPrivateKey == c.ConfirmationChallengeSecret ||
+		bytes.Equal(keyMaterial.PrivateKey, []byte(c.ConfirmationChallengeSecret)) {
+		return errors.New("operation confirmation challenge and trusted-token key must be independent")
+	}
 	if c.DatabaseURL != "" && c.DatabaseURL == c.WriterDatabaseURL {
 		return errors.New("reader and writer database URLs must use distinct roles")
 	}
 	return nil
+}
+
+var trustedTokenKeyIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+type TrustedTokenKeyMaterial struct {
+	KeyID           string
+	PrivateKey      ed25519.PrivateKey
+	VerificationKey ed25519.PublicKey
+}
+
+// TrustedTokenKeyMaterial strictly parses the canonical raw
+// Ed25519 private key used for trusted-token issuance. The verification key is
+// always derived from this private key and is never independently configured.
+func (c Config) TrustedTokenKeyMaterial() (TrustedTokenKeyMaterial, error) {
+	keyID := c.TrustedTokenKeyID
+	encoded := c.TrustedTokenPrivateKey
+	if strings.TrimSpace(keyID) != keyID || !trustedTokenKeyIDPattern.MatchString(keyID) {
+		return TrustedTokenKeyMaterial{}, errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_KEY_ID is invalid")
+	}
+	if strings.TrimSpace(encoded) != encoded || encoded == "" || strings.Contains(encoded, "=") {
+		return TrustedTokenKeyMaterial{}, errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY must be canonical base64url")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || len(decoded) != ed25519.PrivateKeySize || base64.RawURLEncoding.EncodeToString(decoded) != encoded {
+		return TrustedTokenKeyMaterial{}, errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY must encode a 64-byte Ed25519 private key")
+	}
+	derived := ed25519.NewKeyFromSeed(decoded[:ed25519.SeedSize])
+	if !bytes.Equal(derived, decoded) {
+		return TrustedTokenKeyMaterial{}, errors.New("KY_AGENT_EXECUTOR_TRUSTED_TOKEN_PRIVATE_KEY is not a valid Ed25519 private key")
+	}
+	privateKey := append(ed25519.PrivateKey(nil), decoded...)
+	verificationKey := append(ed25519.PublicKey(nil), derived[ed25519.SeedSize:]...)
+	return TrustedTokenKeyMaterial{
+		KeyID: keyID, PrivateKey: privateKey, VerificationKey: verificationKey,
+	}, nil
 }
 
 func loadEnvFile(path string) error {

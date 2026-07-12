@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,18 @@ type fakeConfirmationStore struct {
 	issuedFirst  string
 	issuedAgain  string
 	consumed     store.ConsumeOperationConfirmationInput
+}
+
+func (f *fakeConfirmationStore) ResolveOperationConfirmationAction(
+	_ context.Context,
+	confirmationID string,
+	actorID string,
+	actorSessionID string,
+) (string, error) {
+	if f.created.ID == confirmationID && f.created.ActorID == actorID && f.created.ActorSessionID == actorSessionID {
+		return f.created.Action, nil
+	}
+	return "", store.ErrNotFound
 }
 
 func (f *fakeConfirmationStore) CreateOperationConfirmation(
@@ -88,9 +101,11 @@ func TestManagerKeepsChallengeDigestOnlyAndIssuesDeterministicBoundToken(t *test
 		t.Fatal(err)
 	}
 	fake := &fakeConfirmationStore{}
+	challengeSecret := bytes.Repeat([]byte{0x42}, 32)
+	nonceSecret := bytes.Repeat([]byte{0x43}, 32)
 	manager, err := New(fake, signer, trustedtoken.KeySet{
 		"confirmation_key_1": privateKey.Public().(ed25519.PublicKey),
-	}, bytes.Repeat([]byte{0x42}, 32))
+	}, challengeSecret, nonceSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +137,20 @@ func TestManagerKeepsChallengeDigestOnlyAndIssuesDeterministicBoundToken(t *test
 	if confirmed.ConfirmationToken == "" || fake.issuedFirst != fake.issuedAgain {
 		t.Fatal("identical persisted claims did not produce the same compact JWS")
 	}
+	restarted, err := New(fake, signer, trustedtoken.KeySet{
+		"confirmation_key_1": privateKey.Public().(ed25519.PublicKey),
+	}, challengeSecret, nonceSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedAfterRestart, err := restarted.Confirm(context.Background(), ConfirmInput{
+		ConfirmationID: created.ConfirmationID, ActorID: "owner_1", ActorSessionID: "login_session_1",
+		ChallengeText: created.ChallengeText, OwnerVerified: true,
+		LoginAuthenticatedAt: loginAt, MFARequired: true, MFAVerified: true,
+	})
+	if err != nil || replayedAfterRestart.ConfirmationToken != confirmed.ConfirmationToken {
+		t.Fatalf("restart token replay=%#v err=%v", replayedAfterRestart, err)
+	}
 	claims, err := trustedtoken.Verify(
 		confirmed.ConfirmationToken,
 		trustedtoken.KeySet{"confirmation_key_1": privateKey.Public().(ed25519.PublicKey)},
@@ -150,6 +179,42 @@ func TestManagerKeepsChallengeDigestOnlyAndIssuesDeterministicBoundToken(t *test
 	}, func(context.Context, *sql.Tx, store.OperationConfirmationProjection) error { return nil })
 	if err != nil || consumed.Status != "consumed" {
 		t.Fatalf("database-clock token verification failed: consumed=%#v err=%v", consumed, err)
+	}
+}
+
+func TestManagerRequiresIndependentChallengeAndTokenNonceSecrets(t *testing.T) {
+	seed := bytes.Repeat([]byte{0x21}, ed25519.SeedSize)
+	privateKey := ed25519.NewKeyFromSeed(seed)
+	signer, err := trustedtoken.NewSigner("confirmation_key_1", privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := trustedtoken.KeySet{"confirmation_key_1": privateKey.Public().(ed25519.PublicKey)}
+	fake := &fakeConfirmationStore{}
+	challenge := bytes.Repeat([]byte{0x31}, 32)
+	if _, err := New(fake, signer, keys, challenge, challenge); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("reused challenge/nonce secret was accepted: %v", err)
+	}
+	if _, err := New(fake, signer, keys, challenge, []byte("too-short")); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("short nonce secret was accepted: %v", err)
+	}
+	nonceSecret := bytes.Repeat([]byte{0x32}, 32)
+	first, err := New(fake, signer, keys, challenge, nonceSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(fake, signer, keys, bytes.Repeat([]byte{0x33}, 32), nonceSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := New(fake, signer, keys, challenge, bytes.Repeat([]byte{0x34}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.tokenNonce("confirmation_1") != second.tokenNonce("confirmation_1") ||
+		first.challengeText("confirmation_1") == second.challengeText("confirmation_1") ||
+		first.tokenNonce("confirmation_1") == third.tokenNonce("confirmation_1") {
+		t.Fatal("challenge and trusted-token nonce derivation domains were not independent")
 	}
 }
 

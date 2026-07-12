@@ -371,6 +371,7 @@ func newConfirmationManager(t *testing.T, control *store.ControlStore) *operatio
 		control, signer,
 		trustedtoken.KeySet{"confirmation_key_1": privateKey.Public().(ed25519.PublicKey)},
 		[]byte("0123456789abcdef0123456789abcdef"),
+		[]byte("abcdef0123456789abcdef0123456789"),
 	)
 	if err != nil {
 		t.Fatal(err)

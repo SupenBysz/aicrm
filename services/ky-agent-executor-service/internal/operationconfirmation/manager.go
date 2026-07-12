@@ -27,9 +27,22 @@ var (
 )
 
 type Store interface {
+	ResolveOperationConfirmationAction(context.Context, string, string, string) (string, error)
 	CreateOperationConfirmation(context.Context, store.CreateOperationConfirmationInput) (store.CreateOperationConfirmationResult, error)
 	ConfirmOperationConfirmation(context.Context, store.ConfirmOperationConfirmationInput, store.OperationConfirmationTokenIssuer) (store.ConfirmOperationConfirmationResult, error)
 	ConsumeOperationConfirmation(context.Context, store.OperationConfirmationTokenVerifier, store.OperationConfirmationMutation) (store.OperationConfirmationProjection, error)
+}
+
+func (m *Manager) ResolveOperationConfirmationAction(
+	ctx context.Context,
+	confirmationID string,
+	actorID string,
+	actorSessionID string,
+) (string, error) {
+	if m == nil || m.store == nil {
+		return "", ErrInvalidConfiguration
+	}
+	return m.store.ResolveOperationConfirmationAction(ctx, confirmationID, actorID, actorSessionID)
 }
 
 type Manager struct {
@@ -37,6 +50,7 @@ type Manager struct {
 	signer           *trustedtoken.Signer
 	verificationKeys trustedtoken.KeySet
 	challengeSecret  []byte
+	tokenNonceSecret []byte
 	random           io.Reader
 }
 
@@ -45,8 +59,10 @@ func New(
 	signer *trustedtoken.Signer,
 	verificationKeys trustedtoken.KeySet,
 	challengeSecret []byte,
+	tokenNonceSecret []byte,
 ) (*Manager, error) {
-	if control == nil || signer == nil || signer.KeyID() == "" || len(challengeSecret) < 32 {
+	if control == nil || signer == nil || signer.KeyID() == "" || len(challengeSecret) < 32 ||
+		len(tokenNonceSecret) < 32 || hmac.Equal(challengeSecret, tokenNonceSecret) {
 		return nil, ErrInvalidConfiguration
 	}
 	if publicKey, ok := verificationKeys[signer.KeyID()]; !ok || len(publicKey) != ed25519.PublicKeySize {
@@ -61,7 +77,8 @@ func New(
 	}
 	return &Manager{
 		store: control, signer: signer, verificationKeys: keys,
-		challengeSecret: append([]byte(nil), challengeSecret...), random: rand.Reader,
+		challengeSecret:  append([]byte(nil), challengeSecret...),
+		tokenNonceSecret: append([]byte(nil), tokenNonceSecret...), random: rand.Reader,
 	}, nil
 }
 
@@ -252,7 +269,7 @@ func (m *Manager) challengeText(confirmationID string) string {
 }
 
 func (m *Manager) tokenNonce(confirmationID string) string {
-	mac := hmac.New(sha256.New, m.challengeSecret)
+	mac := hmac.New(sha256.New, m.tokenNonceSecret)
 	_, _ = mac.Write([]byte("aicrm-operation-confirmation-token-nonce-v1\n" + confirmationID))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)[:16])
 }

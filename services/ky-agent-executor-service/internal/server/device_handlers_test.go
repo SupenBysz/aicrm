@@ -102,11 +102,13 @@ func newDeviceHandlerFixture(t *testing.T) deviceFixture {
 }
 
 func deviceHandlerServer(control *fakeDeviceControl, authorizer accessclient.Authorizer) *Server {
-	return newWithControl(config.Config{
+	server := newWithControl(config.Config{
 		HTTPAddr: "127.0.0.1:18087", WriteEnabled: true,
 		InternalToken: "device-handler-internal-token", AuthTokenSecret: deviceTestAuthSecret,
 		DeviceChallengeSecret: deviceTestChallengeSecret,
 	}, &fakeReader{}, control, authorizer)
+	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
+	return server
 }
 
 func deviceBearerToken(t *testing.T) string {

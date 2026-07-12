@@ -14,17 +14,20 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/config"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/controltask"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialfs"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/operationconfirmation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/trustedtoken"
 	"github.com/Kysion/KyaiCRM/shared/auth"
 )
 
 type Server struct {
-	cfg         config.Config
-	reader      store.Reader
-	control     controlStore
-	authorizer  accessclient.Authorizer
-	authRuntime authorizationRuntime
-	taskRuntime taskRuntime
+	cfg                 config.Config
+	reader              store.Reader
+	control             controlStore
+	authorizer          accessclient.Authorizer
+	authRuntime         authorizationRuntime
+	taskRuntime         taskRuntime
+	confirmationRuntime operationConfirmationRuntime
 }
 
 type authorizationRuntime interface {
@@ -102,6 +105,25 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.authorizer = authorizer
+		keyMaterial, err := s.cfg.TrustedTokenKeyMaterial()
+		if err != nil {
+			return err
+		}
+		signer, err := trustedtoken.NewSigner(keyMaterial.KeyID, keyMaterial.PrivateKey)
+		if err != nil {
+			return err
+		}
+		confirmationManager, err := operationconfirmation.New(
+			opened,
+			signer,
+			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			[]byte(s.cfg.ConfirmationChallengeSecret),
+			[]byte(s.cfg.TrustedTokenNonceSecret),
+		)
+		if err != nil {
+			return err
+		}
+		s.confirmationRuntime = confirmationManager
 		credentials, err := credentialfs.New(s.cfg.CredentialRoot)
 		if err != nil {
 			return err
@@ -294,6 +316,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/ai-executor-tasks/{taskId}/cancel", s.public([]string{"platform.ai_executor_tasks.cancel"}, nil, s.cancelPublicTask))
 	s.registerControlTaskRoutes(mux)
 	s.registerDeviceRoutes(mux)
+	s.registerOperationConfirmationRoutes(mux)
 
 	return mux
 }
@@ -401,6 +424,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	databaseReady := s.reader != nil && s.reader.Ping(r.Context()) == nil
 	internalTokenConfigured := s.cfg.InternalToken != ""
 	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil &&
+		operationConfirmationRuntimeReady(s.confirmationRuntime) &&
 		s.cfg.AuthTokenSecret != "" && validDeviceChallengeSecret(s.cfg.DeviceChallengeSecret, s.cfg.AuthTokenSecret, s.cfg.InternalToken))
 	status := "ok"
 	httpStatus := http.StatusOK
