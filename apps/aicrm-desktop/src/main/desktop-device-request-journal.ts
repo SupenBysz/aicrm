@@ -195,6 +195,38 @@ export class DesktopDeviceRequestJournalStore {
     });
   }
 
+  /**
+   * Startup settlement for a session successor that already durably proves
+   * the exact response was reconciled. Absence means a prior completion won;
+   * a present journal must still contain the exact response/hash fence.
+   */
+  completeIfPresent(
+    reference: string,
+    expectedRequestHash: string
+  ): Promise<"completed" | "already_absent"> {
+    return this.exclusive(async () => {
+      assertReference(reference);
+      if (!DIGEST_PATTERN.test(expectedRequestHash)) {
+        throw journalError("desktop_device_request_journal_unsafe", "设备请求恢复完成栅栏无效");
+      }
+      this.assertSecureStorage();
+      await this.ensureRoot();
+      await this.repairTemporary(reference);
+      const current = await this.loadLocked(reference);
+      if (current === null) return "already_absent";
+      if (!current.response || current.signed.requestHash !== expectedRequestHash) {
+        throw journalError(
+          "desktop_device_request_journal_not_completed",
+          "设备请求恢复尚未形成精确持久响应"
+        );
+      }
+      await rm(this.target(reference));
+      await rm(this.temporary(reference), { force: true });
+      await syncDirectory(this.root);
+      return "completed";
+    });
+  }
+
   list(): Promise<DesktopDeviceRequestJournalRecord[]> {
     return this.exclusive(async () => {
       this.assertSecureStorage();

@@ -1707,6 +1707,36 @@ test("exact staging quarantine rejects missing, dual and unknown filesystem shap
   }
 });
 
+test("startup staging quarantine proves a wholly absent create window as a no-op", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  assert.equal(
+    await current.manager.quarantineStagingIfPresent(
+      "executor_not_created",
+      "session_not_created"
+    ),
+    null
+  );
+  await seedStaging(
+    current.manager,
+    "executor_created",
+    "session_created",
+    "candidate"
+  );
+  const quarantined = await current.manager.quarantineStagingIfPresent(
+    "executor_created",
+    "session_created"
+  );
+  assert.equal(quarantined.ref.sourceId, "session_created");
+  assert.deepEqual(
+    await current.manager.quarantineStagingIfPresent(
+      "executor_created",
+      "session_created"
+    ),
+    quarantined
+  );
+});
+
 test("exact staging quarantine rejects symlink and hardlink payloads", async (t) => {
   if (process.platform === "win32") return;
   const current = await managerFixture();

@@ -1504,7 +1504,7 @@ function validSuccessor(
     next.handoffId !== current.handoffId ||
     next.createdAt !== current.createdAt ||
     Date.parse(next.updatedAt) < Date.parse(current.updatedAt) ||
-    next.sessionRevision < current.sessionRevision ||
+    !validSessionRevisionSuccessor(current, next) ||
     isTerminalStatus(current.status) ||
     current.status === "activation_acked" ||
     !monotonicRecoveryTuple(current, next)
@@ -1526,6 +1526,23 @@ function validSuccessor(
     next.lastProgressStatus === next.status &&
     nextIndex === currentIndex + 1
   );
+}
+
+function validSessionRevisionSuccessor(
+  current: DesktopCodexAuthorizationSessionRecord,
+  next: DesktopCodexAuthorizationSessionRecord
+): boolean {
+  if (
+    next.status === "handoff_claimed" ||
+    next.status === "proof_prepared" ||
+    next.status === "activation_ack_response_received"
+  ) {
+    return (
+      current.sessionRevision < Number.MAX_SAFE_INTEGER &&
+      next.sessionRevision === current.sessionRevision + 1
+    );
+  }
+  return next.sessionRevision === current.sessionRevision;
 }
 
 function strictInitialRecord(record: DesktopCodexAuthorizationSessionRecord): boolean {

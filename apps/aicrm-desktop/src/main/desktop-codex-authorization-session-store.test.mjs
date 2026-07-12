@@ -395,6 +395,65 @@ async function advanceOneAuthorizationStage(store, current) {
   }
 }
 
+test("server response transitions require the exact next session revision", async (t) => {
+  for (const stage of ["claim", "proof", "ack"]) {
+    await t.test(stage, async (st) => {
+      for (const delta of [0, 2]) {
+        const current = await fixture();
+        st.after(() => rm(current.base, { recursive: true, force: true }));
+        let value = await current.store.create(initial());
+        let status;
+        let changes;
+        if (stage === "claim") {
+          value = await advance(current.store, value, "handoff_claim_starting", {
+            claimRequestReference: CLAIM_REFERENCE,
+            claimRequestHash: CLAIM_HASH
+          });
+          status = "handoff_claimed";
+          changes = {
+            claimToken: CLAIM_TOKEN,
+            claimExpiresAt: CLAIM_EXPIRES_AT,
+            sessionRevision: value.sessionRevision + delta
+          };
+        } else if (stage === "proof") {
+          value = await progressToWaiting(current.store, value);
+          value = await advance(current.store, value, "login_completed", {
+            loginIdHash: LOGIN_ID_HASH,
+            accountFingerprint: ACCOUNT_FINGERPRINT,
+            candidateBindingDigest: CANDIDATE_DIGEST
+          });
+          value = await advance(current.store, value, "proof_submit_starting", {
+            proofRequestReference: PROOF_REFERENCE,
+            proofRequestHash: PROOF_HASH
+          });
+          status = "proof_prepared";
+          changes = {
+            proofId: "proof_1",
+            activationOperationId: "activation_operation_1",
+            activationId: "activation_1",
+            activationToken: ACTIVATION_TOKEN,
+            activationExpiresAt: ACTIVATION_EXPIRES_AT,
+            credentialRevision: 3,
+            leaseEpoch: 2,
+            sourceCredentialRevision: 1,
+            revocationEpoch: 4,
+            bindingDigest: BINDING_DIGEST,
+            sessionRevision: value.sessionRevision + delta
+          };
+        } else {
+          value = await progressToAckStarting(current.store, value);
+          status = "activation_ack_response_received";
+          changes = { sessionRevision: value.sessionRevision + delta };
+        }
+        await assert.rejects(
+          advance(current.store, value, status, changes),
+          { code: "desktop_codex_authorization_conflict" }
+        );
+      }
+    });
+  }
+});
+
 test("superseded is a durable token-clearing terminal at every unfinished progress stage", async (t) => {
   for (const targetStatus of DESKTOP_CODEX_AUTHORIZATION_PROGRESS.slice(0, -1)) {
     await t.test(targetStatus, async (st) => {

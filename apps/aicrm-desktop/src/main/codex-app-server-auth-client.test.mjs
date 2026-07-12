@@ -210,6 +210,46 @@ test("stdio handshake locks version and credential home while stripping inherite
   await context.client.stop();
 });
 
+test("stop fails closed until the exact App Server child exit is observed", async (t) => {
+  let context;
+  context = await fixture((message, child) => successfulHandler(context)(message, child));
+  t.after(() => rm(context.base, { recursive: true, force: true }));
+  await context.client.start();
+  const child = context.child();
+  const originalKill = child.kill.bind(child);
+  child.kill = () => true;
+  await assert.rejects(context.client.stop(), {
+    code: "executor_app_server_stop_failed"
+  });
+  assert.equal(child.exitCode, null);
+  assert.equal(child.signalCode, null);
+
+  child.kill = originalKill;
+  await context.client.stop();
+  assert.equal(child.signalCode, "SIGTERM");
+});
+
+test("protocol failure keeps an unconfirmed writer visible to explicit stop", async (t) => {
+  let context;
+  context = await fixture((message, child) => successfulHandler(context)(message, child));
+  t.after(() => rm(context.base, { recursive: true, force: true }));
+  await context.client.start();
+  const child = context.child();
+  const originalKill = child.kill.bind(child);
+  child.kill = () => true;
+  child.sendRaw("{invalid-json}\n");
+  await Promise.resolve();
+  await assert.rejects(context.client.stop(), {
+    code: "executor_app_server_stop_failed"
+  });
+  assert.equal(child.exitCode, null);
+  assert.equal(child.signalCode, null);
+
+  child.kill = originalKill;
+  await context.client.stop();
+  assert.equal(child.signalCode, "SIGTERM");
+});
+
 test("browser login, cached completion and refreshed account stay Main-only safe projections", async (t) => {
   let accountAuthorized = false;
   let context;

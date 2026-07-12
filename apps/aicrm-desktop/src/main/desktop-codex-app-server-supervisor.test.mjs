@@ -408,10 +408,40 @@ test("failed stops release singleflight for exact retry and repeated shutdown co
     });
     assert.equal(current.clients[0].calls.stop, 1);
     const recovered = await current.supervisor.stop(receipt);
-    assert.equal(recovered.state, "failed");
+    assert.equal(recovered.state, "stopped");
     assert.equal(current.clients[0].calls.stop, 2);
     await current.supervisor.stop(receipt);
     assert.equal(current.clients[0].calls.stop, 2);
+  });
+
+  await t.test("start failure binding-bound recovery", async () => {
+    const current = fixture({
+      clientOptions: { startError: new Error("start failed"), stopFailures: 1 }
+    });
+    await assert.rejects(current.supervisor.start(binding()), {
+      code: "desktop_codex_app_server_start_failed"
+    });
+    assert.equal(current.clients[0].calls.stop, 1);
+    const stopped = await current.supervisor.stopByBinding(binding());
+    assert.equal(stopped.state, "stopped");
+    assert.equal(current.clients[0].calls.stop, 2);
+    await assert.rejects(
+      current.supervisor.stopByBinding(binding({ sessionId: "foreign" })),
+      { code: "desktop_codex_app_server_stale_receipt" }
+    );
+  });
+
+  await t.test("start failure converges after its internal stop already completed", async () => {
+    const current = fixture({
+      clientOptions: { startError: new Error("start failed") }
+    });
+    await assert.rejects(current.supervisor.start(binding()), {
+      code: "desktop_codex_app_server_start_failed"
+    });
+    assert.equal(current.clients[0].calls.stop, 1);
+    const stopped = await current.supervisor.stopByBinding(binding());
+    assert.equal(stopped.state, "stopped");
+    assert.equal(current.clients[0].calls.stop, 1);
   });
 
   await t.test("closed admission and repeated shutdown", async () => {

@@ -274,6 +274,21 @@ export class DesktopCodexAppServerSupervisor {
     return this.stopInstance(this.resolveReceipt(receipt), false);
   }
 
+  /**
+   * Main-only recovery stop for the create-client/start failure window where
+   * the caller has the exact binding but start never returned its receipt.
+   */
+  stopByBinding(
+    input: DesktopCodexAppServerBinding
+  ): Promise<Readonly<DesktopCodexAppServerSnapshot>> {
+    const binding = validateBinding(input);
+    const instance = this.instances.get(binding.executorId);
+    if (!instance || !sameBinding(instance.binding, binding)) {
+      return Promise.reject(staleReceiptError());
+    }
+    return this.stopInstance(instance, false);
+  }
+
   async shutdownAll(): Promise<void> {
     this.shuttingDown = true;
     const results = await Promise.allSettled(
@@ -399,7 +414,10 @@ export class DesktopCodexAppServerSupervisor {
     instance: RuntimeInstance,
     cancelLogin: boolean
   ): Promise<Readonly<DesktopCodexAppServerSnapshot>> {
-    if (instance.stopCompleted) return Promise.resolve(this.snapshot(instance));
+    if (instance.stopCompleted) {
+      if (instance.state === "failed") this.transition(instance, "stopped");
+      return Promise.resolve(this.snapshot(instance));
+    }
     if (instance.stopPromise) return instance.stopPromise;
     const operation = this.performStop(instance, cancelLogin);
     const tracked = operation.then(
@@ -428,6 +446,7 @@ export class DesktopCodexAppServerSupervisor {
     const client = instance.client;
     if (!client) {
       instance.stopCompleted = true;
+      if (instance.state === "failed") this.transition(instance, "stopped");
       return this.snapshot(instance);
     }
     const wasFailed = instance.state === "failed";
@@ -456,7 +475,7 @@ export class DesktopCodexAppServerSupervisor {
         "Codex App Server 当前实例停止失败"
       );
     }
-    if (!wasFailed) this.transition(instance, "stopped");
+    this.transition(instance, "stopped");
     return this.snapshot(instance);
   }
 
@@ -702,8 +721,9 @@ function validTransition(
       return next === "stopping" || next === "failed";
     case "stopping":
       return next === "stopped" || next === "failed";
-    case "stopped":
     case "failed":
+      return next === "stopped";
+    case "stopped":
       return false;
   }
 }

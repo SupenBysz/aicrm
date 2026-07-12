@@ -228,7 +228,7 @@ interface AuthorizationRequestLane extends Pick<DesktopDeviceRequestLane, "runPi
 interface AuthorizationRequestJournal
   extends Pick<
     DesktopDeviceRequestJournalStore,
-    "load" | "createOrLoad" | "recordResponse" | "complete"
+    "load" | "createOrLoad" | "recordResponse" | "complete" | "completeIfPresent"
   > {}
 
 interface HttpResponseLike {
@@ -718,6 +718,13 @@ export class DesktopAuthorizationTransportClient {
 
   completeRequest(requestReference: string, requestHash: string): Promise<void> {
     return this.requestJournal.complete(requestReference, requestHash);
+  }
+
+  completeRequestIfPresent(
+    requestReference: string,
+    requestHash: string
+  ): Promise<"completed" | "already_absent"> {
+    return this.requestJournal.completeIfPresent(requestReference, requestHash);
   }
 
   cancel(): void {

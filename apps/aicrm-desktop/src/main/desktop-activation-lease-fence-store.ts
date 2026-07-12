@@ -212,6 +212,19 @@ export class DesktopActivationLeaseFenceStore
     });
   }
 
+  /** Startup-only exact inspection that also returns a removed tombstone. */
+  inspect(activationId: string): Promise<DesktopActivationLeaseFenceRecord | null> {
+    assertSafeId(activationId);
+    return this.exclusive(async () => {
+      this.assertSecureStorage();
+      await this.ensureRoot();
+      await this.assertRootEntries();
+      await this.repairPending(activationId);
+      const current = await this.readTarget(activationId);
+      return current ? cloneRecord(current) : null;
+    });
+  }
+
   list(): Promise<DesktopActivationLeaseFenceRecord[]> {
     return this.exclusive(async () => {
       this.assertSecureStorage();

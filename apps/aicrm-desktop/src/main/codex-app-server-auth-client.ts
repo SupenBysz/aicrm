@@ -67,6 +67,7 @@ export type CodexAppServerAuthErrorCode =
   | "executor_app_server_protocol_invalid"
   | "executor_app_server_rejected"
   | "executor_app_server_start_failed"
+  | "executor_app_server_stop_failed"
   | "executor_app_server_stopped"
   | "executor_app_server_timeout"
   | "executor_app_server_unsupported";
@@ -338,9 +339,19 @@ export class CodexAppServerAuthClient extends EventEmitter {
     if (this.state === "stopped") return;
     this.state = "stopping";
     const child = this.child;
-    this.child = null;
     this.rejectAll(appServerError("executor_app_server_stopped", "App Server 已停止"));
-    if (child) await this.stopChild(child);
+    if (child) {
+      try {
+        await this.stopChild(child);
+      } catch {
+        this.state = "failed";
+        throw appServerError(
+          "executor_app_server_stop_failed",
+          "App Server 进程退出未确认"
+        );
+      }
+    }
+    if (this.child === child) this.child = null;
     this.stdoutBuffer = Buffer.alloc(0);
     this.stderrBytes = 0;
     this.completions.clear();
@@ -576,9 +587,18 @@ export class CodexAppServerAuthClient extends EventEmitter {
     if (this.state === "failed" || this.state === "stopped") return;
     this.state = "failed";
     const child = this.child;
-    this.child = null;
     this.rejectAll(appServerError(code, message));
-    if (child) void this.stopChild(child);
+    if (child) {
+      void this.stopChild(child).then(
+        () => {
+          if (this.child === child) this.child = null;
+        },
+        () => {
+          // Keep the exact child visible so a later explicit stop retries and
+          // cannot fabricate writer termination.
+        }
+      );
+    }
   }
 
   private rejectAll(error: CodexAppServerAuthError): void {
@@ -608,10 +628,16 @@ export class CodexAppServerAuthClient extends EventEmitter {
     terminateChild(child, "SIGTERM");
     if (!(await Promise.race([exited, timedOut]))) {
       terminateChild(child, "SIGKILL");
-      await Promise.race([
-        once(child, "exit").catch(() => undefined),
-        new Promise<void>((resolve) => setTimeout(resolve, this.stopTimeoutMs))
+      const killed = await Promise.race([
+        exited,
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), this.stopTimeoutMs))
       ]);
+      if (!killed && child.exitCode === null && child.signalCode === null) {
+        throw appServerError(
+          "executor_app_server_stop_failed",
+          "App Server 进程退出未确认"
+        );
+      }
     }
   }
 }

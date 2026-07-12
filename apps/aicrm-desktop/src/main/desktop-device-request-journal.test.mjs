@@ -220,6 +220,29 @@ test("response is durable before return and only exact completed records may be 
   assert.equal(await current.journal.load(record.reference), null);
 });
 
+test("startup settlement is idempotent only after an exact durable response", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const record = await current.journal.createOrLoad(requestRecord());
+  await assert.rejects(
+    current.journal.completeIfPresent(record.reference, record.signed.requestHash),
+    { code: "desktop_device_request_journal_not_completed" }
+  );
+  await current.journal.recordResponse(
+    record.reference,
+    record.signed.requestHash,
+    response()
+  );
+  assert.equal(
+    await current.journal.completeIfPresent(record.reference, record.signed.requestHash),
+    "completed"
+  );
+  assert.equal(
+    await current.journal.completeIfPresent(record.reference, record.signed.requestHash),
+    "already_absent"
+  );
+});
+
 test("device binding alone accepts Bearer and 201 while ticket kinds remain fixed to 200", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));

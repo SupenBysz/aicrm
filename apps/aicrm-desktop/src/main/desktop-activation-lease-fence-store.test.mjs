@@ -575,6 +575,11 @@ test("remove requires the exact current fence and crash-recovers a terminal tomb
   const restarted = new DesktopActivationLeaseFenceStore(current.options);
   assert.equal(await restarted.read("activation_1"), null);
   assert.deepEqual(await restarted.list(), []);
+  const removed = await restarted.inspect("activation_1");
+  assert.equal(removed.status, "removed");
+  assert.equal(removed.activationId, exact.activationId);
+  assert.equal(removed.operationId, exact.operationId);
+  assert.equal(removed.tokenHash, exact.tokenHash);
   await restarted.remove(exact);
   await assert.rejects(
     restarted.persistRenewal(target(), renewal()),

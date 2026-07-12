@@ -664,6 +664,38 @@ export class DesktopCredentialTreeManager {
     );
   }
 
+  /**
+   * Startup recovery for the app_server_starting -> staging-create crash
+   * window. A wholly absent source and quarantine is a proven no-op; any
+   * partial or competing state still fails closed through the strict path.
+   */
+  async quarantineStagingIfPresent(
+    executorId: string,
+    sessionId: string
+  ): Promise<DesktopCredentialStagingQuarantineProjection | null> {
+    assertSafeId(executorId);
+    assertSafeId(sessionId);
+    return this.withExecutorLock(executorId, async () => {
+      const sourceReservation = this.stagingReservationPath(executorId, sessionId);
+      const sourceHome = this.pathFor({ kind: "staging", executorId, sessionId });
+      const quarantineParent = await this.ensurePrivatePath(
+        executorId,
+        "quarantine",
+        quarantineCategory("staging")
+      );
+      const reservation = path.join(quarantineParent, sessionId);
+      const payload = path.join(reservation, "payload");
+      const states = await Promise.all([
+        pathExists(sourceReservation),
+        pathExists(sourceHome),
+        pathExists(reservation),
+        pathExists(payload)
+      ]);
+      if (states.every((exists) => !exists)) return null;
+      return this.quarantineStagingUnlocked(executorId, sessionId);
+    });
+  }
+
   private async quarantineStagingUnlocked(
     executorId: string,
     sessionId: string
