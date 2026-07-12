@@ -2,6 +2,31 @@
 
 本文件记录 AiCRM 主平台与衍生模板资产的版本变更。格式遵循“按版本维护，每个版本包含更新时间、更新内容、部署/迁移说明和验证方式”的规范。
 
+## [0.1.6] - 2026-07-12
+
+### 更新内容
+
+- 锁定脚本候选、契约测试与激活的 P0 策略：`generate/repair` 只能生成 candidate，`contract_test` 只能生成测试结果；低稳定选择器、坐标、敏感定位、旧修订和缺失/失败测试均不得激活。
+- 自动脚本修复预算固定为单次 Attempt 最多一次；脚本关键方法必须使用稳定 `elementKey` 和锁定的 `keySource` 枚举。
+- 永久停用 `ky-ai-model-service` 中旧 TUI/PTY/WebSocket executor worker；旧 task/run 创建、terminal resize 和 interrupt 写入口统一返回 `410 legacy_endpoint_gone`。
+- 移除 Desktop Vault 生成并经 Renderer 传递的本机 HMAC verification receipt；Renderer、Plugin 和普通 Bearer 不得确认 snapshot seal、cleanup 或 onboarding complete 成功。
+- Matrix 公共步骤结果与 Store 双层拒绝可信运行时专属成功结果；生产 capability 继续保持 session detection 和 server-verifiable receipt 关闭。
+- 加固 `ky-ai-model-service` systemd 单元，增加严格 umask、no-new-privileges、私有临时目录和只读系统/用户目录保护。
+
+### 部署 / 迁移说明
+
+- 新增 `035_executor_legacy_output_cleanup.sql`，一次性收敛旧非终态 executor task、清理原始 TUI/Codex 输出和路径字段，并将旧授权状态与危险执行开关恢复为 fail-closed。
+- 迁移 035 不新增或删除表结构；执行后仍不开放可信授权、generation run、contract test、candidate 激活或 v9 onboarding 生产门禁。
+- 部署前先停止旧 `ky-ai-model-service` 并确认其 Codex/TUI 子进程全部退出，再安装 no-worker 新 binary/unit；随后执行迁移 035、启动新服务并部署后台静态资源。禁止在旧 worker 仍运行时先清库，避免迁移后迟到输出重新写入。
+- 新服务启动并通过 readyz 后，复扫数据库、日志和 API 响应中的敏感 canary；任一残留都阻止继续进入 P1。
+
+### 验证方式
+
+- 执行全部 Go 服务 `go test ./...`，并对 Matrix 与 AI Model 服务执行 `go test -race ./...`、`go vet ./...`。
+- 执行 `pnpm typecheck`、`pnpm build`、Vault/legacy-flow/trust-boundary 定向测试。
+- 执行 `pnpm test:database-deploy`，并在生产等价 PostgreSQL 副本验证迁移首次执行、重复执行和回滚。
+- 执行 `systemd-analyze verify ops/native/ky-ai-model-service.service`、solution skill 校验和 `git diff --check`。
+
 ## [0.1.5] - 2026-07-09 15:49:11 CST +0800
 
 ### 更新内容
