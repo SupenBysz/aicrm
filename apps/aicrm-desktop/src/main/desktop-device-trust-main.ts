@@ -2,6 +2,7 @@ import path from "node:path";
 import { app, safeStorage } from "electron";
 import { DESKTOP_APPLICATION_NAME } from "../shared/constants";
 import { loadDesktopConfig } from "./config";
+import { DesktopDeviceHeartbeatClient } from "./desktop-device-heartbeat-client";
 import { DesktopDeviceIdentityStore } from "./desktop-device-identity";
 import { DesktopDeviceRegistrationClient } from "./desktop-device-registration-client";
 import { DesktopDevicePendingRegistrationStore } from "./desktop-device-registration-pending";
@@ -27,10 +28,16 @@ export function getDesktopDeviceTrustRuntime(): DesktopDeviceTrustRuntime {
     loadHostSession: loadSession,
     loadTrustedApiBaseUrl: async () => (await loadDesktopConfig()).apiBaseUrl
   });
+  const heartbeatClient = new DesktopDeviceHeartbeatClient({
+    identityStore,
+    appVersion: app.getVersion(),
+    loadTrustedApiBaseUrl: async () => (await loadDesktopConfig()).apiBaseUrl
+  });
   trustRuntime = new DesktopDeviceTrustRuntime({
     identityStore,
     pendingRegistrationStore,
     registrationClient,
+    heartbeatClient,
     loadHostSession: loadSession
   });
   return trustRuntime;

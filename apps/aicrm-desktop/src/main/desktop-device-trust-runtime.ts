@@ -8,6 +8,7 @@ import type {
   DesktopDeviceIdentityProjection,
   DesktopDeviceIdentityStore
 } from "./desktop-device-identity.ts";
+import type { DesktopDeviceHeartbeatClient } from "./desktop-device-heartbeat-client.ts";
 import type { DesktopDeviceRegistrationClient } from "./desktop-device-registration-client.ts";
 import type {
   DesktopDevicePendingRegistration,
@@ -36,10 +37,13 @@ interface TrustPendingStore
 interface TrustRegistrationClient
   extends Pick<DesktopDeviceRegistrationClient, "register" | "cancel"> {}
 
+interface TrustHeartbeatClient extends Pick<DesktopDeviceHeartbeatClient, "start" | "stop"> {}
+
 export interface DesktopDeviceTrustRuntimeOptions {
   identityStore: TrustIdentityStore;
   pendingRegistrationStore: TrustPendingStore;
   registrationClient: TrustRegistrationClient;
+  heartbeatClient: TrustHeartbeatClient;
   loadHostSession: () => Promise<DesktopSession | null>;
   now?: () => Date;
 }
@@ -49,6 +53,7 @@ export class DesktopDeviceTrustRuntime {
   private readonly identityStore: TrustIdentityStore;
   private readonly pendingRegistrationStore: TrustPendingStore;
   private readonly registrationClient: TrustRegistrationClient;
+  private readonly heartbeatClient: TrustHeartbeatClient;
   private readonly loadHostSession: () => Promise<DesktopSession | null>;
   private readonly now: () => Date;
   private generation = 0;
@@ -59,6 +64,7 @@ export class DesktopDeviceTrustRuntime {
     this.identityStore = options.identityStore;
     this.pendingRegistrationStore = options.pendingRegistrationStore;
     this.registrationClient = options.registrationClient;
+    this.heartbeatClient = options.heartbeatClient;
     this.loadHostSession = options.loadHostSession;
     this.now = options.now ?? (() => new Date());
     this.state = this.project("idle", null, null, false, "设备尚未自动登记");
@@ -127,6 +133,7 @@ export class DesktopDeviceTrustRuntime {
               ? "新设备已登记；旧设备绑定仍需在后台执行 rebind"
               : "设备已安全登记"
           );
+          this.heartbeatClient.start();
         }
         return cloneProjection(this.state);
       })
@@ -158,6 +165,7 @@ export class DesktopDeviceTrustRuntime {
   cancelAutomaticRegistration(): DesktopDeviceRegistrationRuntimeProjection {
     this.generation += 1;
     this.registrationClient.cancel();
+    this.heartbeatClient.stop();
     this.state = this.project(
       "cancelled",
       identityFromState(this.state),

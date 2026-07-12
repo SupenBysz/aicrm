@@ -82,18 +82,35 @@ class FakeRegistrationClient {
   }
 }
 
+class FakeHeartbeatClient {
+  constructor() {
+    this.startCalls = 0;
+    this.stopCalls = 0;
+  }
+
+  start() {
+    this.startCalls += 1;
+  }
+
+  stop() {
+    this.stopCalls += 1;
+  }
+}
+
 function runtimeFixture({ identity = oldIdentity, pending = null, result = registeredIdentity, session = null } = {}) {
   const identityStore = new FakeIdentityStore(identity);
   const pendingStore = new FakePendingStore(pending);
   const client = new FakeRegistrationClient(result);
+  const heartbeatClient = new FakeHeartbeatClient();
   const runtime = new DesktopDeviceTrustRuntime({
     identityStore,
     pendingRegistrationStore: pendingStore,
     registrationClient: client,
+    heartbeatClient,
     loadHostSession: async () => session,
     now: () => new Date("2026-07-13T00:05:00.000Z")
   });
-  return { runtime, identityStore, pendingStore, client };
+  return { runtime, identityStore, pendingStore, client, heartbeatClient };
 }
 
 test("session-save notification and concurrent ensure share one Main registration operation", async () => {
@@ -109,6 +126,7 @@ test("session-save notification and concurrent ensure share one Main registratio
   resolve(registeredIdentity);
   const states = await Promise.all(calls);
   assert.equal(states.every((state) => state.status === "registered"), true);
+  assert.equal(current.heartbeatClient.startCalls, 1);
 });
 
 test("restart resumes only when the encrypted Main session exists", async () => {
@@ -134,6 +152,7 @@ test("session clear cancels in-flight and fences its late completion", async () 
   const cancelled = current.runtime.cancelAutomaticRegistration();
   assert.equal(cancelled.status, "cancelled");
   assert.equal(current.client.cancelCalls, 1);
+  assert.equal(current.heartbeatClient.stopCalls, 1);
   resolve(registeredIdentity);
   assert.equal((await operation).status, "cancelled");
   assert.equal((await current.runtime.getRegistrationState()).status, "cancelled");
@@ -181,6 +200,7 @@ test("Main wiring owns one signer and session save triggers registration without
   assert.equal((trustMain.match(/new DesktopDeviceIdentityStore/g) ?? []).length, 1);
   assert.equal((trustMain.match(/new DesktopDevicePendingRegistrationStore/g) ?? []).length, 1);
   assert.equal((trustMain.match(/new DesktopDeviceRegistrationClient/g) ?? []).length, 1);
+  assert.equal((trustMain.match(/new DesktopDeviceHeartbeatClient/g) ?? []).length, 1);
   assert.equal(deviceIpc.includes("new DesktopDeviceIdentityStore"), false);
   assert.match(main, /const desktopDeviceTrustRuntime = getDesktopDeviceTrustRuntime\(\)/);
   assert.match(main, /registerAuthIpc\(desktopDeviceTrustRuntime\)/);
