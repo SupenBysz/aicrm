@@ -186,13 +186,11 @@ export interface AiExecutorConfig {
   allowCdpRuntime: boolean;
   allowScriptSave: boolean;
   allowAutoActivate: boolean;
-  appServerListen: string;
+  appServerListen: "stdio://";
   authStatus: AiExecutorAuthStatus;
   authMethod: string;
   authAccountLabel: string;
-  boundDeviceId: string;
   codexVersion: string;
-  capabilities: Record<string, unknown>;
   lastHeartbeatAt: string | null;
   lastAuthCheckedAt: string | null;
   remark: string;
@@ -219,31 +217,8 @@ export type AiExecutorConfigInput = Pick<
   | "allowCdpRuntime"
   | "allowScriptSave"
   | "allowAutoActivate"
-  | "appServerListen"
   | "remark"
 >;
-
-export interface AiExecutorAuthSession {
-  executorId: string;
-  runtimeType: AiExecutorRuntimeType;
-  authMode: "desktop" | "device_auth";
-  authStatus: AiExecutorAuthStatus;
-  command: string;
-  codexHome: string;
-  verificationUri: string;
-  userCode: string;
-  expiresAt: string | null;
-  message: string;
-}
-
-export interface AiExecutorAuthStatusInput {
-  authStatus: AiExecutorAuthStatus;
-  authMethod?: string;
-  authAccountLabel?: string;
-  boundDeviceId?: string;
-  codexVersion?: string;
-  capabilities?: Record<string, unknown>;
-}
 
 export interface AiExecutorTask {
   id: string;
@@ -320,10 +295,6 @@ export function getCodexExecutorConfig(client: RequestClient): Promise<AiExecuto
   return client.request<AiExecutorConfig>("/api/v1/ai-executors/codex");
 }
 
-export function updateCodexExecutorConfig(client: RequestClient, input: AiExecutorConfigInput): Promise<AiExecutorConfig> {
-  return client.request<AiExecutorConfig>("/api/v1/ai-executors/codex", { method: "PATCH", body: input });
-}
-
 export function listAiExecutors(
   client: RequestClient,
   params: { status?: string; runtimeType?: string; executorType?: string; page: number; pageSize: number }
@@ -343,18 +314,6 @@ export function createAiExecutor(client: RequestClient, input: AiExecutorConfigI
 
 export function updateAiExecutor(client: RequestClient, id: string, input: AiExecutorConfigInput): Promise<AiExecutorConfig> {
   return client.request<AiExecutorConfig>(`/api/v1/ai-executors/${id}`, { method: "PATCH", body: input });
-}
-
-export function authorizeAiExecutor(client: RequestClient, id: string): Promise<AiExecutorAuthSession> {
-  return client.request<AiExecutorAuthSession>(`/api/v1/ai-executors/${id}/authorize`, { method: "POST" });
-}
-
-export function syncAiExecutorAuthStatus(
-  client: RequestClient,
-  id: string,
-  input: AiExecutorAuthStatusInput
-): Promise<AiExecutorConfig> {
-  return client.request<AiExecutorConfig>(`/api/v1/ai-executors/${id}/auth-status`, { method: "POST", body: input });
 }
 
 export function listAiExecutorTasks(

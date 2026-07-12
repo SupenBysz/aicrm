@@ -65,6 +65,27 @@ func TestLegacyExecutorAuthorizeRejectsLegacyBody(t *testing.T) {
 	assertNoLegacyAuthorizationMaterial(t, rec.Body.String())
 }
 
+func TestLegacyCodexExecutorConfigPatchIsGoneBeforeDecode(t *testing.T) {
+	s := &Server{}
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/ai-executors/codex", strings.NewReader(`{
+		"appServerListen":"ws://127.0.0.1:4500",
+		"capabilities":{"codexHome":"/root/.codex"}
+	}`))
+	rec := httptest.NewRecorder()
+
+	s.updateExecutorConfig(rec, req, wsContext{UserID: "user_1"})
+
+	if rec.Code != http.StatusGone {
+		t.Fatalf("legacy config PATCH response status = %d, want %d", rec.Code, http.StatusGone)
+	}
+	assertLegacyAuthorizationHeaders(t, rec)
+	assertErrorCode(t, rec.Body.String(), "legacy_endpoint_gone")
+	assertNoLegacyAuthorizationMaterial(t, rec.Body.String())
+	if strings.Contains(rec.Body.String(), "ws://") {
+		t.Fatalf("legacy config PATCH echoed unsafe transport: %s", rec.Body.String())
+	}
+}
+
 func TestServerCodexHomeCandidatesOnlyUsesExecutorOwnedPath(t *testing.T) {
 	t.Setenv("CODEX_HOME", "/tmp/global-codex-home-must-be-ignored")
 	s := &Server{}

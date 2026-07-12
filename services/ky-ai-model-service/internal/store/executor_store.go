@@ -372,6 +372,7 @@ func normalizeExecutorInputDefaults(in *ExecutorConfigInput) {
 	if in.Status == "" {
 		in.Status = "enabled"
 	}
+	in.AppServerListen = "stdio://"
 	if in.Priority <= 0 {
 		in.Priority = 100
 	}
@@ -386,10 +387,6 @@ func normalizeExecutorInputDefaults(in *ExecutorConfigInput) {
 	}
 	if in.MaxConcurrency < 1 {
 		in.MaxConcurrency = 1
-	}
-	in.AppServerListen = strings.TrimSpace(in.AppServerListen)
-	if in.AppServerListen == "" {
-		in.AppServerListen = "stdio://"
 	}
 	in.Remark = strings.TrimSpace(in.Remark)
 }

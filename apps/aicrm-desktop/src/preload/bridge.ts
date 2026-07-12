@@ -38,8 +38,8 @@ const bridge: AiCrmDesktopBridge = {
     openTerminalWindow: (input) => ipcRenderer.invoke(IPC_CHANNELS.aiExecutorOpenTerminalWindow, input)
   },
   codex: {
-    authorize: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorAuthorize, input),
-    getAuthStatus: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorGetAuthStatus, input)
+    authorize: (...args: unknown[]) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorAuthorize, ...args),
+    getAuthStatus: (...args: unknown[]) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorGetAuthStatus, ...args)
   },
   matrixAccount: {
     getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountGetCapabilities),

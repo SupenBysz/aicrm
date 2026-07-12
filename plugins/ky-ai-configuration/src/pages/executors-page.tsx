@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App,
@@ -29,13 +29,9 @@ import {
 } from "@ky/admin-core";
 import { useSearchParams } from "react-router-dom";
 import {
-  authorizeAiExecutor,
   createAiExecutor,
   listAiExecutors,
-  syncAiExecutorAuthStatus,
   updateAiExecutor,
-  type AiExecutorAuthSession,
-  type AiExecutorAuthStatus,
   type AiExecutorConfig,
   type AiExecutorConfigInput,
   type AiExecutorRuntimeType
@@ -50,7 +46,7 @@ const RUNTIME_META: Record<AiExecutorRuntimeType, { label: string; color: string
 const AUTH_META: Record<string, { label: string; color: string }> = {
   not_authorized: { label: "未授权", color: "default" },
   authorizing: { label: "授权中", color: "processing" },
-  authorized: { label: "已授权", color: "green" },
+  authorized: { label: "历史已授权（待复核）", color: "orange" },
   expired: { label: "已过期", color: "orange" },
   error: { label: "授权异常", color: "red" }
 };
@@ -74,7 +70,6 @@ const defaultValues: AiExecutorConfigInput = {
   allowCdpRuntime: true,
   allowScriptSave: true,
   allowAutoActivate: false,
-  appServerListen: "stdio://",
   remark: ""
 };
 
@@ -89,8 +84,6 @@ export function ExecutorsPage() {
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("view");
   const [active, setActive] = useState<AiExecutorConfig | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [authSession, setAuthSession] = useState<AiExecutorAuthSession | null>(null);
-  const authPollTimerRef = useRef<number | null>(null);
 
   const canCreate = permissions.can("platform.ai_executors.create");
   const canUpdate = permissions.can("platform.ai_executors.update");
@@ -118,8 +111,6 @@ export function ExecutorsPage() {
     }
   }, [active, drawerMode, drawerOpen, form]);
 
-  useEffect(() => () => stopDesktopAuthPolling(), []);
-
   const drawerTitle = useMemo(() => {
     if (drawerMode === "create") return "添加执行器";
     if (drawerMode === "edit") return "编辑执行器";
@@ -132,21 +123,18 @@ export function ExecutorsPage() {
 
   function openCreate() {
     setActive(null);
-    setAuthSession(null);
     setDrawerMode("create");
     setDrawerOpen(true);
   }
 
   function openView(record: AiExecutorConfig) {
     setActive(record);
-    setAuthSession(null);
     setDrawerMode("view");
     setDrawerOpen(true);
   }
 
   function openEdit(record: AiExecutorConfig) {
     setActive(record);
-    setAuthSession(null);
     setDrawerMode("edit");
     setDrawerOpen(true);
   }
@@ -166,125 +154,6 @@ export function ExecutorsPage() {
     },
     onError: (error: Error) => message.error(error.message)
   });
-
-  const syncAuthStatusMutation = useMutation({
-    mutationFn: async (item: AiExecutorConfig) => {
-      const updated = await syncDesktopCodexAuthorization(item, authSession ?? undefined, { silent: false });
-      if (!updated) throw new Error("本机 Codex 尚未完成授权，请完成 Codex 登录后再同步");
-      return updated;
-    },
-    onSuccess: () => {
-      void message.success("Codex 授权状态已同步");
-    },
-    onError: (error: Error) => message.error(error.message)
-  });
-
-  const authorizeMutation = useMutation({
-    mutationFn: async (item: AiExecutorConfig) => {
-      const session = await authorizeAiExecutor(client, item.id);
-      let nextItem = item;
-      let nextSession = session;
-      if (session.authMode === "desktop") {
-        const desktopStatus = await startDesktopCodexAuthorization(item, session);
-        nextSession = {
-          ...session,
-          authStatus: desktopStatus.authStatus,
-          codexHome: desktopStatus.codexHome,
-          command: desktopStatus.command,
-          message: desktopStatus.message
-        };
-        if (desktopStatus.authStatus === "authorized") {
-          nextItem = (await syncDesktopCodexAuthResult(item, desktopStatus, { silent: true })) ?? item;
-        }
-      }
-      return { item: nextItem, session: nextSession };
-    },
-    onSuccess: ({ item, session }) => {
-      setAuthSession(session);
-      setActive((current) => (current?.id === item.id ? item : current));
-      void message.success(
-        session.authMode === "desktop" && session.authStatus === "authorized"
-          ? "已检测到客户端 Codex 授权并完成同步"
-          : session.authMode === "desktop"
-            ? "已发起客户端 Codex 授权"
-            : "已生成设备码授权指引"
-      );
-      void queryClient.invalidateQueries({ queryKey: ["ai-executors"] });
-      if (session.authMode === "desktop" && session.authStatus !== "authorized") {
-        startDesktopAuthPolling(item, session);
-      }
-    },
-    onError: (error: Error) => message.error(error.message)
-  });
-
-  function stopDesktopAuthPolling() {
-    if (authPollTimerRef.current != null) {
-      window.clearInterval(authPollTimerRef.current);
-      authPollTimerRef.current = null;
-    }
-  }
-
-  function startDesktopAuthPolling(item: AiExecutorConfig, session: AiExecutorAuthSession) {
-    stopDesktopAuthPolling();
-    let attempts = 0;
-    let syncing = false;
-    authPollTimerRef.current = window.setInterval(() => {
-      if (syncing) return;
-      attempts += 1;
-      syncing = true;
-      void syncDesktopCodexAuthorization(item, session, { silent: true })
-        .then((updated) => {
-          if (updated?.authStatus === "authorized") {
-            stopDesktopAuthPolling();
-            void message.success("Codex 已授权，状态已同步");
-          } else if (attempts >= 60) {
-            stopDesktopAuthPolling();
-          }
-        })
-        .finally(() => {
-          syncing = false;
-        });
-    }, 15000);
-  }
-
-  async function syncDesktopCodexAuthorization(
-    item: AiExecutorConfig,
-    session?: AiExecutorAuthSession,
-    options?: { silent?: boolean }
-  ): Promise<AiExecutorConfig | null> {
-    const status = await getDesktopCodexAuthorizationStatus(item, session);
-    return syncDesktopCodexAuthResult(item, status, options);
-  }
-
-  async function syncDesktopCodexAuthResult(
-    item: AiExecutorConfig,
-    status: DesktopCodexAuthResult,
-    options?: { silent?: boolean }
-  ): Promise<AiExecutorConfig | null> {
-    const updated = await syncAiExecutorAuthStatus(client, item.id, {
-      authStatus: status.authStatus,
-      authMethod: "desktop",
-      authAccountLabel: status.authAccountLabel,
-      codexVersion: status.codexVersion,
-      capabilities: status.capabilities ?? { codexHome: status.codexHome }
-    });
-    setActive((current) => (current?.id === updated.id ? updated : current));
-    void queryClient.invalidateQueries({ queryKey: ["ai-executors"] });
-    if (!options?.silent) {
-      setAuthSession((current) =>
-        current
-          ? {
-              ...current,
-              authStatus: status.authStatus,
-              codexHome: status.codexHome,
-              command: status.command,
-              message: status.message || "客户端 Codex 探针已完成，执行器授权状态已同步。"
-            }
-          : current
-      );
-    }
-    return updated;
-  }
 
   const columns: ColumnsType<AiExecutorConfig> = [
     {
@@ -355,8 +224,8 @@ export function ExecutorsPage() {
             </Button>
           ) : null}
           {canAuthorize ? (
-            <Button size="small" type="link" onClick={() => authorizeMutation.mutate(record)}>
-              授权
+            <Button disabled size="small" type="link" title="可信授权桥升级完成后开放">
+              可信授权升级中
             </Button>
           ) : null}
         </div>
@@ -403,21 +272,29 @@ export function ExecutorsPage() {
           ) : null
         }
       >
-        <Table<AiExecutorConfig>
-          rowKey="id"
-          columns={columns}
-          dataSource={query.data?.items ?? []}
-          loading={query.isFetching}
-          scroll={{ x: 1200 }}
-          pagination={{
-            current: queryState.page,
-            pageSize: queryState.pageSize,
-            total: query.data?.pagination.total ?? 0,
-            showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (page, pageSize) => applyState({ page, pageSize })
-          }}
-        />
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Alert
+            showIcon
+            type="warning"
+            message="可信授权升级中"
+            description="当前授权状态仅为历史记录，不代表执行器已通过可信凭据和 readiness 校验；新授权和状态同步暂时关闭。"
+          />
+          <Table<AiExecutorConfig>
+            rowKey="id"
+            columns={columns}
+            dataSource={query.data?.items ?? []}
+            loading={query.isFetching}
+            scroll={{ x: 1200 }}
+            pagination={{
+              current: queryState.page,
+              pageSize: queryState.pageSize,
+              total: query.data?.pagination.total ?? 0,
+              showSizeChanger: true,
+              showTotal: (total) => `共 ${total} 条`,
+              onChange: (page, pageSize) => applyState({ page, pageSize })
+            }}
+          />
+        </Space>
       </ListPageCard>
 
       <Drawer
@@ -428,13 +305,8 @@ export function ExecutorsPage() {
         extra={
           <Space>
             {drawerMode === "view" && active && canAuthorize ? (
-              <Button loading={authorizeMutation.isPending} onClick={() => authorizeMutation.mutate(active)}>
-                授权 Codex
-              </Button>
-            ) : null}
-            {drawerMode === "view" && active?.runtimeType === "desktop" && canAuthorize ? (
-              <Button loading={syncAuthStatusMutation.isPending} onClick={() => syncAuthStatusMutation.mutate(active)}>
-                同步授权状态
+              <Button disabled title="可信授权桥升级完成后开放">
+                可信授权升级中
               </Button>
             ) : null}
             {drawerMode === "view" && active && canUpdate ? <Button onClick={() => setDrawerMode("edit")}>编辑</Button> : null}
@@ -447,7 +319,7 @@ export function ExecutorsPage() {
         }
       >
         {drawerMode === "view" && active ? (
-          <ExecutorDetail item={active} authSession={authSession} />
+          <ExecutorDetail item={active} />
         ) : (
           <ExecutorForm form={form} onFinish={(values) => saveMutation.mutate(values)} />
         )}
@@ -456,7 +328,7 @@ export function ExecutorsPage() {
   );
 }
 
-function ExecutorDetail({ authSession, item }: { item: AiExecutorConfig; authSession: AiExecutorAuthSession | null }) {
+function ExecutorDetail({ item }: { item: AiExecutorConfig }) {
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       <Descriptions size="small" bordered column={1}>
@@ -466,7 +338,6 @@ function ExecutorDetail({ authSession, item }: { item: AiExecutorConfig; authSes
         <Descriptions.Item label="状态">{item.status === "enabled" ? "启用" : "停用"}</Descriptions.Item>
         <Descriptions.Item label="授权状态">{AUTH_META[item.authStatus]?.label ?? item.authStatus}</Descriptions.Item>
         <Descriptions.Item label="授权方式">{item.authMethod || "-"}</Descriptions.Item>
-        <Descriptions.Item label="绑定客户端">{item.boundDeviceId || "-"}</Descriptions.Item>
         <Descriptions.Item label="Codex 版本">{item.codexVersion || "-"}</Descriptions.Item>
         <Descriptions.Item label="优先级">{item.priority}</Descriptions.Item>
         <Descriptions.Item label="最大并发">{item.maxConcurrency}</Descriptions.Item>
@@ -474,22 +345,12 @@ function ExecutorDetail({ authSession, item }: { item: AiExecutorConfig; authSes
         <Descriptions.Item label="最近授权校验">{formatTime(item.lastAuthCheckedAt)}</Descriptions.Item>
         <Descriptions.Item label="备注">{item.remark || "-"}</Descriptions.Item>
       </Descriptions>
-      {authSession ? (
-        <Alert
-          showIcon
-          type={authSession.authMode === "desktop" ? "info" : "warning"}
-          message={authSession.message}
-          description={
-            authSession.command ? (
-              <Typography.Text code copyable>
-                {authSession.command}
-              </Typography.Text>
-            ) : (
-              <Typography.Text type="secondary">请在 AiCRM Desktop 客户端完成授权窗口中的 Codex 登录。</Typography.Text>
-            )
-          }
-        />
-      ) : null}
+      <Alert
+        showIcon
+        type="warning"
+        message="可信授权升级中"
+        description="此处显示的授权字段仅用于历史审计；可信授权会话、设备证明和 readiness 上线前不能据此执行脚本维护任务。"
+      />
     </Space>
   );
 }
@@ -571,9 +432,6 @@ function ExecutorForm({
           <Switch />
         </Form.Item>
       </Space>
-      <Form.Item label="App Server 监听方式" name="appServerListen">
-        <Input placeholder="stdio:// / unix:// / ws://127.0.0.1:4500" />
-      </Form.Item>
       <Form.Item label="备注" name="remark">
         <Input.TextArea rows={3} placeholder="执行器部署、限制或运维备注" />
       </Form.Item>
@@ -599,69 +457,8 @@ function toInput(item: AiExecutorConfig): AiExecutorConfigInput {
     allowCdpRuntime: item.allowCdpRuntime,
     allowScriptSave: item.allowScriptSave,
     allowAutoActivate: item.allowAutoActivate,
-    appServerListen: item.appServerListen,
     remark: item.remark
   };
-}
-
-interface DesktopCodexAuthResult {
-  executorId: string;
-  authStatus: AiExecutorAuthStatus;
-  codexHome: string;
-  authAccountLabel?: string;
-  codexVersion?: string;
-  capabilities?: Record<string, unknown>;
-  command: string;
-  message: string;
-}
-
-interface DesktopCodexBridge {
-  authorize: (input: { executorId: string; name: string; codexHome?: string }) => Promise<{ ok: boolean; data?: DesktopCodexAuthResult; error?: { message?: string } }>;
-  getAuthStatus: (input: { executorId: string; name: string; codexHome?: string }) => Promise<{ ok: boolean; data?: DesktopCodexAuthResult; error?: { message?: string } }>;
-}
-
-async function startDesktopCodexAuthorization(item: AiExecutorConfig, session: AiExecutorAuthSession): Promise<DesktopCodexAuthResult> {
-  const bridge = getDesktopCodexBridge();
-  const result = await bridge.authorize({ executorId: item.id, name: item.name, codexHome: session.codexHome });
-  if (!result.ok || !result.data) {
-    throw new Error(result.error?.message || "客户端 Codex 授权启动失败");
-  }
-  return result.data;
-}
-
-async function getDesktopCodexAuthorizationStatus(
-  item: AiExecutorConfig,
-  session?: AiExecutorAuthSession
-): Promise<DesktopCodexAuthResult> {
-  const bridge = getDesktopCodexBridge();
-  const result = await bridge.getAuthStatus({ executorId: item.id, name: item.name, codexHome: session?.codexHome ?? codexHomeFromCapabilities(item) });
-  if (!result.ok || !result.data) {
-    throw new Error(result.error?.message || "客户端 Codex 授权状态读取失败");
-  }
-  return result.data;
-}
-
-function tryGetDesktopCodexBridge(): DesktopCodexBridge | null {
-  return (
-    (window as unknown as {
-      aicrm?: {
-        codex?: DesktopCodexBridge;
-      };
-    }).aicrm?.codex ?? null
-  );
-}
-
-function getDesktopCodexBridge(): DesktopCodexBridge {
-  const bridge = tryGetDesktopCodexBridge();
-  if (!bridge) {
-    throw new Error("请从 AiCRM Desktop 客户端打开后台后再授权客户端执行器");
-  }
-  return bridge;
-}
-
-function codexHomeFromCapabilities(item: AiExecutorConfig): string | undefined {
-  const value = item.capabilities?.codexHome;
-  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function formatTime(value: string | null | undefined) {

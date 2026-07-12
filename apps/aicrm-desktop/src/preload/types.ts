@@ -3,8 +3,7 @@ import type {
   DesktopApiResponse,
   AiExecutorTerminalWindowInput,
   AiExecutorTerminalWindowResult,
-  CodexExecutorAuthInput,
-  CodexExecutorAuthResult,
+  CodexExecutorAuthStatusProjection,
   DesktopConfig,
   DesktopCommandResult,
   MatrixAccountBrowserInput,
@@ -76,8 +75,8 @@ export interface AiCrmDesktopBridge {
     ) => Promise<DesktopCommandResult<AiExecutorTerminalWindowResult>>;
   };
   codex: {
-    authorize: (input: CodexExecutorAuthInput) => Promise<DesktopCommandResult<CodexExecutorAuthResult>>;
-    getAuthStatus: (input: CodexExecutorAuthInput) => Promise<DesktopCommandResult<CodexExecutorAuthResult>>;
+    authorize: () => Promise<DesktopCommandResult<never>>;
+    getAuthStatus: () => Promise<DesktopCommandResult<CodexExecutorAuthStatusProjection>>;
   };
   matrixAccount: {
     getCapabilities: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;

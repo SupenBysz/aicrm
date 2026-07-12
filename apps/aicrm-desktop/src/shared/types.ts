@@ -112,20 +112,13 @@ export interface AiExecutorTerminalWindowResult {
   focusedExisting: boolean;
 }
 
-export interface CodexExecutorAuthInput {
-  executorId: string;
-  name: string;
-  codexHome?: string;
-}
-
-export interface CodexExecutorAuthResult {
-  executorId: string;
-  authStatus: "not_authorized" | "authorizing" | "authorized" | "expired" | "error";
-  codexHome: string;
-  authAccountLabel?: string;
-  codexVersion?: string;
-  capabilities?: Record<string, unknown>;
-  command: string;
+export interface CodexExecutorAuthStatusProjection {
+  bridgeVersion: 1;
+  authStatus: "not_authorized";
+  appServerListen: "stdio://";
+  capabilities: {
+    trustedAuthorization: false;
+  };
   message: string;
 }
 

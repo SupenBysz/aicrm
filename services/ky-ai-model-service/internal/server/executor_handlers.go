@@ -16,12 +16,13 @@ import (
 )
 
 func (s *Server) getExecutorConfig(w http.ResponseWriter, r *http.Request, wc wsContext) {
+	setLegacyExecutorAuthorizationHeaders(w)
 	item, err := s.store.GetExecutorConfig(r.Context(), "codex")
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	writeData(w, r, item)
+	writeData(w, r, toLegacyExecutorConfigProjection(item))
 }
 
 func (s *Server) listExecutors(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -34,7 +35,7 @@ func (s *Server) listExecutors(w http.ResponseWriter, r *http.Request, wc wsCont
 		writeStoreError(w, r, err)
 		return
 	}
-	writeList(w, r, items, store.Page{Page: page, PageSize: pageSize, Total: total})
+	writeList(w, r, toLegacyExecutorConfigProjections(items), store.Page{Page: page, PageSize: pageSize, Total: total})
 }
 
 func (s *Server) createExecutor(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -56,7 +57,7 @@ func (s *Server) createExecutor(w http.ResponseWriter, r *http.Request, wc wsCon
 		"executorType": item.ExecutorType,
 		"runtimeType":  item.RuntimeType,
 	})
-	writeData(w, r, item)
+	writeData(w, r, toLegacyExecutorConfigProjection(item))
 }
 
 func (s *Server) getExecutor(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -65,7 +66,7 @@ func (s *Server) getExecutor(w http.ResponseWriter, r *http.Request, wc wsContex
 		writeStoreError(w, r, err)
 		return
 	}
-	writeData(w, r, item)
+	writeData(w, r, toLegacyExecutorConfigProjection(item))
 }
 
 func (s *Server) updateExecutor(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -87,31 +88,12 @@ func (s *Server) updateExecutor(w http.ResponseWriter, r *http.Request, wc wsCon
 		"executorType": item.ExecutorType,
 		"runtimeType":  item.RuntimeType,
 	})
-	writeData(w, r, item)
+	writeData(w, r, toLegacyExecutorConfigProjection(item))
 }
 
 func (s *Server) updateExecutorConfig(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	var in store.ExecutorConfigInput
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	normalizeExecutorConfigInput(&in)
-	if !validExecutorConfigInput(in) {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "执行器参数无效")
-		return
-	}
-	current, err := s.store.GetExecutorConfig(r.Context(), "codex")
-	if err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	item, err := s.store.UpdateExecutorConfig(r.Context(), current.ID, in, wc.UserID)
-	if err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	s.audit(r.Context(), r, wc, "ai_executor_config.updated", "ai_executor_config", item.ID, map[string]any{"executorType": item.ExecutorType})
-	writeData(w, r, item)
+	setLegacyExecutorAuthorizationHeaders(w)
+	writeError(w, r, http.StatusGone, "legacy_endpoint_gone", "旧版 Codex 执行器配置写接口已停用")
 }
 
 func (s *Server) authorizeExecutor(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -696,10 +678,7 @@ func normalizeExecutorConfigInput(in *store.ExecutorConfigInput) {
 	if in.Priority <= 0 {
 		in.Priority = 100
 	}
-	in.AppServerListen = strings.TrimSpace(in.AppServerListen)
-	if in.AppServerListen == "" {
-		in.AppServerListen = "stdio://"
-	}
+	in.AppServerListen = "stdio://"
 	in.Remark = strings.TrimSpace(in.Remark)
 	if in.TriggerFailureCount < 1 {
 		in.TriggerFailureCount = 1
