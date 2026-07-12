@@ -708,6 +708,8 @@ menu.enterprise.matrix_accounts
 
 组合权限固定使用 AND：generation/contract test 需要 `view + regenerate`；修改 executor 需要 `update + assign_executor`；修改 model 需要 `update + assign_model`；同时修改需要三个权限全部成立，并再次校验 workspace grant 与 catalog。
 
+Script context snapshot 的用户侧 operation create 与 WebSpace generation 相同，要求 `view + regenerate`，且资源必须属于当前 workspace/WebSpace。Desktop proof 使用一次性 command ticket + 设备签名，不接受或复用普通用户权限；Agent internal GET 使用服务身份并校验冻结 runId，不把脚本权限转交给调用方。
+
 ### 14.3 Agent Executor 权限
 
 ```text

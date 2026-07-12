@@ -835,6 +835,48 @@ dispatch_status = pending | dispatching | dispatched | cancelled | failed
 
 Contract test generation run 必须冻结 `contract_id/contract_revision/target_version_id`；成功只写契约测试记录与目标 candidate 验证结果，不创建新 candidate。
 
+### 5.12 脱敏脚本上下文快照
+
+`contextSnapshotId` 引用 Matrix service 拥有的短期、不可变安全资源，不是 Renderer 上传的任意 JSON，也不是 Desktop 原始 CDP/DOM 快照。P1 只允许 additive 建表和 shadow read；可信 Desktop 提交端点、设备证明和 command ticket 在 P2B 通过前保持关闭。
+
+```text
+ky_matrix_account_login_script_context_snapshot
+  id
+  workspace_type
+  workspace_id
+  platform
+  web_space_id                  # 与 script_id 二选一
+  script_id                     # 手动维护时可用
+  attempt_id                    # WebSpace 属于 Attempt 时冻结
+  script_purpose
+  schema_version
+  sanitizer_version
+  page_origin
+  page_path                     # 禁止 query/fragment/userinfo
+  page_fingerprint
+  safe_payload_json             # 严格 schema 的脱敏结构化投影
+  content_hash
+  status                        # ready | expired | deleted
+  expires_at                    # created_at + 30 minutes
+  created_by
+  created_at
+  deleted_at
+```
+
+`safe_payload_json` 只允许：页面标题的有界摘要、规范化可见文本片段、landmark、role/accessible name，以及带 `elementKey/keySource/stability` 的元素证据和候选验证所需矩形。固定禁止原始 DOM、原始 accessibility tree、input value、Cookie、Storage、IndexedDB、Token、密码、验证码、账号凭据、二维码 data URL、截图、任意文件路径和任意 CDP/App Server 输出。Root/element 字段采用严格白名单，未知字段拒绝；payload、文本、元素数量和单字段长度均有上限。
+
+上下文创建链路固定为：
+
+1. 用户以 Bearer、workspace、权限和 Idempotency-Key 为目标 WebSpace 创建 snapshot operation；服务端签发绑定 `operationId/snapshotId/webSpaceId/deviceId/purpose/sanitizerVersion/expiry/nonce` 的一次性 Desktop command ticket。
+2. Host 只把 ID 与 ticket 交给统一 Desktop Port。Main 捕获并在本地完成严格脱敏，以设备签名直接提交 `/api/v1/matrix-account-script-context-snapshots/{snapshotId}/desktop-proofs`；Renderer/Plugin 不接触 payload、proof 或 receipt。
+3. Matrix 验证 ticket、设备签名、sequence/nonce、target revision、schema、大小和 content hash 后一次性物化 `ready` 资源；相同请求按 ledger 幂等，不同 body 或重放拒绝。
+4. Generation/contract-test create 只接收 `contextSnapshotId`。Matrix 必须验证同 workspace、同平台、同 WebSpace/Script、同 purpose、状态 ready 且未过期，再冻结到 generation run。
+5. Agent Executor 仅凭同 runId 和 internal token 从 Matrix internal API 获取安全投影；响应 `no-store`，不得写 task event/raw-log、审计或普通 API。终态或 TTL 到期后清理。
+
+用户 Command body 固定为 `{scriptPurpose,expectedWebSpaceRevision,sanitizerVersion}`，202 响应固定为 `{operationId,snapshotId,expectedWebSpaceRevision,commandTicket,expiresAt}`。Desktop proof body 固定为 `{operationId,snapshotId,webSpaceId,expectedWebSpaceRevision,runtimeEpoch,nativeSequence,schemaVersion,sanitizerVersion,pageOrigin,pagePath,pageFingerprint,safePayload,contentHash,capturedAt}`；不得扩展 screenshot、path、credential 或任意 raw 字段。Internal GET 额外要求 `X-KY-Executor-Task-Id: <runId>`，Matrix 必须校验该 run 冻结了同一 snapshot。
+
+页面截图默认不进入该持久资源。确需视觉输入时只能使用独立的、进程内、短期、单次消费流，任何重启或超时都丢弃并回到无截图生成；截图不是 generation run 成功和恢复的必要条件。
+
 ## 6. API 契约
 
 账号档案 API 前缀固定为：

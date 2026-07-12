@@ -860,6 +860,20 @@ GET  /internal/v1/executor-tasks/{taskId}/result
 POST /internal/v1/executor-tasks/{taskId}/cancel
 ```
 
+Matrix 脚本上下文使用独立的可信提交与内部读取合同：
+
+```text
+POST /api/v1/matrix-account-web-spaces/{webSpaceId}/script-context-snapshots
+POST /api/v1/matrix-account-script-context-snapshots/{snapshotId}/desktop-proofs
+GET  /internal/v1/matrix-account-script-context-snapshots/{snapshotId}
+```
+
+- 第一个 POST 是用户 Command，要求脚本 regenerate 权限、`expectedWebSpaceRevision` 和 Idempotency-Key，只创建 operation 并返回绑定设备/目标/用途/修订的一次性 Desktop ticket；不得接受 snapshot body。
+- `desktop-proofs` 不使用普通 Bearer 或 workspace Header，必须同时校验 command ticket、设备签名、sequence/nonce/request ledger 和严格脱敏 schema；Renderer/Plugin 不得作为 proof 中继。
+- 用户 Command body/response、Desktop proof body 和 30 分钟 TTL 严格使用 Matrix §5.12 的固定字段，未知字段拒绝。
+- internal GET 只接受 Agent Executor internal token、`X-KY-Request-Id` 和 `X-KY-Executor-Task-Id: <runId>`；Matrix 校验该 generation run 冻结了同一 snapshot，只返回 Matrix §5.12 的安全投影，不返回截图、路径或原始浏览器内容。
+- P1 shadow 阶段三条能力均保持 intake 关闭；建表不等于授权 Desktop 或 Agent 写入。
+
 - 仅允许 loopback/受控内网，并校验 `X-KY-Internal-Token` 和 `X-KY-Request-Id`。
 - Resolve 输入 workspace、script、scriptPurpose、operation、generationEngine、可选 executor/model；返回完整冻结 binding、唯一 taskType 或结构化错误。
 - Matrix service 预生成全局 UUID `runId`，Create task 必须携带 `requestedTaskId=runId`、scriptPurpose、operation/taskType、Idempotency-Key 和已解析 binding revision；executor task 主键必须采用该 runId，返回 202 `{taskId: runId, status:"pending"}`。相同 ID 不同 request hash 返回冲突。

@@ -2032,6 +2032,7 @@ enterprise.workbench.view
 
 - LoginAttempt：创建、snapshot、event history、持久 SSE、刷新二维码、重试、取消、打开/恢复窗口和绑定确认。
 - Account capability run：把 `executeAccountCapability` 映射为版本化 capability 运行资源。
+- Script context snapshot：用户 Command 只创建绑定 WebSpace/device/revision 的 operation；脱敏 payload 由 Desktop Main 以 ticket + 设备签名直交 Matrix，普通 Renderer/Plugin 不上传 payload/proof；Agent 只经 internal API 按 runId 读取短期安全投影。
 - Script generation run：按 WebSpace 或 Script 创建异步 run，读取资源/event/SSE/terminal，并以 revision CAS 取消。
 - Contract test：唯一入口为 `/api/v1/matrix-account-login-script-contracts/{contractId}/tests`，只能写测试记录；candidate 激活另走 revision CAS。
 
