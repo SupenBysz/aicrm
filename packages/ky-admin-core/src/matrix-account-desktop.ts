@@ -479,81 +479,105 @@ export interface AiExecutorTerminalWindowResult {
   focusedExisting: boolean;
 }
 
-interface MatrixAccountBridgeLike {
-  app?: {
-    getVersion?: () => Promise<string>;
-  };
-  aiExecutor?: {
-    openTerminalWindow?: (
-      input: AiExecutorTerminalWindowInput
-    ) => Promise<DesktopCommandResult<AiExecutorTerminalWindowResult>>;
-  };
-  matrixAccount?: {
-    getCapabilities?: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;
-    startLogin?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountBrowserResult>>;
-    openAccount?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountBrowserResult>>;
-    checkSession?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountCheckResult>>;
-    clearProfile?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountClearProfileResult>>;
-    onLoginStateChanged?: (listener: (payload: MatrixAccountLoginStatePayload) => void) => () => void;
-    createWebSpaceLogin?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>>;
-    openWebSpace?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>>;
-    detectWebSpaceAccount?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceDetectResult>>;
-    clearWebSpace?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceClearResult>>;
-    captureWebSpaceSnapshot?: (
-      input: MatrixAccountWebSpaceSnapshotInput
-    ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceSnapshotResult>>;
-    runWebSpaceLoginScript?: (
-      input: MatrixAccountWebSpaceScriptInput
-    ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceScriptResult>>;
-    onWebSpaceStateChanged?: (listener: (payload: MatrixAccountWebSpaceStatePayload) => void) => () => void;
-    startAccountOnboarding?: (
-      input: MatrixAccountOnboardingStartInput
-    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
-    getAccountOnboarding?: (
-      input: MatrixAccountOnboardingLookupInput
-    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
-    getLoginQrCode?: (
-      input: MatrixAccountOnboardingQrInput
-    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
-    refreshLoginQrCode?: (
-      input: MatrixAccountOnboardingRefreshQrInput
-    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
-    cancelAccountOnboarding?: (
-      input: MatrixAccountOnboardingCancelInput
-    ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
-    sealSessionSnapshot?: (
-      input: MatrixAccountSessionSnapshotSealInput
-    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
-    verifySessionSnapshot?: (
-      input: MatrixAccountSessionSnapshotVerifyInput
-    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
-    restoreSessionSnapshot?: (
-      input: MatrixAccountSessionSnapshotRestoreInput
-    ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotRestoreResult>>;
-    cleanupSessionWebSpace?: (
-      input: MatrixAccountSessionWebSpaceCleanupInput
-    ) => Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>>;
-    onAccountOnboardingEvent?: (listener: (payload: MatrixAccountOnboardingEvent) => void) => () => void;
+export interface AiExecutorDesktopBridgeContract {
+  openTerminalWindow?: (
+    input: AiExecutorTerminalWindowInput
+  ) => Promise<DesktopCommandResult<AiExecutorTerminalWindowResult>>;
+}
+
+export interface MatrixAccountDesktopBridgeContract {
+  getCapabilities?: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;
+  startLogin?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountBrowserResult>>;
+  openAccount?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountBrowserResult>>;
+  checkSession?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountCheckResult>>;
+  clearProfile?: (input: MatrixAccountBrowserInput) => Promise<DesktopCommandResult<MatrixAccountClearProfileResult>>;
+  onLoginStateChanged?: (listener: (payload: MatrixAccountLoginStatePayload) => void) => () => void;
+  createWebSpaceLogin?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>>;
+  openWebSpace?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceBrowserResult>>;
+  detectWebSpaceAccount?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceDetectResult>>;
+  clearWebSpace?: (input: MatrixAccountWebSpaceInput) => Promise<DesktopCommandResult<MatrixAccountWebSpaceClearResult>>;
+  captureWebSpaceSnapshot?: (
+    input: MatrixAccountWebSpaceSnapshotInput
+  ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceSnapshotResult>>;
+  runWebSpaceLoginScript?: (
+    input: MatrixAccountWebSpaceScriptInput
+  ) => Promise<DesktopCommandResult<MatrixAccountWebSpaceScriptResult>>;
+  onWebSpaceStateChanged?: (listener: (payload: MatrixAccountWebSpaceStatePayload) => void) => () => void;
+  startAccountOnboarding?: (
+    input: MatrixAccountOnboardingStartInput
+  ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+  getAccountOnboarding?: (
+    input: MatrixAccountOnboardingLookupInput
+  ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+  getLoginQrCode?: (
+    input: MatrixAccountOnboardingQrInput
+  ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
+  refreshLoginQrCode?: (
+    input: MatrixAccountOnboardingRefreshQrInput
+  ) => Promise<DesktopCommandResult<MatrixAccountOnboardingQrCodeView>>;
+  cancelAccountOnboarding?: (
+    input: MatrixAccountOnboardingCancelInput
+  ) => Promise<DesktopCommandResult<MatrixAccountOnboardingView>>;
+  sealSessionSnapshot?: (
+    input: MatrixAccountSessionSnapshotSealInput
+  ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
+  verifySessionSnapshot?: (
+    input: MatrixAccountSessionSnapshotVerifyInput
+  ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotVerificationResult>>;
+  restoreSessionSnapshot?: (
+    input: MatrixAccountSessionSnapshotRestoreInput
+  ) => Promise<DesktopCommandResult<MatrixAccountSessionSnapshotRestoreResult>>;
+  cleanupSessionWebSpace?: (
+    input: MatrixAccountSessionWebSpaceCleanupInput
+  ) => Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>>;
+  onAccountOnboardingEvent?: (listener: (payload: MatrixAccountOnboardingEvent) => void) => () => void;
+}
+
+/**
+ * Host-owned adapter boundary for all Matrix Account native capabilities.
+ *
+ * Core deliberately has no knowledge of renderer globals; the Admin Host is
+ * the only layer allowed to resolve the preload bridge and inject this port.
+ */
+export interface MatrixAccountDesktopPort {
+  isDesktopRuntime(): boolean;
+  getDebugMode(): Promise<boolean>;
+  getMatrixAccountBridge(): MatrixAccountDesktopBridgeContract | null;
+  getAiExecutorBridge(): AiExecutorDesktopBridgeContract | null;
+}
+
+let installedDesktopPort: MatrixAccountDesktopPort | null = null;
+
+/**
+ * Installs the Host adapter for the lifetime of the application. The returned
+ * disposer is primarily for tests and embedded hosts; it only removes the port
+ * when it is still the active installation.
+ */
+export function installMatrixAccountDesktopPort(port: MatrixAccountDesktopPort): () => void {
+  const previous = installedDesktopPort;
+  installedDesktopPort = port;
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    if (installedDesktopPort === port) installedDesktopPort = previous;
   };
 }
 
-function matrixAccountBridge(): NonNullable<MatrixAccountBridgeLike["matrixAccount"]> | null {
-  if (typeof window === "undefined") return null;
-  return ((window as unknown as { aicrm?: MatrixAccountBridgeLike }).aicrm?.matrixAccount ?? null) as
-    | NonNullable<MatrixAccountBridgeLike["matrixAccount"]>
-    | null;
+function matrixAccountBridge(): MatrixAccountDesktopBridgeContract | null {
+  return installedDesktopPort?.getMatrixAccountBridge() ?? null;
 }
 
-function aiExecutorBridge(): NonNullable<MatrixAccountBridgeLike["aiExecutor"]> | null {
-  if (typeof window === "undefined") return null;
-  return ((window as unknown as { aicrm?: MatrixAccountBridgeLike }).aicrm?.aiExecutor ?? null) as
-    | NonNullable<MatrixAccountBridgeLike["aiExecutor"]>
-    | null;
+function aiExecutorBridge(): AiExecutorDesktopBridgeContract | null {
+  return installedDesktopPort?.getAiExecutorBridge() ?? null;
 }
 
 export function isAiCrmDesktopClientRuntime(): boolean {
-  if (typeof window === "undefined") return false;
-  return typeof (window as unknown as { aicrm?: MatrixAccountBridgeLike }).aicrm?.app?.getVersion === "function";
+  return installedDesktopPort?.isDesktopRuntime() ?? false;
+}
+
+export function getAiCrmDesktopDebugMode(): Promise<boolean> {
+  return installedDesktopPort?.getDebugMode() ?? Promise.resolve(false);
 }
 
 export function hasMatrixAccountDesktopCapability(): boolean {

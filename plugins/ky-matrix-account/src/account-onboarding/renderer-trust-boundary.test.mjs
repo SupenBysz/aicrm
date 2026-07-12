@@ -5,6 +5,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { submitAccountOnboardingStepResultRequest } from "./api.ts";
+import {
+  installMatrixAccountDesktopPort,
+  isAiCrmDesktopClientRuntime,
+  subscribeMatrixAccountOnboarding
+} from "../../../../packages/ky-admin-core/src/matrix-account-desktop.ts";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const publicBoundaryFiles = [
@@ -51,6 +56,64 @@ test("production automation gates stay closed and no Renderer completion facade 
     const source = await readFile(path.join(repositoryRoot, relativePath), "utf8");
     assert.doesNotMatch(source, /\bcompleteAccountOnboarding(?:Request)?\b/);
   }
+});
+
+test("Host is the sole preload bridge reader and Core consumes an injected Desktop Port", async () => {
+  for (const relativePath of [
+    "packages/ky-admin-core/src/matrix-account-desktop.ts",
+    "plugins/ky-matrix-account/src/account-onboarding/service.ts",
+    "plugins/ky-matrix-account/src/pages/matrix-accounts-page.tsx"
+  ]) {
+    const source = await readFile(path.join(repositoryRoot, relativePath), "utf8");
+    assert.doesNotMatch(
+      source,
+      /window\.aicrm\b|\)\.aicrm\b|\baicrm\?\s*:/,
+      `${relativePath} reads the preload bridge directly`
+    );
+  }
+
+  const hostAdapter = await readFile(
+    path.join(repositoryRoot, "apps/ky-admin-host/src/desktop-client.ts"),
+    "utf8"
+  );
+  const hostEntry = await readFile(path.join(repositoryRoot, "apps/ky-admin-host/src/main.tsx"), "utf8");
+  assert.match(hostAdapter, /window\.aicrm/);
+  assert.match(hostEntry, /installMatrixAccountDesktopPort\(matrixAccountDesktopPort\)/);
+});
+
+test("injected onboarding subscription registers once, filters sequence and disposes once", () => {
+  let nativeListener;
+  let subscribeCount = 0;
+  let disposeCount = 0;
+  const uninstall = installMatrixAccountDesktopPort({
+    isDesktopRuntime: () => true,
+    getDebugMode: async () => false,
+    getAiExecutorBridge: () => null,
+    getMatrixAccountBridge: () => ({
+      onAccountOnboardingEvent(listener) {
+        subscribeCount += 1;
+        nativeListener = listener;
+        return () => {
+          disposeCount += 1;
+        };
+      }
+    })
+  });
+  const received = [];
+  const unsubscribe = subscribeMatrixAccountOnboarding("attempt-1", 3, (event) => received.push(event.sequence));
+
+  nativeListener?.({ attemptId: "attempt-2", sequence: 4 });
+  nativeListener?.({ attemptId: "attempt-1", sequence: 3 });
+  nativeListener?.({ attemptId: "attempt-1", sequence: 4 });
+  nativeListener?.({ attemptId: "attempt-1", sequence: 4 });
+  nativeListener?.({ attemptId: "attempt-1", sequence: 5 });
+  unsubscribe();
+  uninstall();
+
+  assert.equal(subscribeCount, 1);
+  assert.equal(disposeCount, 1);
+  assert.deepEqual(received, [4, 5]);
+  assert.equal(isAiCrmDesktopClientRuntime(), false);
 });
 
 test("ordinary step-result requests strip nested trust material", async () => {

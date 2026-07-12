@@ -1,9 +1,16 @@
+import type {
+  AiExecutorDesktopBridgeContract,
+  MatrixAccountDesktopBridgeContract,
+  MatrixAccountDesktopPort
+} from "@ky/admin-core";
+
 const DESKTOP_CLIENT_MODE = "desktop";
 const DESKTOP_CLIENT_NAME = "aicrm-desktop";
 
 export interface DesktopBridgeLike {
   app?: {
     getVersion?: () => Promise<string>;
+    getConfig?: () => Promise<{ debugMode?: boolean }>;
   };
   window?: {
     getState?: () => Promise<DesktopWindowState>;
@@ -16,6 +23,8 @@ export interface DesktopBridgeLike {
     getSnapshot?: () => Promise<DesktopNetworkLogSnapshot>;
     clear?: () => Promise<DesktopNetworkLogSnapshot>;
   };
+  matrixAccount?: MatrixAccountDesktopBridgeContract;
+  aiExecutor?: AiExecutorDesktopBridgeContract;
 }
 
 export interface DesktopWindowState {
@@ -65,6 +74,21 @@ export function getDesktopBridge(): DesktopBridgeLike | null {
   if (!isDesktopClientMode()) return null;
   return window.aicrm ?? null;
 }
+
+/** The sole Host adapter from the preload bridge into plugin-facing Core APIs. */
+export const matrixAccountDesktopPort: MatrixAccountDesktopPort = {
+  isDesktopRuntime: isDesktopClientMode,
+  async getDebugMode() {
+    const config = await getDesktopBridge()?.app?.getConfig?.();
+    return Boolean(config?.debugMode);
+  },
+  getMatrixAccountBridge() {
+    return getDesktopBridge()?.matrixAccount ?? null;
+  },
+  getAiExecutorBridge() {
+    return getDesktopBridge()?.aiExecutor ?? null;
+  }
+};
 
 export function desktopClientHeaders(): Record<string, string> {
   if (!isDesktopClientMode()) return {};
