@@ -226,19 +226,12 @@ export interface CodexModelCatalogSnapshot {
 export interface CodexAuthorizationChangedEvent {
   id: string;
   name: "codex.authorization.changed";
-  version: 2;
-  source: "main";
-  scope: "executor";
+  version: 1;
+  source: "aicrm-desktop";
+  scope: "system";
   occurredAt: string;
-  correlationId?: string;
-  payload: {
-    operationId: string;
-    runtimeSessionId: string;
-    runtimeEpoch: number;
-    nativeSequence: number;
-    scopeHash: string;
-    snapshot: CodexAuthorizationSnapshot;
-  };
+  correlationId: string;
+  payload: CodexAuthorizationSnapshot;
 }
 
 export type MatrixAccountPlatform = "douyin" | "kuaishou" | "xiaohongshu";

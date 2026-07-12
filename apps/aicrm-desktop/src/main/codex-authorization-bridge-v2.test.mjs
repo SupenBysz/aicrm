@@ -145,7 +145,7 @@ test("Bridge v2 physical channels, preload surface, and unsubscribe are explicit
   assert.match(mainIpc, /invokeSingleArgument\(args, logoutCodexCredential\)/);
 });
 
-test("Bridge v2 contract exposes only safe snapshot and sequence envelope fields", async () => {
+test("Bridge v2 contract uses the standard system event envelope and safe snapshot", async () => {
   const shared = await readFile(new URL("../shared/types.ts", import.meta.url), "utf8");
   assert.match(shared, /interface CodexAuthorizationCapabilities[\s\S]*bridgeVersion: 2/);
   assert.match(shared, /supportsAppServerAuth: true/);
@@ -156,9 +156,14 @@ test("Bridge v2 contract exposes only safe snapshot and sequence envelope fields
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const eventContract = shared.slice(start, end);
-  for (const field of ["operationId", "runtimeSessionId", "runtimeEpoch", "nativeSequence", "scopeHash", "snapshot"]) {
+  for (const field of ["id", "name", "version", "source", "scope", "occurredAt", "correlationId", "payload"]) {
     assert.match(eventContract, new RegExp(`${field}:`), `event envelope missing ${field}`);
   }
+  assert.match(eventContract, /version: 1/);
+  assert.match(eventContract, /source: "aicrm-desktop"/);
+  assert.match(eventContract, /scope: "system"/);
+  assert.match(eventContract, /correlationId: string/);
+  assert.match(eventContract, /payload: CodexAuthorizationSnapshot/);
   for (const forbidden of ["nextActions", "bindingDecision", "receipt", "qrCodeDataUrl", "cookie", "storage", "dom", "screenshot"] ) {
     assert.equal(eventContract.toLowerCase().includes(forbidden.toLowerCase()), false, `event contract contains ${forbidden}`);
   }
