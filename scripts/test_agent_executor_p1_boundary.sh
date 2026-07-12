@@ -42,8 +42,14 @@ if grep -q 'internal/appserver\|internal/credentialfs' "$SERVICE_DIR/internal/se
   fail "P1 deployed server must not wire the P2A runtime before cutover"
 fi
 if grep -R -n -E 'INSERT[[:space:]]+INTO|UPDATE[[:space:]]+ky_|DELETE[[:space:]]+FROM|TRUNCATE[[:space:]]+' \
-  "$SERVICE_DIR/internal/store" --include='*.go' --exclude='*_test.go'; then
-  fail "P1 production store contains SQL writes"
+  "$SERVICE_DIR/internal/store" --include='*.go' --exclude='*_test.go' --exclude='control_*.go'; then
+  fail "P1 shadow reader contains SQL writes"
+fi
+grep -q 'if s.cfg.WriteEnabled {' "$SERVICE_DIR/internal/server/server.go" || fail "P2A control store is not feature-gated"
+grep -q 'strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true")' \
+  "$SERVICE_DIR/internal/config/config.go" || fail "control writes are not explicit opt-in"
+if grep -q '^KY_AGENT_EXECUTOR_WRITE_ENABLED=true$' "$ROOT_DIR/ops/native/ky-agent-executor-service.env.example"; then
+  fail "P1 deployment example enables control writes"
 fi
 
 grep -q 'ky-agent-executor-service' "$ROOT_DIR/go.work" || fail "go.work integration missing"

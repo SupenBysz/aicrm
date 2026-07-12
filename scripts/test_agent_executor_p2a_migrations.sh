@@ -57,6 +57,7 @@ before="$(schema_fingerprint)"
 psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
 BEGIN;
 \ir $ROOT_DIR/ops/db/040_agent_executor_authorization_runtime.sql
+\ir $ROOT_DIR/ops/db/041_agent_executor_p2a_control_api.sql
 ROLLBACK;
 SQL
 after="$(schema_fingerprint)"
@@ -65,6 +66,8 @@ after="$(schema_fingerprint)"
 for _ in 1 2; do
   psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
     -f "$ROOT_DIR/ops/db/040_agent_executor_authorization_runtime.sql" >/dev/null
+  psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
+    -f "$ROOT_DIR/ops/db/041_agent_executor_p2a_control_api.sql" >/dev/null
 done
 
 assert_scalar() {
@@ -88,6 +91,9 @@ assert_scalar \
 assert_scalar \
   "SELECT count(*) FROM pg_constraint WHERE conname IN ('ky_ai_executor_task_result_safe_metadata_check','ky_ai_executor_task_event_safe_metadata_check','ky_ai_executor_task_outbox_safe_metadata_check','ky_ai_executor_control_outbox_safe_metadata_check')" \
   "4" "safe metadata constraints exist once"
+assert_scalar \
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='ky_ai_executor_api_idempotency'" \
+  "1" "P2A API idempotency table exists"
 
 psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 INSERT INTO ky_ai_executor_authorization_session (

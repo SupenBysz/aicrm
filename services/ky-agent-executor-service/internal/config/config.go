@@ -11,13 +11,22 @@ import (
 const (
 	ServiceName = "ky-agent-executor-service"
 	ShadowMode  = "shadow_read_only"
+	ControlMode = "p2a_control_plane"
 )
 
 type Config struct {
-	HTTPAddr       string
-	RuntimeEnvFile string
-	DatabaseURL    string
-	InternalToken  string
+	HTTPAddr          string
+	RuntimeEnvFile    string
+	DatabaseURL       string
+	WriterDatabaseURL string
+	InternalToken     string
+	AuthTokenSecret   string
+	MembershipURL     string
+	WriteEnabled      bool
+	CredentialRoot    string
+	CodexBinary       string
+	SystemdRunPath    string
+	OwnerInstanceID   string
 }
 
 func Load() Config {
@@ -36,11 +45,32 @@ func Load() Config {
 		internalToken = strings.TrimSpace(os.Getenv("KY_INTERNAL_SERVICE_TOKEN"))
 	}
 
+	membershipURL := strings.TrimSpace(os.Getenv("KY_MEMBERSHIP_SERVICE_URL"))
+	if membershipURL == "" {
+		membershipURL = "http://127.0.0.1:18083"
+	}
+	credentialRoot := strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_CREDENTIAL_ROOT"))
+	if credentialRoot == "" {
+		credentialRoot = "/var/lib/aicrm-agent-executors"
+	}
+	ownerInstanceID := strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID"))
+	if ownerInstanceID == "" {
+		hostname, _ := os.Hostname()
+		ownerInstanceID = hostname
+	}
 	return Config{
-		HTTPAddr:       addr,
-		RuntimeEnvFile: runtimeEnvFile,
-		DatabaseURL:    strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
-		InternalToken:  internalToken,
+		HTTPAddr:          addr,
+		RuntimeEnvFile:    runtimeEnvFile,
+		DatabaseURL:       strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
+		WriterDatabaseURL: strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
+		InternalToken:     internalToken,
+		AuthTokenSecret:   strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
+		MembershipURL:     membershipURL,
+		WriteEnabled:      strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
+		CredentialRoot:    credentialRoot,
+		CodexBinary:       strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
+		SystemdRunPath:    strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
+		OwnerInstanceID:   ownerInstanceID,
 	}
 }
 
@@ -51,12 +81,34 @@ func (c Config) Validate() error {
 	if err != nil {
 		return errors.New("KY_AGENT_EXECUTOR_SERVICE_HTTP_ADDR must be host:port")
 	}
-	if host == "localhost" {
+	if host != "localhost" {
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return errors.New("ky-agent-executor-service must bind to loopback")
+		}
+	}
+	return c.validateControlPlane()
+}
+
+func (c Config) validateControlPlane() error {
+	if !c.WriteEnabled {
 		return nil
 	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return errors.New("ky-agent-executor-service P1 must bind to loopback")
+	for name, value := range map[string]string{
+		"KY_AGENT_EXECUTOR_DATABASE_URL":        c.DatabaseURL,
+		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL": c.WriterDatabaseURL,
+		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":      c.InternalToken,
+		"KY_AUTH_TOKEN_SECRET":                  c.AuthTokenSecret,
+		"KY_MEMBERSHIP_SERVICE_URL":             c.MembershipURL,
+		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":     c.CredentialRoot,
+		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":   c.OwnerInstanceID,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return errors.New(name + " is required when Agent Executor writes are enabled")
+		}
+	}
+	if c.DatabaseURL != "" && c.DatabaseURL == c.WriterDatabaseURL {
+		return errors.New("reader and writer database URLs must use distinct roles")
 	}
 	return nil
 }

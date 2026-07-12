@@ -4,15 +4,32 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/accessclient"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/config"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
+	"github.com/Kysion/KyaiCRM/shared/auth"
 )
 
 type Server struct {
-	cfg    config.Config
-	reader store.Reader
+	cfg        config.Config
+	reader     store.Reader
+	control    controlStore
+	authorizer accessclient.Authorizer
+}
+
+type controlStore interface {
+	Ping(context.Context) error
+	ListExecutors(context.Context, string, string) ([]store.ExecutorControlProjection, error)
+	GetExecutor(context.Context, string, string, string) (store.ExecutorControlProjection, error)
+	CreateExecutor(context.Context, store.CreateExecutorInput, string, string) (store.ExecutorControlProjection, error)
+	PatchExecutor(context.Context, string, store.ExecutorPatch, string, string) (store.ExecutorControlProjection, error)
+	ListModels(context.Context, string, bool) ([]store.ModelProjection, error)
+	ListWorkspaceGrants(context.Context, string) ([]store.WorkspaceGrantProjection, error)
+	PutWorkspaceGrant(context.Context, string, string, string, string, string, int64) (store.WorkspaceGrantProjection, error)
+	DeleteWorkspaceGrant(context.Context, string, string, string, string, int64) (store.WorkspaceGrantProjection, error)
 }
 
 func New(cfg config.Config) *Server {
@@ -21,6 +38,10 @@ func New(cfg config.Config) *Server {
 
 func newWithReader(cfg config.Config, reader store.Reader) *Server {
 	return &Server{cfg: cfg, reader: reader}
+}
+
+func newWithControl(cfg config.Config, reader store.Reader, control controlStore, authorizer accessclient.Authorizer) *Server {
+	return &Server{cfg: cfg, reader: reader, control: control, authorizer: authorizer}
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -34,6 +55,19 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		s.reader = opened
 		defer opened.Close()
+	}
+	if s.cfg.WriteEnabled {
+		opened, err := store.OpenControl(ctx, s.cfg.WriterDatabaseURL)
+		if err != nil {
+			return err
+		}
+		s.control = opened
+		defer opened.Close()
+		authorizer, err := accessclient.New(s.cfg.MembershipURL, s.cfg.InternalToken)
+		if err != nil {
+			return err
+		}
+		s.authorizer = authorizer
 	}
 
 	httpServer := &http.Server{
@@ -75,7 +109,76 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("POST /internal/v1/executor-tasks", s.internal(s.shadowWriteRejected))
 	mux.HandleFunc("POST /internal/v1/executor-tasks/{taskId}/cancel", s.internal(s.shadowWriteRejected))
 
+	// P2A public control plane. The handlers remain fail-closed unless the
+	// dedicated writer role and Membership access-decision client are enabled.
+	mux.HandleFunc("GET /api/v1/ai-executors", s.public([]string{"platform.ai_executors.view"}, nil, s.listExecutors))
+	mux.HandleFunc("POST /api/v1/ai-executors", s.public([]string{"platform.ai_executors.create"}, nil, s.createExecutor))
+	mux.HandleFunc("GET /api/v1/ai-executors/{executorId}", s.public([]string{"platform.ai_executors.view"}, nil, s.getExecutor))
+	mux.HandleFunc("PATCH /api/v1/ai-executors/{executorId}", s.public([]string{"platform.ai_executors.update"}, nil, s.patchExecutor))
+	mux.HandleFunc("GET /api/v1/ai-executors/{executorId}/models", s.public([]string{"platform.ai_executors.view"}, nil, s.listExecutorModels))
+	mux.HandleFunc("GET /api/v1/ai-executors/{executorId}/workspace-grants", s.public([]string{"platform.ai_executors.view"}, nil, s.listExecutorWorkspaceGrants))
+	mux.HandleFunc("PUT /api/v1/ai-executors/{executorId}/workspace-grants/{workspaceType}/{workspaceId}", s.public([]string{"platform.ai_executors.update"}, nil, s.putExecutorWorkspaceGrant))
+	mux.HandleFunc("DELETE /api/v1/ai-executors/{executorId}/workspace-grants/{workspaceType}/{workspaceId}", s.public([]string{"platform.ai_executors.update"}, nil, s.deleteExecutorWorkspaceGrant))
+
 	return mux
+}
+
+type actorContext struct {
+	ActorID       string
+	SessionID     string
+	MembershipID  string
+	WorkspaceType string
+	WorkspaceID   string
+}
+
+type publicHandler func(http.ResponseWriter, *http.Request, actorContext)
+
+func (s *Server) public(requiredAll, requiredAny []string, next publicHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		noStore(w)
+		ensureRequestID(r)
+		if !s.cfg.WriteEnabled || s.control == nil || s.authorizer == nil {
+			writeError(w, r, http.StatusServiceUnavailable, "control_plane_disabled", "Agent Executor control plane is disabled")
+			return
+		}
+		if s.cfg.AuthTokenSecret == "" {
+			writeError(w, r, http.StatusServiceUnavailable, "authentication_unavailable", "authentication is unavailable")
+			return
+		}
+		header := r.Header.Get("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			writeError(w, r, http.StatusUnauthorized, "unauthorized", "authentication is required")
+			return
+		}
+		payload, err := auth.VerifyToken(s.cfg.AuthTokenSecret, strings.TrimPrefix(header, "Bearer "))
+		if err != nil || !validOpaqueID(payload.UserID) || !validOpaqueID(payload.SessionID) {
+			writeError(w, r, http.StatusUnauthorized, "unauthorized", "authentication is invalid")
+			return
+		}
+		workspaceType := strings.TrimSpace(r.Header.Get("X-KY-Workspace-Type"))
+		workspaceID := strings.TrimSpace(r.Header.Get("X-KY-Workspace-Id"))
+		if workspaceType != "platform" || workspaceID != "platform_root" {
+			writeError(w, r, http.StatusForbidden, "workspace_forbidden", "platform workspace is required")
+			return
+		}
+		decision, err := s.authorizer.Evaluate(r.Context(), requestID(r), accessclient.Request{
+			ActorID: payload.UserID, SessionID: payload.SessionID,
+			WorkspaceType: workspaceType, WorkspaceID: workspaceID,
+			RequiredAllPermissions: requiredAll, RequiredAnyPermissions: requiredAny,
+		})
+		if errors.Is(err, accessclient.ErrDenied) {
+			writeError(w, r, http.StatusForbidden, "permission_denied", "permission is denied")
+			return
+		}
+		if err != nil {
+			writeError(w, r, http.StatusServiceUnavailable, "authorization_unavailable", "authorization decision is unavailable")
+			return
+		}
+		next(w, r, actorContext{
+			ActorID: payload.UserID, SessionID: payload.SessionID, MembershipID: decision.MembershipID,
+			WorkspaceType: workspaceType, WorkspaceID: workspaceID,
+		})
+	}
 }
 
 func (s *Server) internal(next http.HandlerFunc) http.HandlerFunc {
@@ -112,19 +215,25 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	databaseReady := s.reader != nil && s.reader.Ping(r.Context()) == nil
 	internalTokenConfigured := s.cfg.InternalToken != ""
+	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil && s.cfg.AuthTokenSecret != "")
 	status := "ok"
 	httpStatus := http.StatusOK
-	if !databaseReady || !internalTokenConfigured {
+	if !databaseReady || !internalTokenConfigured || !controlReady {
 		status = "degraded"
 		httpStatus = http.StatusServiceUnavailable
+	}
+	mode := config.ShadowMode
+	if s.cfg.WriteEnabled {
+		mode = config.ControlMode
 	}
 	writeJSON(w, httpStatus, map[string]any{
 		"status":                  status,
 		"service":                 config.ServiceName,
-		"mode":                    config.ShadowMode,
-		"writeEnabled":            false,
+		"mode":                    mode,
+		"writeEnabled":            s.cfg.WriteEnabled && controlReady,
 		"scriptMaintenanceReady":  false,
 		"databaseReady":           databaseReady,
+		"controlReady":            controlReady,
 		"internalTokenConfigured": internalTokenConfigured,
 	})
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLoadIsFailClosedAndHasNoWriteMode(t *testing.T) {
+func TestLoadIsFailClosedUnlessWriteModeIsExplicit(t *testing.T) {
 	t.Setenv("KY_AGENT_EXECUTOR_SERVICE_HTTP_ADDR", "")
 	t.Setenv("KY_AGENT_EXECUTOR_DATABASE_URL", "reader-dsn")
 	t.Setenv("KY_AGENT_EXECUTOR_INTERNAL_TOKEN", "internal-secret")
@@ -21,9 +21,32 @@ func TestLoadIsFailClosedAndHasNoWriteMode(t *testing.T) {
 	if os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED") != "true" {
 		t.Fatal("test canary unexpectedly changed")
 	}
-	// Config intentionally has no WriteEnabled field and ignores the canary.
+	if !cfg.WriteEnabled {
+		t.Fatal("explicit control-plane write mode was not loaded")
+	}
 	if ShadowMode != "shadow_read_only" {
 		t.Fatalf("unexpected mode: %s", ShadowMode)
+	}
+}
+
+func TestValidateWriteModeRequiresDedicatedDependencies(t *testing.T) {
+	base := Config{HTTPAddr: "127.0.0.1:18087", WriteEnabled: true}
+	if err := base.Validate(); err == nil {
+		t.Fatal("incomplete write mode was accepted")
+	}
+	base.WriterDatabaseURL = "writer-dsn"
+	base.DatabaseURL = "reader-dsn"
+	base.InternalToken = "internal"
+	base.AuthTokenSecret = "auth-secret"
+	base.MembershipURL = "http://127.0.0.1:18083"
+	base.CredentialRoot = "/var/lib/aicrm-agent-executors"
+	base.OwnerInstanceID = "instance-1"
+	if err := base.Validate(); err != nil {
+		t.Fatalf("complete control-plane config rejected: %v", err)
+	}
+	base.DatabaseURL = base.WriterDatabaseURL
+	if err := base.Validate(); err == nil {
+		t.Fatal("same reader/writer role was accepted")
 	}
 }
 

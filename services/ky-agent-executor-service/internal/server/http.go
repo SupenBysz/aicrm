@@ -1,17 +1,22 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
 )
 
 var (
-	opaqueIDPattern  = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-	requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
-	safeCodePattern  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,127}$`)
+	opaqueIDPattern       = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	requestIDPattern      = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+	safeCodePattern       = regexp.MustCompile(`^[a-z][a-z0-9_]{0,127}$`)
+	idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,160}$`)
 )
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -40,6 +45,53 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 
 func requestID(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-KY-Request-Id"))
+}
+
+func ensureRequestID(r *http.Request) {
+	if !requestIDPattern.MatchString(requestID(r)) {
+		r.Header.Set("X-KY-Request-Id", newOpaqueID("req"))
+	}
+}
+
+func newOpaqueID(prefix string) string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		panic("secure random source unavailable")
+	}
+	return prefix + "_" + hex.EncodeToString(raw[:])
+}
+
+func sha256Hex(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
+}
+
+func idempotencyKey(r *http.Request) (string, bool) {
+	value := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	return value, idempotencyKeyPattern.MatchString(value)
+}
+
+func decodeStrictJSON(w http.ResponseWriter, r *http.Request, value any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "request JSON is invalid")
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, r, http.StatusBadRequest, "validation_error", "request must contain one JSON object")
+		return false
+	}
+	return true
+}
+
+func decodeRawObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, bool) {
+	var object map[string]json.RawMessage
+	if !decodeStrictJSON(w, r, &object) || object == nil {
+		return nil, false
+	}
+	return object, true
 }
 
 func tokenEqual(expected, actual string) bool {
