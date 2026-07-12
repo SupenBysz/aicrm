@@ -6,7 +6,6 @@ import type {
   AccountOnboardingEventsView,
   AccountOnboardingView,
   CancelAccountOnboardingInput,
-  CompleteAccountOnboardingInput,
   ConfirmAccountBindingInput,
   RefreshLoginQrCodeInput,
   RetryAccountOnboardingStepInput,
@@ -15,6 +14,7 @@ import type {
 } from "./types";
 
 const loginAttemptsBase = "/api/v1/matrix-account-login-attempts";
+const trustedRuntimeOnlySuccessMethods = new Set(["session.snapshot.seal.v1", "web_space.cleanup.v1"]);
 
 export type AccountOnboardingTransport = AccountOnboardingView & {
   workspaceType?: string;
@@ -119,9 +119,10 @@ export function submitAccountOnboardingStepResultRequest(
   attemptId: string,
   input: SubmitAccountOnboardingStepResultInput
 ): Promise<AccountOnboardingTransport> {
+  assertRendererStepResultAllowed(input);
   return client.request<AccountOnboardingWrappedResponse>(attemptPath(attemptId, "/step-results"), {
     method: "POST",
-    body: input
+    body: rendererStepResultBody(input)
   }).then(unwrapAttempt);
 }
 
@@ -144,26 +145,6 @@ export function confirmAccountBindingRequest(
   });
 }
 
-/** Complete is accepted only after the trusted runtime sealed and verified the snapshot. */
-export function completeAccountOnboardingRequest(
-  client: RequestClient,
-  input: CompleteAccountOnboardingInput
-): Promise<AccountOnboardingView> {
-  return submitAccountOnboardingStepResultRequest(client, input.attemptId, {
-    operationId: input.operationId,
-    methodKey: "business.onboarding.complete.v1",
-    status: "success",
-    observedPhase: "ready",
-    resultSummary: {
-      snapshotId: input.snapshotId,
-      snapshotVerified: true,
-      bindingDecision: input.bindingDecision,
-      businessAssignment: input.businessAssignment
-    },
-    verificationReceipt: input.snapshotVerificationReceipt
-  });
-}
-
 export function executeAccountCapabilityRequest<TInput, TData>(
   client: RequestClient,
   input: AccountCapabilityExecutionInput<TInput>
@@ -177,4 +158,45 @@ export function executeAccountCapabilityRequest<TInput, TData>(
 
 function unwrapAttempt(value: AccountOnboardingWrappedResponse): AccountOnboardingTransport {
   return "attempt" in value ? value.attempt : value;
+}
+
+function assertRendererStepResultAllowed(input: SubmitAccountOnboardingStepResultInput): void {
+  if (input.methodKey === "business.onboarding.complete.v1") {
+    throw new Error("trusted_runtime_step_required");
+  }
+  if (input.status === "success" && trustedRuntimeOnlySuccessMethods.has(input.methodKey)) {
+    throw new Error("trusted_runtime_step_required");
+  }
+}
+
+function rendererStepResultBody(input: SubmitAccountOnboardingStepResultInput): SubmitAccountOnboardingStepResultInput {
+  return {
+    operationId: input.operationId,
+    methodKey: input.methodKey,
+    status: input.status,
+    observedPhase: input.observedPhase,
+    resultSummary: sanitizeRendererSummary(input.resultSummary),
+    errorCode: input.errorCode,
+    errorMessage: input.errorMessage,
+    durationMs: input.durationMs
+  };
+}
+
+function sanitizeRendererSummary(value: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!value) return undefined;
+  return sanitizeRendererValue(value, 0) as Record<string, unknown>;
+}
+
+function sanitizeRendererValue(value: unknown, depth: number): unknown {
+  if (depth > 8) return undefined;
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeRendererValue(entry, depth + 1));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !/(?:proof|receipt)/i.test(key))
+      .map(([key, entry]) => [key, sanitizeRendererValue(entry, depth + 1)])
+      .filter(([, entry]) => entry !== undefined)
+  );
 }

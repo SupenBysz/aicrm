@@ -116,8 +116,6 @@ export interface MatrixAccountSessionSnapshotManifest {
 export interface MatrixAccountSessionSnapshotVerification {
   manifest: MatrixAccountSessionSnapshotManifest;
   verifiedAt: string;
-  /** Sensitive bearer proof for the backend step result. Never persist it in logs. */
-  verificationReceipt: string;
 }
 
 export interface MatrixAccountSessionSnapshotRestoreResult extends MatrixAccountSessionSnapshotVerification {
@@ -327,8 +325,7 @@ export class MatrixAccountSessionVault {
       const verifiedAt = new Date().toISOString();
       return {
         manifest,
-        verifiedAt,
-        verificationReceipt: createVerificationReceipt(masterKey, manifest, verifiedAt)
+        verifiedAt
       };
     } catch (error) {
       throw normalizeVaultError(error, "session_snapshot_verify_failed", "登录态快照校验失败");
@@ -383,7 +380,6 @@ export class MatrixAccountSessionVault {
       return {
         manifest,
         verifiedAt,
-        verificationReceipt: createVerificationReceipt(masterKey, manifest, verifiedAt),
         restoredAt: new Date().toISOString()
       };
     } catch (error) {
@@ -584,26 +580,6 @@ function decryptValue(masterKey: Buffer, encrypted: EncryptedValue): Buffer {
 
 function macManifest(masterKey: Buffer, manifest: Omit<MatrixAccountSessionSnapshotManifest, "manifestMac">): string {
   return createHmac("sha256", masterKey).update(stableStringify(manifest)).digest("base64");
-}
-
-function createVerificationReceipt(
-  masterKey: Buffer,
-  manifest: MatrixAccountSessionSnapshotManifest,
-  verifiedAt: string
-): string {
-  const payload = Buffer.from(
-    stableStringify({
-      version: 1,
-      snapshotId: manifest.snapshotId,
-      scopeHash: manifest.scopeHash,
-      contentHash: manifest.archive.contentHash,
-      fingerprintHash: manifest.fingerprintHash,
-      verifiedAt
-    }),
-    "utf8"
-  ).toString("base64url");
-  const signature = createHmac("sha256", masterKey).update(payload).digest("base64url");
-  return `v1.${payload}.${signature}`;
 }
 
 function normalizeScope(scope: MatrixAccountSessionVaultScope): MatrixAccountSessionVaultScope {

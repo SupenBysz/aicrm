@@ -21,7 +21,6 @@ import {
 } from "@ky/admin-core";
 import {
   cancelAccountOnboardingRequest,
-  completeAccountOnboardingRequest,
   confirmAccountBindingRequest,
   executeAccountCapabilityRequest,
   getAccountOnboardingRequest,
@@ -50,14 +49,12 @@ import type {
   AccountOnboardingView,
   AccountLoginObservedPhase,
   CancelAccountOnboardingInput,
-  CompleteAccountOnboardingInput,
   ConfirmAccountBindingInput,
   LoginQrCodeView,
   MatrixAccountReadyView,
   RefreshLoginQrCodeInput,
   RetryAccountOnboardingStepInput,
-  StartAccountOnboardingInput,
-  SubmitAccountOnboardingStepResultInput
+  StartAccountOnboardingInput
 } from "./types";
 
 export interface AccountOnboardingRuntimePort {
@@ -81,9 +78,6 @@ export interface MatrixAccountAutomationService {
   retryAccountOnboardingStep(input: RetryAccountOnboardingStepInput): Promise<AccountOnboardingView>;
   confirmAccountBinding(input: ConfirmAccountBindingInput): Promise<AccountOnboardingView>;
   cancelAccountOnboarding(input: CancelAccountOnboardingInput): Promise<AccountOnboardingView>;
-  submitStepResult(attemptId: string, input: SubmitAccountOnboardingStepResultInput): Promise<AccountOnboardingView>;
-  /** Called by the trusted runtime only, with a snapshot verification receipt. */
-  completeAccountOnboarding(input: CompleteAccountOnboardingInput): Promise<AccountOnboardingView>;
   subscribeAccountOnboarding(
     attemptId: string,
     listener: AccountOnboardingEventListener,
@@ -171,43 +165,17 @@ export function createMatrixAccountAutomationService(
         return sanitizeOnboardingView(attempt);
       }
 
-      const snapshot = sealed.data;
+      // A local integrity check is only a safe Renderer projection. It cannot
+      // advance the durable Attempt until Main submits a device-signed result
+      // through the trusted Desktop endpoint introduced by P2B.
       attempt = await submitAccountOnboardingStepResultRequest(client, input.attemptId, {
         operationId: sealOperationId,
         methodKey: "session.snapshot.seal.v1",
-        status: "success",
-        resultSummary: {
-          snapshotId: snapshot.snapshotId,
-          fingerprintHash: snapshot.fingerprintHash,
-          contentHash: snapshot.contentHash,
-          verified: snapshot.status === "verified",
-          size: snapshot.sizeBytes,
-          sourceBytes: snapshot.sourceBytes,
-          fileCount: snapshot.fileCount,
-          schemaVersion: snapshot.schemaVersion
-        },
-        verificationReceipt: snapshot.verificationReceipt
+        status: "failed",
+        errorCode: "TRUSTED_SNAPSHOT_ATTESTATION_UNAVAILABLE",
+        resultSummary: {}
       });
-      if (attempt.status !== "active" || attempt.currentStep !== "business.onboarding.complete.v1") {
-        return sanitizeOnboardingView(attempt);
-      }
-
-      return sanitizeOnboardingView(
-        await completeAccountOnboardingRequest(client, {
-          attemptId: input.attemptId,
-          operationId: operationId(input.commandId, "complete"),
-          snapshotId: snapshot.snapshotId,
-          snapshotVerificationReceipt: snapshot.verificationReceipt,
-          bindingDecision: input.decision,
-          businessAssignment: {
-            accountId: input.accountId,
-            ownerMemberId: input.ownerMemberId,
-            departmentId: input.departmentId,
-            teamId: input.teamId,
-            remark: input.remark
-          }
-        })
-      );
+      return sanitizeOnboardingView(attempt);
     },
 
     async cancelAccountOnboarding(input) {
@@ -221,25 +189,13 @@ export function createMatrixAccountAutomationService(
       const completed = await submitAccountOnboardingStepResultRequest(client, input.attemptId, {
         operationId: operationId(input.commandId, "cleanup"),
         methodKey: "web_space.cleanup.v1",
-        status: cleanupSucceeded ? "success" : "failed",
-        errorCode: cleanupSucceeded ? undefined : desktop.error?.code || "ONBOARDING_CLEANUP_FAILED",
-        resultSummary: { cleared: cleanupSucceeded }
+        status: "failed",
+        errorCode: cleanupSucceeded
+          ? "TRUSTED_CLEANUP_ATTESTATION_UNAVAILABLE"
+          : desktop.error?.code || "ONBOARDING_CLEANUP_FAILED",
+        resultSummary: {}
       });
       return sanitizeOnboardingView(completed);
-    },
-
-    async submitStepResult(attemptId, input) {
-      return sanitizeOnboardingView(await submitAccountOnboardingStepResultRequest(client, attemptId, input));
-    },
-
-    async completeAccountOnboarding(input) {
-      if (!input.snapshotId.trim()) {
-        throw new Error("verified_snapshot_required");
-      }
-      if (!input.snapshotVerificationReceipt.trim()) {
-        throw new Error("snapshot_verification_receipt_required");
-      }
-      return sanitizeOnboardingView(await completeAccountOnboardingRequest(client, input));
     },
 
     subscribeAccountOnboarding(attemptId, listener, subscriptionOptions = {}) {

@@ -431,6 +431,9 @@ func transitionLoginAttemptStep(current MatrixAccountLoginAttempt, in MatrixAcco
 	if current.Status != "active" || in.MethodKey == "" || in.MethodKey != current.CurrentStep {
 		return loginAttemptTransition{}, ErrValidation
 	}
+	if isTrustedRuntimeOnlyStepSuccess(in.MethodKey, in.Status) {
+		return loginAttemptTransition{}, ErrValidation
+	}
 	transition := transitionFromAttempt(current)
 	transition.EventData = map[string]any{
 		"operationId": in.OperationID,
@@ -528,7 +531,7 @@ func transitionLoginAttemptStep(current MatrixAccountLoginAttempt, in MatrixAcco
 		if strings.TrimSpace(accountID) == "" {
 			accountID = summaryString(current.BindingInput, "accountId")
 		}
-		if current.Phase != "committing" || current.SnapshotID == "" || !current.SnapshotVerified || current.SnapshotFingerprintHash == "" || current.SnapshotContentHash == "" || !summaryBool(in.ResultSummary, "snapshotVerified") || strings.TrimSpace(in.VerificationReceipt) == "" {
+		if current.Phase != "committing" || current.SnapshotID == "" || !current.SnapshotVerified || current.SnapshotFingerprintHash == "" || current.SnapshotContentHash == "" || !summaryBool(in.ResultSummary, "snapshotVerified") {
 			return loginAttemptTransition{}, ErrValidation
 		}
 		transition.AccountID = accountID
@@ -553,6 +556,18 @@ func transitionLoginAttemptStep(current MatrixAccountLoginAttempt, in MatrixAcco
 		return loginAttemptTransition{}, ErrValidation
 	}
 	return transition, nil
+}
+
+func isTrustedRuntimeOnlyStepSuccess(methodKey, status string) bool {
+	if status != "success" {
+		return false
+	}
+	switch methodKey {
+	case loginStepSnapshotSeal, loginStepComplete, loginStepWebSpaceCleanup:
+		return true
+	default:
+		return false
+	}
 }
 
 func finalizeLoginAttempt(ctx context.Context, tx *sql.Tx, current MatrixAccountLoginAttempt, expectedAccountID, actorUserID string) (string, error) {

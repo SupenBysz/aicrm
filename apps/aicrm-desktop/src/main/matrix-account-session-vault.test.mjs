@@ -59,7 +59,7 @@ test("seal verifies and restores persistent WebSpace data without regenerable ca
   assert.equal(sealed.manifest.snapshotId, "snapshot-1");
   assert.equal(duplicate.manifest.archive.contentHash, sealed.manifest.archive.contentHash);
   assert.equal(sealed.manifest.archive.fileCount, 2);
-  assert.match(sealed.verificationReceipt, /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.equal("verificationReceipt" in sealed, false);
   assert.equal(await readFile(path.join(current.source, "Network", "Cookies"), "utf8"), "encrypted-cookie-database");
 
   const verified = await current.vault.verify({ snapshotId: "snapshot-1", expectedScope: scope() });

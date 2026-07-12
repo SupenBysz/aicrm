@@ -11,7 +11,7 @@ func TestLoginAttemptUpdateKeepsEmptySnapshotNullable(t *testing.T) {
 	}
 }
 
-func TestLoginAttemptHappyPathRequiresVerifiedSnapshot(t *testing.T) {
+func TestLoginAttemptHappyPathStopsAtTrustedSnapshotBoundary(t *testing.T) {
 	current := MatrixAccountLoginAttempt{
 		Status:           "active",
 		Phase:            "created",
@@ -44,51 +44,82 @@ func TestLoginAttemptHappyPathRequiresVerifiedSnapshot(t *testing.T) {
 		},
 	})
 	current = applyTestStep(t, current, MatrixAccountLoginStepResultInput{MethodKey: loginStepBindingConfirm, Status: "success"})
+	if current.CurrentStep != loginStepSnapshotSeal || current.Phase != "snapshot_sealing" {
+		t.Fatalf("binding transition = %#v", current)
+	}
 
 	_, err := transitionLoginAttemptStep(current, MatrixAccountLoginStepResultInput{
 		MethodKey: loginStepSnapshotSeal,
 		Status:    "success",
 		ResultSummary: map[string]any{
 			"snapshotId":      "snapshot-1",
-			"fingerprintHash": "fingerprint",
-			"contentHash":     "content",
-			"verified":        false,
-		},
-	})
-	if err != ErrValidation {
-		t.Fatalf("unverified snapshot error = %v", err)
-	}
-
-	current = applyTestStep(t, current, MatrixAccountLoginStepResultInput{
-		MethodKey: loginStepSnapshotSeal,
-		Status:    "success",
-		ResultSummary: map[string]any{
-			"snapshotId":      "snapshot-1",
-			"fingerprintHash": "fingerprint",
-			"contentHash":     "content",
+			"fingerprintHash": strings.Repeat("a", 64),
+			"contentHash":     strings.Repeat("b", 64),
 			"verified":        true,
 		},
 	})
-	if current.Phase != "committing" || current.SnapshotID != "snapshot-1" || current.CurrentStep != loginStepComplete {
-		t.Fatalf("snapshot transition = %#v", current)
+	if err != ErrValidation {
+		t.Fatalf("ordinary snapshot success must be rejected, got %v", err)
 	}
 
-	_, err = transitionLoginAttemptStep(current, MatrixAccountLoginStepResultInput{
-		MethodKey:     loginStepComplete,
-		Status:        "success",
-		ResultSummary: map[string]any{"accountId": "ma_1", "snapshotVerified": true},
+	failed := applyTestStep(t, current, MatrixAccountLoginStepResultInput{
+		MethodKey: loginStepSnapshotSeal,
+		Status:    "failed",
+		ErrorCode: "TRUSTED_RUNTIME_PROOF_UNAVAILABLE",
 	})
-	if err != ErrValidation {
-		t.Fatalf("empty verification receipt error = %v", err)
+	if failed.BlockedMethod != loginStepSnapshotSeal || failed.LastErrorCode != "TRUSTED_RUNTIME_PROOF_UNAVAILABLE" {
+		t.Fatalf("snapshot failure transition = %#v", failed)
 	}
-	completed := applyTestStep(t, current, MatrixAccountLoginStepResultInput{
-		MethodKey:           loginStepComplete,
-		Status:              "success",
-		VerificationReceipt: "native-receipt",
-		ResultSummary:       map[string]any{"accountId": "ma_1", "snapshotVerified": true},
-	})
-	if completed.Status != "completed" || completed.Phase != "ready" || completed.AccountID != "ma_1" {
-		t.Fatalf("complete transition = %#v", completed)
+	if failed.SnapshotVerified || failed.SnapshotID != "" {
+		t.Fatalf("untrusted snapshot state was persisted in transition: %#v", failed)
+	}
+}
+
+func TestTrustedRuntimeOnlySuccessCannotAdvanceStoreTransition(t *testing.T) {
+	tests := []struct {
+		name    string
+		current MatrixAccountLoginAttempt
+		input   MatrixAccountLoginStepResultInput
+	}{
+		{
+			name: "snapshot seal",
+			current: MatrixAccountLoginAttempt{
+				Status: "active", Phase: "snapshot_sealing", CurrentStep: loginStepSnapshotSeal,
+			},
+			input: MatrixAccountLoginStepResultInput{MethodKey: loginStepSnapshotSeal, Status: "success"},
+		},
+		{
+			name: "onboarding complete",
+			current: MatrixAccountLoginAttempt{
+				Status: "active", Phase: "committing", CurrentStep: loginStepComplete,
+			},
+			input: MatrixAccountLoginStepResultInput{MethodKey: loginStepComplete, Status: "success"},
+		},
+		{
+			name: "web space cleanup",
+			current: MatrixAccountLoginAttempt{
+				Status: "active", Phase: "cleanup_pending", CurrentStep: loginStepWebSpaceCleanup,
+			},
+			input: MatrixAccountLoginStepResultInput{MethodKey: loginStepWebSpaceCleanup, Status: "success"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := transitionLoginAttemptStep(tt.current, tt.input); err != ErrValidation {
+				t.Fatalf("trusted-only success error = %v", err)
+			}
+			failure := tt.input
+			failure.Status = "failed"
+			failure.ErrorCode = "TRUSTED_RUNTIME_PROOF_UNAVAILABLE"
+			transition, err := transitionLoginAttemptStep(tt.current, failure)
+			if err != nil {
+				t.Fatalf("failure result should remain recordable: %v", err)
+			}
+			if transition.BlockedMethod != tt.input.MethodKey || transition.LastErrorCode == "" {
+				t.Fatalf("failure transition = %#v", transition)
+			}
+		})
 	}
 }
 

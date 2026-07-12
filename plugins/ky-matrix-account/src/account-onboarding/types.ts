@@ -226,22 +226,6 @@ export interface ConfirmAccountBindingInput {
   remark?: string;
 }
 
-export interface CompleteAccountOnboardingInput {
-  attemptId: string;
-  operationId: string;
-  snapshotId: string;
-  /** Opaque, short-lived receipt signed by the trusted snapshot runtime. */
-  snapshotVerificationReceipt: string;
-  bindingDecision: Extract<AccountBindingDecision, "create_new" | "attach_existing" | "replace_device_session">;
-  businessAssignment: {
-    accountId?: string;
-    ownerMemberId?: string;
-    departmentId?: string;
-    teamId?: string;
-    remark?: string;
-  };
-}
-
 export type AccountOnboardingStepResultStatus = "success" | "failed" | "timeout" | "cancelled";
 
 export interface SubmitAccountOnboardingStepResultInput {
@@ -253,8 +237,6 @@ export interface SubmitAccountOnboardingStepResultInput {
   errorCode?: string;
   errorMessage?: string;
   durationMs?: number;
-  /** Trusted-runtime proof; never copied into event/result summaries or AI context. */
-  verificationReceipt?: string;
 }
 
 export interface AccountCapabilityExecutionInput<TInput = Record<string, unknown>> {

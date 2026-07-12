@@ -511,8 +511,7 @@ function toSessionSnapshotVerificationResult(
     fingerprintHash: manifest.fingerprintHash,
     sizeBytes: manifest.archive.ciphertextBytes,
     sourceBytes: manifest.archive.sourceBytes,
-    fileCount: manifest.archive.fileCount,
-    verificationReceipt: verification.verificationReceipt
+    fileCount: manifest.archive.fileCount
   };
 }
 

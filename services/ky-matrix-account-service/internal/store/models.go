@@ -158,18 +158,17 @@ type MatrixAccountLoginCommandResult struct {
 }
 
 type MatrixAccountLoginStepResultInput struct {
-	OperationID         string         `json:"operationId"`
-	AttemptNo           int            `json:"attemptNo"`
-	MethodKey           string         `json:"methodKey"`
-	ScriptID            string         `json:"scriptId"`
-	ScriptVersionID     string         `json:"scriptVersionId"`
-	Status              string         `json:"status"`
-	ObservedPhase       string         `json:"observedPhase"`
-	ErrorCode           string         `json:"errorCode"`
-	ErrorMessage        string         `json:"errorMessage"`
-	DurationMs          int64          `json:"durationMs"`
-	ResultSummary       map[string]any `json:"resultSummary"`
-	VerificationReceipt string         `json:"verificationReceipt"`
+	OperationID     string         `json:"operationId"`
+	AttemptNo       int            `json:"attemptNo"`
+	MethodKey       string         `json:"methodKey"`
+	ScriptID        string         `json:"scriptId"`
+	ScriptVersionID string         `json:"scriptVersionId"`
+	Status          string         `json:"status"`
+	ObservedPhase   string         `json:"observedPhase"`
+	ErrorCode       string         `json:"errorCode"`
+	ErrorMessage    string         `json:"errorMessage"`
+	DurationMs      int64          `json:"durationMs"`
+	ResultSummary   map[string]any `json:"resultSummary"`
 }
 
 type MatrixAccountLoginMethodRun struct {

@@ -136,6 +136,10 @@ func (s *Server) submitLoginAttemptStepResult(w http.ResponseWriter, r *http.Req
 		writeError(w, r, http.StatusBadRequest, "validation_error", "步骤结果无效")
 		return
 	}
+	if code, message, blocked := publicTrustedStepSuccessBlock(in.MethodKey, in.Status); blocked {
+		writeError(w, r, http.StatusServiceUnavailable, code, message)
+		return
+	}
 	projected, ok := normalizeLoginStepSummary(in.MethodKey, in.Status, in.ResultSummary)
 	if !ok {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "步骤结果包含无效字段")
@@ -175,10 +179,6 @@ func (s *Server) submitLoginAttemptStepResult(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	if in.MethodKey == "business.onboarding.complete.v1" {
-		writeError(w, r, http.StatusServiceUnavailable, "snapshot_verifier_unavailable", "可信快照验签器尚未启用，当前流程不能提交账号绑定")
-		return
-	}
 	if in.MethodKey == "account.identity.get.v1" && in.Status == "success" {
 		identity, _ := projected["identityKey"].(string)
 		if identity == "" || invalidDetectedIdentity(identity) {
@@ -198,6 +198,20 @@ func (s *Server) submitLoginAttemptStepResult(w http.ResponseWriter, r *http.Req
 var loginStepErrorCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 var loginStepDigestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var loginStepIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9_.:-]{1,160}$`)
+
+func publicTrustedStepSuccessBlock(methodKey, status string) (string, string, bool) {
+	if status != "success" {
+		return "", "", false
+	}
+	switch methodKey {
+	case "business.onboarding.complete.v1":
+		return "snapshot_verifier_unavailable", "可信快照验签器尚未启用，当前流程不能提交账号绑定", true
+	case "session.snapshot.seal.v1", "web_space.cleanup.v1":
+		return "trusted_runtime_proof_unavailable", "可信桌面证明通道尚未启用，当前步骤不能由普通登录请求确认", true
+	default:
+		return "", "", false
+	}
+}
 
 func normalizeLoginStepSummary(methodKey, status string, source map[string]any) (map[string]any, bool) {
 	projected, ok := projectLoginStepSummary(methodKey, source)

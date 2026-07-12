@@ -1,6 +1,69 @@
 package server
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestPublicStepResultsRejectTrustedSuccessWithServiceUnavailable(t *testing.T) {
+	tests := []struct {
+		methodKey string
+		code      string
+	}{
+		{"session.snapshot.seal.v1", "trusted_runtime_proof_unavailable"},
+		{"web_space.cleanup.v1", "trusted_runtime_proof_unavailable"},
+		{"business.onboarding.complete.v1", "snapshot_verifier_unavailable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.methodKey, func(t *testing.T) {
+			body := `{"operationId":"operation-1","methodKey":"` + tt.methodKey + `","status":"success","verificationReceipt":"attacker-controlled"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/matrix-account-login-attempts/attempt-1/step-results", strings.NewReader(body))
+			req.SetPathValue("id", "attempt-1")
+			response := httptest.NewRecorder()
+			new(Server).submitLoginAttemptStepResult(response, req, wsContext{})
+			if response.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+			var envelope struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if envelope.Error.Code != tt.code {
+				t.Fatalf("error code = %q", envelope.Error.Code)
+			}
+		})
+	}
+}
+
+func TestPublicTrustedStepSuccessPolicyFailsClosed(t *testing.T) {
+	tests := []struct {
+		methodKey string
+		code      string
+	}{
+		{"session.snapshot.seal.v1", "trusted_runtime_proof_unavailable"},
+		{"web_space.cleanup.v1", "trusted_runtime_proof_unavailable"},
+		{"business.onboarding.complete.v1", "snapshot_verifier_unavailable"},
+	}
+	for _, tt := range tests {
+		code, _, blocked := publicTrustedStepSuccessBlock(tt.methodKey, "success")
+		if !blocked || code != tt.code {
+			t.Fatalf("method %s block = %q, %v", tt.methodKey, code, blocked)
+		}
+		if _, _, blocked := publicTrustedStepSuccessBlock(tt.methodKey, "failed"); blocked {
+			t.Fatalf("method %s failure result must remain recordable", tt.methodKey)
+		}
+	}
+	if _, _, blocked := publicTrustedStepSuccessBlock("account.identity.get.v1", "success"); blocked {
+		t.Fatal("ordinary method success was blocked")
+	}
+}
 
 func TestProjectLoginStepSummaryDropsCredentialMaterial(t *testing.T) {
 	projected, ok := projectLoginStepSummary("account.identity.get.v1", map[string]any{

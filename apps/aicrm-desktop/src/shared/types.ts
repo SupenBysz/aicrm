@@ -291,10 +291,7 @@ export interface MatrixAccountSessionSnapshotView {
   fileCount: number;
 }
 
-export interface MatrixAccountSessionSnapshotVerificationResult extends MatrixAccountSessionSnapshotView {
-  /** Sensitive bearer proof for backend step completion. Never persist it in telemetry or logs. */
-  verificationReceipt: string;
-}
+export type MatrixAccountSessionSnapshotVerificationResult = MatrixAccountSessionSnapshotView;
 
 export interface MatrixAccountSessionSnapshotRestoreResult extends MatrixAccountSessionSnapshotVerificationResult {
   restoreId: string;
