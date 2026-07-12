@@ -374,6 +374,26 @@ test("concurrent Main registration calls coalesce and already-registered state p
   assert.equal(registered.requests.length, 0);
 });
 
+test("Main session clear can abort an in-flight automatic registration", async () => {
+  let fetchStarted;
+  const started = new Promise((resolve) => {
+    fetchStarted = resolve;
+  });
+  const current = fixture({
+    fetch: async (_url, init) => {
+      fetchStarted();
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    }
+  });
+  const operation = current.client.register();
+  await started;
+  current.client.cancel();
+  await assert.rejects(operation, { code: "desktop_device_registration_cancelled" });
+  assert.equal(current.identityStore.marked.length, 0);
+});
+
 test("untrusted API bases and expired or malformed Host sessions fail before signing", async (t) => {
   const cases = [
     {
@@ -747,6 +767,8 @@ test("registration remains Main-only and is not exposed as IPC or a Codex capabi
   ]) {
     assert.equal(exposed.includes(forbidden), false, `renderer/IPC surface contains ${forbidden}`);
   }
-  assert.match(mainIndex, /registerDesktopDeviceIpc\(\)/);
-  assert.match(deviceIpc, /getIdentityStore\(\)\.getIdentity\(\)/);
+  assert.match(mainIndex, /registerDesktopDeviceIpc\(desktopDeviceTrustRuntime\)/);
+  assert.match(deviceIpc, /runtime\.getIdentity\(\)/);
+  assert.match(deviceIpc, /runtime\.ensureRegistration\(\)/);
+  assert.match(deviceIpc, /runtime\.getRegistrationState\(\)/);
 });

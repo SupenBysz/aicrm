@@ -15,6 +15,7 @@
     "test:codex-authorization-bridge-v2": "node --test src/main/codex-authorization-bridge-v2.test.mjs",
     "test:desktop-device-identity": "node --test src/main/desktop-device-identity.test.mjs",
     "test:desktop-device-registration": "node --test src/main/desktop-device-registration-client.test.mjs",
+    "test:desktop-device-trust-runtime": "node --test src/main/desktop-device-trust-runtime.test.mjs src/main/desktop-session-store.test.mjs",
     "test:controlled-window-release": "node --test src/main/controlled-window-release.test.mjs",
     "test:matrix-account-policy": "node --test src/main/matrix-account-script-policy.test.mjs",
     "test:matrix-account-session-vault": "node --test src/main/matrix-account-session-vault.test.mjs",

@@ -13,6 +13,8 @@ import {
 
 const IDENTITY_FILE = "identity.sec";
 const SEQUENCE_FILE = "sequence.sec";
+const REGISTRATION_RESET_FILE = "registration-reset.sec";
+const REGISTRATION_PENDING_FILE = "registration-pending.sec";
 const DEVICE_REGISTRATION_PATH = "/api/v1/ai-executor-devices";
 const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
 
@@ -20,6 +22,7 @@ export type DesktopDeviceIdentityErrorCode =
   | "desktop_secure_storage_unavailable"
   | "desktop_device_identity_corrupt"
   | "desktop_device_identity_unsafe"
+  | "desktop_device_identity_reset_forbidden"
   | "desktop_device_registration_recovery_required"
   | "desktop_device_sequence_exhausted";
 
@@ -90,6 +93,12 @@ interface StoredSequence {
   lastSequence: string;
 }
 
+interface StoredRegistrationReset {
+  version: 1;
+  previousDeviceId: string;
+  startedAt: string;
+}
+
 export interface DesktopDeviceIdentityStoreOptions {
   root: string;
   safeStorage: SafeStorageLike;
@@ -106,6 +115,7 @@ export class DesktopDeviceIdentityStore {
   private readonly root: string;
   private readonly identityPath: string;
   private readonly sequencePath: string;
+  private readonly registrationResetPath: string;
   private readonly safeStorage: SafeStorageLike;
   private readonly keyFactory: () => DesktopDeviceKeyMaterial;
   private readonly now: () => Date;
@@ -118,6 +128,7 @@ export class DesktopDeviceIdentityStore {
     }
     this.identityPath = path.join(this.root, IDENTITY_FILE);
     this.sequencePath = path.join(this.root, SEQUENCE_FILE);
+    this.registrationResetPath = path.join(this.root, REGISTRATION_RESET_FILE);
     this.safeStorage = options.safeStorage;
     this.keyFactory = options.keyFactory ?? generateDesktopDeviceKeyMaterial;
     this.now = options.now ?? (() => new Date());
@@ -270,9 +281,45 @@ export class DesktopDeviceIdentityStore {
     });
   }
 
+  /**
+   * Starts an explicitly authorized recovery reset with a durable marker before
+   * any pending request or key file is removed. A crash leaves enough evidence
+   * for the next Main process to complete the reset without reviving the old
+   * identity. Registered and revoked identities are never reset here.
+   */
+  resetRegistrationRecovery(
+    expectedDeviceId: string,
+    clearPending: () => Promise<void>
+  ): Promise<DesktopDeviceIdentityProjection> {
+    return this.exclusive(async () => {
+      const identity = await this.loadOrCreate();
+      if (identity.deviceId !== expectedDeviceId) {
+        throw identityError(
+          "desktop_device_registration_recovery_required",
+          "设备登记恢复目标不匹配"
+        );
+      }
+      if (identity.registrationStatus !== "unregistered") {
+        throw identityError(
+          "desktop_device_identity_reset_forbidden",
+          "已登记或已撤销设备禁止本地重置"
+        );
+      }
+      await this.writeEncrypted(this.registrationResetPath, {
+        version: 1,
+        previousDeviceId: identity.deviceId,
+        startedAt: this.now().toISOString()
+      });
+      await clearPending();
+      await this.recoverRegistrationReset();
+      return projection(await this.loadOrCreate());
+    });
+  }
+
   private async loadOrCreate(): Promise<StoredIdentity> {
     this.assertSecureStorage();
     await this.ensureRoot();
+    await this.recoverRegistrationReset();
     const [identityExists, sequenceExists] = await Promise.all([
       regularFileExists(this.identityPath),
       regularFileExists(this.sequencePath)
@@ -314,6 +361,34 @@ export class DesktopDeviceIdentityStore {
       await this.writeEncrypted(this.sequencePath, sequenceState(identity));
     }
     return identity;
+  }
+
+  private async recoverRegistrationReset(): Promise<void> {
+    if (!(await regularFileExists(this.registrationResetPath))) return;
+    const marker = validateRegistrationReset(await this.readEncrypted(this.registrationResetPath));
+    if (await regularFileExists(this.identityPath)) {
+      const identity = validateIdentity(await this.readEncrypted(this.identityPath));
+      if (identity.deviceId !== marker.previousDeviceId) {
+        await rm(this.registrationResetPath);
+        await syncDirectory(this.root);
+        return;
+      }
+      if (identity.registrationStatus !== "unregistered") {
+        throw identityError(
+          "desktop_device_identity_reset_forbidden",
+          "恢复标记不得重置已登记或已撤销设备"
+        );
+      }
+    }
+    // The encrypted reset marker is the durable authorization to remove the
+    // one fixed pending-registration record as part of the same recoverable
+    // local transaction, including after a process crash in clearPending().
+    await rm(path.join(this.root, REGISTRATION_PENDING_FILE), { force: true });
+    await rm(this.identityPath, { force: true });
+    await rm(this.sequencePath, { force: true });
+    await syncDirectory(this.root);
+    await rm(this.registrationResetPath, { force: true });
+    await syncDirectory(this.root);
   }
 
   private assertSecureStorage(): void {
@@ -364,7 +439,10 @@ export class DesktopDeviceIdentityStore {
     }
   }
 
-  private async writeEncrypted(file: string, value: StoredIdentity | StoredSequence): Promise<void> {
+  private async writeEncrypted(
+    file: string,
+    value: StoredIdentity | StoredSequence | StoredRegistrationReset
+  ): Promise<void> {
     let encrypted: Buffer;
     try {
       encrypted = this.safeStorage.encryptString(JSON.stringify(value));
@@ -477,6 +555,21 @@ function validateSequence(value: unknown): StoredSequence {
   }
   parseSequence(sequence.lastSequence);
   return sequence;
+}
+
+function validateRegistrationReset(value: unknown): StoredRegistrationReset {
+  if (!isExactRecord(value, ["version", "previousDeviceId", "startedAt"])) {
+    throw identityError("desktop_device_identity_corrupt", "设备登记恢复标记无效");
+  }
+  const marker = value as unknown as StoredRegistrationReset;
+  if (
+    marker.version !== 1 ||
+    !/^[0-9a-f]{64}$/.test(marker.previousDeviceId) ||
+    !validISOString(marker.startedAt)
+  ) {
+    throw identityError("desktop_device_identity_corrupt", "设备登记恢复标记字段无效");
+  }
+  return marker;
 }
 
 function parseSequence(value: string): bigint {

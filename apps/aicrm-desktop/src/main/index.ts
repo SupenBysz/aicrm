@@ -18,6 +18,7 @@ import { registerMatrixAccountIpc } from "./ipc/matrix-account-ipc";
 import { registerNetworkIpc } from "./ipc/network-ipc";
 import { registerWindowIpc } from "./ipc/window-ipc";
 import { installNetworkLogCapture } from "./network-log";
+import { getDesktopDeviceTrustRuntime } from "./desktop-device-trust-main";
 
 process.title = DESKTOP_APPLICATION_NAME;
 app.setName(DESKTOP_APPLICATION_NAME);
@@ -34,12 +35,14 @@ if (!singleInstanceLock) {
   app.quit();
 }
 
+const desktopDeviceTrustRuntime = getDesktopDeviceTrustRuntime();
+
 registerApiIpc();
 registerAiExecutorWindowIpc();
 registerAppIpc();
-registerAuthIpc();
+registerAuthIpc(desktopDeviceTrustRuntime);
 registerCodexExecutorIpc();
-registerDesktopDeviceIpc();
+registerDesktopDeviceIpc(desktopDeviceTrustRuntime);
 registerMatrixAccountIpc();
 registerNetworkIpc();
 registerWindowIpc();
@@ -51,6 +54,7 @@ app.whenReady().then(() => {
   });
   installNetworkLogCapture();
   installApplicationMenu();
+  void desktopDeviceTrustRuntime.resumeAfterStartup();
   const mainWindow = createMainWindow();
 
   app.on("second-instance", () => {

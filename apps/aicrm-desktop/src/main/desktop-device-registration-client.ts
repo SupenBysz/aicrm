@@ -31,6 +31,7 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{8,160}$/;
 
 export type DesktopDeviceRegistrationErrorCode =
   | "desktop_device_already_revoked"
+  | "desktop_device_registration_cancelled"
   | "desktop_device_registration_contract_invalid"
   | "desktop_device_registration_recovery_required"
   | "desktop_device_registration_rejected"
@@ -142,6 +143,8 @@ export class DesktopDeviceRegistrationClient {
   private readonly requestIdFactory: () => string;
   private readonly requestTimeoutMs: number;
   private inFlight: Promise<DesktopDeviceIdentityProjection> | null = null;
+  private cancellationEpoch = 0;
+  private readonly activeControllers = new Set<AbortController>();
 
   constructor(options: DesktopDeviceRegistrationClientOptions) {
     this.identityStore = options.identityStore;
@@ -161,7 +164,8 @@ export class DesktopDeviceRegistrationClient {
 
   register(): Promise<DesktopDeviceIdentityProjection> {
     if (this.inFlight) return this.inFlight;
-    const operation = this.registerOnce();
+    const epoch = this.cancellationEpoch;
+    const operation = this.registerOnce(epoch);
     this.inFlight = operation;
     void operation.finally(() => {
       if (this.inFlight === operation) this.inFlight = null;
@@ -169,13 +173,22 @@ export class DesktopDeviceRegistrationClient {
     return operation;
   }
 
-  private async registerOnce(): Promise<DesktopDeviceIdentityProjection> {
+  cancel(): void {
+    this.cancellationEpoch += 1;
+    for (const controller of this.activeControllers) controller.abort();
+  }
+
+  private async registerOnce(epoch: number): Promise<DesktopDeviceIdentityProjection> {
+    this.assertActive(epoch);
     const identity = await this.identityStore.getIdentity();
+    this.assertActive(epoch);
     const pending = await this.pendingRegistrationStore.load();
+    this.assertActive(epoch);
     if (identity.registrationStatus === "registered") {
       if (pending) {
         validatePendingForIdentity(pending, identity);
         await this.pendingRegistrationStore.clear(identity.deviceId, pending.requestHash);
+        this.assertActive(epoch);
       }
       return identity;
     }
@@ -184,7 +197,9 @@ export class DesktopDeviceRegistrationClient {
     }
 
     const authorization = await this.loadBearerAuthorization();
+    this.assertActive(epoch);
     const origin = trustedApiOrigin(await this.loadTrustedApiBaseUrl());
+    this.assertActive(epoch);
     if (pending) {
       if (pending.authorization !== authorization) {
         throw registrationError(
@@ -192,7 +207,7 @@ export class DesktopDeviceRegistrationClient {
           "Host Bearer 已变化，禁止重签首次登记"
         );
       }
-      return this.replayPending(identity, pending, origin, authorization);
+      return this.replayPending(identity, pending, origin, authorization, epoch);
     }
     const challengeRequest: DesktopDeviceRegistrationChallengeRequest = {
       publicKey: identity.publicKey,
@@ -206,8 +221,10 @@ export class DesktopDeviceRegistrationClient {
       authorization,
       challengeBody,
       validateChallenge,
+      epoch,
       { "Idempotency-Key": challengeIdempotencyKey(challengeBody) }
     );
+    this.assertActive(epoch);
     if (Date.parse(challenge.expiresAt) <= this.now().getTime()) {
       throw registrationError(
         "desktop_device_registration_response_invalid",
@@ -233,6 +250,7 @@ export class DesktopDeviceRegistrationClient {
         allowedAuthorizationSchemes: ["Bearer"]
       },
       async (signed) => {
+        this.assertActive(epoch);
         validateSignedRegistration(
           signed,
           identity,
@@ -248,23 +266,27 @@ export class DesktopDeviceRegistrationClient {
           createdAt: this.now().toISOString()
         });
         await this.pendingRegistrationStore.create(prepared);
+        this.assertActive(epoch);
       }
     );
+    this.assertActive(epoch);
     if (!prepared) {
       throw registrationError(
         "desktop_device_registration_recovery_required",
         "设备登记待定请求未持久化"
       );
     }
-    return this.submitPending(identity, prepared, origin, authorization);
+    return this.submitPending(identity, prepared, origin, authorization, epoch);
   }
 
   private async replayPending(
     identity: DesktopDeviceIdentityProjection,
     pending: DesktopDevicePendingRegistration,
     origin: string,
-    authorization: string
+    authorization: string,
+    epoch: number
   ): Promise<DesktopDeviceIdentityProjection> {
+    this.assertActive(epoch);
     validatePendingForIdentity(pending, identity);
     await this.identityStore.repairRegistrationSequence({
       deviceId: pending.deviceId,
@@ -272,15 +294,18 @@ export class DesktopDeviceRegistrationClient {
       keyGeneration: pending.keyGeneration,
       sequence: pending.sequence
     });
-    return this.submitPending(identity, pending, origin, authorization);
+    this.assertActive(epoch);
+    return this.submitPending(identity, pending, origin, authorization, epoch);
   }
 
   private async submitPending(
     identity: DesktopDeviceIdentityProjection,
     pending: DesktopDevicePendingRegistration,
     origin: string,
-    authorization: string
+    authorization: string,
+    epoch: number
   ): Promise<DesktopDeviceIdentityProjection> {
+    this.assertActive(epoch);
     const body = pendingRegistrationBody(pending);
     const signed = pendingRegistrationSignedRequest(pending);
     validatePendingCreateBody(body, identity);
@@ -291,8 +316,10 @@ export class DesktopDeviceRegistrationClient {
       authorization,
       body,
       validateCreateResponse,
+      epoch,
       signed.headers
     );
+    this.assertActive(epoch);
     if (created.deviceId !== identity.deviceId) {
       throw registrationError(
         "desktop_device_registration_response_invalid",
@@ -300,7 +327,9 @@ export class DesktopDeviceRegistrationClient {
       );
     }
     const registered = await this.identityStore.markRegistration("registered", identity.deviceId);
+    this.assertActive(epoch);
     await this.pendingRegistrationStore.clear(identity.deviceId, pending.requestHash);
+    this.assertActive(epoch);
     return registered;
   }
 
@@ -322,8 +351,10 @@ export class DesktopDeviceRegistrationClient {
     authorization: string,
     body: Uint8Array,
     validate: (value: unknown) => T,
+    epoch: number,
     signedHeaders: Record<string, string> = {}
   ): Promise<T> {
+    this.assertActive(epoch);
     const requestId = this.requestIdFactory();
     if (!REQUEST_ID_PATTERN.test(requestId)) {
       throw registrationError(
@@ -332,6 +363,7 @@ export class DesktopDeviceRegistrationClient {
       );
     }
     const controller = new AbortController();
+    this.activeControllers.add(controller);
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     let response: HttpResponseLike;
     try {
@@ -355,6 +387,10 @@ export class DesktopDeviceRegistrationClient {
       });
     } catch {
       clearTimeout(timeout);
+      this.activeControllers.delete(controller);
+      if (epoch !== this.cancellationEpoch) {
+        throw registrationError("desktop_device_registration_cancelled", "设备自动登记已取消");
+      }
       throw registrationError(
         "desktop_device_registration_transport_failed",
         "设备登记请求失败"
@@ -366,7 +402,9 @@ export class DesktopDeviceRegistrationClient {
       text = await readBoundedText(response);
     } finally {
       clearTimeout(timeout);
+      this.activeControllers.delete(controller);
     }
+    this.assertActive(epoch);
     const envelope = parseEnvelope(text);
     if (!response.ok) {
       throw new DesktopDeviceRegistrationError(
@@ -379,6 +417,12 @@ export class DesktopDeviceRegistrationClient {
       );
     }
     return validate(readEnvelopeData(envelope));
+  }
+
+  private assertActive(epoch: number): void {
+    if (epoch !== this.cancellationEpoch) {
+      throw registrationError("desktop_device_registration_cancelled", "设备自动登记已取消");
+    }
   }
 }
 

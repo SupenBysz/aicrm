@@ -244,6 +244,28 @@ export interface DesktopDeviceIdentityProjection {
   registeredAt: string | null;
 }
 
+export type DesktopDeviceRegistrationRuntimeStatus =
+  | "idle"
+  | "registering"
+  | "registered"
+  | "failed"
+  | "recovery_required"
+  | "cancelled";
+
+export interface DesktopDeviceRegistrationRuntimeProjection {
+  status: DesktopDeviceRegistrationRuntimeStatus;
+  deviceId: string | null;
+  registrationStatus: DesktopDeviceIdentityProjection["registrationStatus"] | null;
+  errorCode: string | null;
+  updatedAt: string;
+  backendRebindRequired: boolean;
+  message: string;
+}
+
+export interface DesktopDeviceRegistrationResetInput {
+  confirm: true;
+}
+
 export type MatrixAccountPlatform = "douyin" | "kuaishou" | "xiaohongshu";
 
 export type MatrixAccountLoginStatus =

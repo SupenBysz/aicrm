@@ -61,6 +61,9 @@ export const IPC_CHANNELS = {
   codexAuthorizationLogout: "codex-authorization:logout",
   codexAuthorizationChanged: "codex-authorization:changed",
   desktopDeviceGetIdentity: "desktop-device:get-identity",
+  desktopDeviceEnsureRegistration: "desktop-device:ensure-registration",
+  desktopDeviceGetRegistrationState: "desktop-device:get-registration-state",
+  desktopDeviceResetRegistrationRecovery: "desktop-device:reset-registration-recovery",
   networkLogSnapshot: "network-log:snapshot",
   networkLogClear: "network-log:clear"
 } as const;

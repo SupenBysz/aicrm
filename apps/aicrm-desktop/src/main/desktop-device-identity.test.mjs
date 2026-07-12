@@ -232,6 +232,69 @@ test("canonical request validation rejects normalization and authorization ambig
   }
 });
 
+test("explicit recovery reset is durable across crash and never resets a registered identity", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-device-reset-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, "identity");
+  const storage = new FakeSafeStorage();
+  const replacement = desktopDeviceKeyMaterialFromSeed(
+    Uint8Array.from({ length: 32 }, (_, index) => 200 - index)
+  );
+  let generated = 0;
+  const store = new DesktopDeviceIdentityStore({
+    root,
+    safeStorage: storage,
+    keyFactory: () => (generated++ === 0 ? fixedKey() : replacement),
+    now: () => new Date("2026-07-12T00:00:00.000Z")
+  });
+  const old = await store.getIdentity();
+  let pendingCleared = false;
+  const rotated = await store.resetRegistrationRecovery(old.deviceId, async () => {
+    pendingCleared = true;
+  });
+  assert.equal(pendingCleared, true);
+  assert.equal(rotated.deviceId, replacement.deviceId);
+  await assert.rejects(readFile(path.join(root, "registration-reset.sec")), { code: "ENOENT" });
+  await store.markRegistration("registered", rotated.deviceId);
+  await assert.rejects(
+    store.resetRegistrationRecovery(rotated.deviceId, async () => undefined),
+    { code: "desktop_device_identity_reset_forbidden" }
+  );
+
+  const crashBase = await mkdtemp(path.join(os.tmpdir(), "aicrm-device-reset-crash-"));
+  t.after(() => rm(crashBase, { recursive: true, force: true }));
+  const crashRoot = path.join(crashBase, "identity");
+  let crashGenerated = 0;
+  const crashing = new DesktopDeviceIdentityStore({
+    root: crashRoot,
+    safeStorage: storage,
+    keyFactory: () => (crashGenerated++ === 0 ? fixedKey() : replacement),
+    now: () => new Date("2026-07-12T00:00:00.000Z")
+  });
+  const crashOld = await crashing.getIdentity();
+  await writeFile(path.join(crashRoot, "registration-pending.sec"), Buffer.from("pending-canary"), {
+    mode: 0o600
+  });
+  await assert.rejects(
+    crashing.resetRegistrationRecovery(crashOld.deviceId, async () => {
+      throw new Error("simulated crash after durable reset marker");
+    })
+  );
+  const marker = await readFile(path.join(crashRoot, "registration-reset.sec"));
+  assert.equal(marker.includes(Buffer.from(crashOld.deviceId)), false);
+  const restarted = new DesktopDeviceIdentityStore({
+    root: crashRoot,
+    safeStorage: storage,
+    keyFactory: () => replacement,
+    now: () => new Date("2026-07-12T00:01:00.000Z")
+  });
+  const recovered = await restarted.getIdentity();
+  assert.equal(recovered.deviceId, replacement.deviceId);
+  assert.equal(recovered.registrationStatus, "unregistered");
+  await assert.rejects(readFile(path.join(crashRoot, "registration-reset.sec")), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(crashRoot, "registration-pending.sec")), { code: "ENOENT" });
+});
+
 test("renderer bridge exposes identity query only and never private signing material", async () => {
   const [constants, preloadTypes, preloadBridge, ipc] = await Promise.all([
     readFile(new URL("../shared/constants.ts", import.meta.url), "utf8"),
@@ -240,11 +303,22 @@ test("renderer bridge exposes identity query only and never private signing mate
     readFile(new URL("./ipc/desktop-device-ipc.ts", import.meta.url), "utf8")
   ]);
   assert.match(constants, /desktopDeviceGetIdentity: "desktop-device:get-identity"/);
+  assert.match(constants, /desktopDeviceEnsureRegistration: "desktop-device:ensure-registration"/);
+  assert.match(constants, /desktopDeviceGetRegistrationState: "desktop-device:get-registration-state"/);
   assert.match(preloadTypes, /desktopDevice:\s*\{\s*getIdentity:/);
+  assert.match(preloadTypes, /ensureRegistration:/);
+  assert.match(preloadTypes, /getRegistrationState:/);
   assert.match(preloadBridge, /desktopDeviceGetIdentity/);
-  assert.match(ipc, /getIdentityStore\(\)\.getIdentity\(\)/);
+  assert.match(ipc, /runtime\.getIdentity\(\)/);
   const exposed = `${preloadTypes}\n${preloadBridge}\n${ipc}`;
-  for (const forbidden of ["privateKeyPkcs8", "signRequest", "buildDesktopDeviceProof", "encryptString("]) {
+  for (const forbidden of [
+    "privateKeyPkcs8",
+    "signRequest",
+    "buildDesktopDeviceProof",
+    "encryptString(",
+    "pendingRegistrationStore",
+    "authorizationTokenHash"
+  ]) {
     assert.equal(exposed.includes(forbidden), false, `renderer identity surface contains ${forbidden}`);
   }
 });

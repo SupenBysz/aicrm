@@ -192,6 +192,22 @@ export class DesktopDevicePendingRegistrationStore {
     });
   }
 
+  /** Used only after the explicit identity reset marker is durable. */
+  clearRegistrationRecovery(expectedDeviceId: string): Promise<void> {
+    return this.exclusive(async () => {
+      const current = await this.loadLocked();
+      if (!current) return;
+      if (current.deviceId !== expectedDeviceId) {
+        throw pendingError(
+          "desktop_device_registration_recovery_required",
+          "设备登记恢复清理目标不匹配"
+        );
+      }
+      await rm(this.pendingPath);
+      await syncDirectory(this.root);
+    });
+  }
+
   private async loadLocked(): Promise<DesktopDevicePendingRegistration | null> {
     this.assertSecureStorage();
     await this.ensureRoot();

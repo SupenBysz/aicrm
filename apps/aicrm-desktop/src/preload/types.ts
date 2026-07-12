@@ -17,6 +17,8 @@ import type {
   DesktopConfig,
   DesktopCommandResult,
   DesktopDeviceIdentityProjection,
+  DesktopDeviceRegistrationResetInput,
+  DesktopDeviceRegistrationRuntimeProjection,
   MatrixAccountBrowserInput,
   MatrixAccountBrowserResult,
   MatrixAccountCapabilities,
@@ -108,6 +110,11 @@ export interface AiCrmDesktopBridge {
   };
   desktopDevice: {
     getIdentity: () => Promise<DesktopCommandResult<DesktopDeviceIdentityProjection>>;
+    ensureRegistration: () => Promise<DesktopCommandResult<DesktopDeviceRegistrationRuntimeProjection>>;
+    getRegistrationState: () => Promise<DesktopCommandResult<DesktopDeviceRegistrationRuntimeProjection>>;
+    resetRegistrationRecovery: (
+      input: DesktopDeviceRegistrationResetInput
+    ) => Promise<DesktopCommandResult<DesktopDeviceRegistrationRuntimeProjection>>;
   };
   matrixAccount: {
     getCapabilities: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;
