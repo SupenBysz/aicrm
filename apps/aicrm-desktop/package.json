@@ -13,6 +13,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:codex-executor-auth-safety": "node --test src/main/codex-executor-auth-safety.test.mjs",
     "test:codex-authorization-bridge-v2": "node --test src/main/codex-authorization-bridge-v2.test.mjs",
+    "test:codex-app-server-auth": "node --test src/main/codex-app-server-auth-client.test.mjs",
     "test:desktop-device-identity": "node --test src/main/desktop-device-identity.test.mjs",
     "test:desktop-device-registration": "node --test src/main/desktop-device-registration-client.test.mjs",
     "test:desktop-device-heartbeat": "node --test src/main/desktop-device-heartbeat-client.test.mjs",

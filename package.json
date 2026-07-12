@@ -11,7 +11,8 @@
     "lint": "turbo run lint",
     "test:database-deploy": "bash scripts/test_deploy_database.sh",
     "typecheck": "turbo run typecheck",
-    "typecheck:desktop": "pnpm --filter @ky/aicrm-desktop typecheck"
+    "typecheck:desktop": "pnpm --filter @ky/aicrm-desktop typecheck",
+    "verify:codex-appserver-protocol": "bash scripts/verify_codex_appserver_protocol.sh"
   },
   "devDependencies": {
     "turbo": "^2.10.4",

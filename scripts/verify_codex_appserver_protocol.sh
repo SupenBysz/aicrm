@@ -25,7 +25,7 @@ output_dir="$(mktemp -d)"
 cleanup() { rm -rf "$output_dir"; }
 trap cleanup EXIT
 
-"$CODEX_BINARY" app-server generate-json-schema --experimental --out "$output_dir" >/dev/null
+"$CODEX_BINARY" app-server generate-json-schema --out "$output_dir" >/dev/null
 schema="$output_dir/codex_app_server_protocol.v2.schemas.json"
 client_requests="$output_dir/ClientRequest.json"
 client_notifications="$output_dir/ClientNotification.json"
@@ -47,11 +47,19 @@ for method in account/login/completed account/updated; do
   grep -q "\"$method\"" "$server_notifications" || fail "missing server notification $method"
 done
 
-grep -q '"chatgptDeviceCode"' "$output_dir/v2/LoginAccountParams.json" \
-  || fail "device-code login input disappeared"
-for field in loginId verificationUrl userCode; do
-  grep -q "\"$field\"" "$output_dir/v2/LoginAccountResponse.json" \
-    || fail "device-code response field $field disappeared"
+login_params="$output_dir/v2/LoginAccountParams.json"
+login_response="$output_dir/v2/LoginAccountResponse.json"
+account_response="$output_dir/v2/GetAccountResponse.json"
+for field in chatgpt chatgptDeviceCode useHostedLoginSuccessPage appBrand; do
+  grep -q "\"$field\"" "$login_params" || fail "authorization input $field disappeared"
+done
+for field in loginId authUrl verificationUrl userCode; do
+  grep -q "\"$field\"" "$login_response" \
+    || fail "authorization response field $field disappeared"
+done
+for field in account requiresOpenaiAuth email planType; do
+  grep -q "\"$field\"" "$account_response" \
+    || fail "account response field $field disappeared"
 done
 for field in id model displayName hidden inputModalities supportedReasoningEfforts; do
   grep -q "\"$field\"" "$output_dir/v2/ModelListResponse.json" \
