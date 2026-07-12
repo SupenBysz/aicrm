@@ -109,6 +109,7 @@ func deviceHandlerServer(control *fakeDeviceControl, authorizer accessclient.Aut
 	}, &fakeReader{}, control, authorizer)
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
+	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
 	return server
 }
 

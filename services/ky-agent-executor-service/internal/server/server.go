@@ -14,6 +14,7 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/config"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/controltask"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialfs"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialrevocation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/desktophandoff"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/operationconfirmation"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
@@ -30,6 +31,7 @@ type Server struct {
 	taskRuntime         taskRuntime
 	confirmationRuntime operationConfirmationRuntime
 	handoffRuntime      desktopHandoffRuntime
+	revocationRuntime   credentialRevocationRuntime
 }
 
 type authorizationRuntime interface {
@@ -136,6 +138,17 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.handoffRuntime = handoffManager
+		revocationManager, err := credentialrevocation.New(
+			opened,
+			confirmationManager,
+			signer,
+			trustedtoken.KeySet{keyMaterial.KeyID: keyMaterial.VerificationKey},
+			[]byte(s.cfg.TrustedTokenNonceSecret),
+		)
+		if err != nil {
+			return err
+		}
+		s.revocationRuntime = revocationManager
 		credentials, err := credentialfs.New(s.cfg.CredentialRoot)
 		if err != nil {
 			return err
@@ -331,6 +344,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	s.registerOperationConfirmationRoutes(mux)
 	s.registerDeviceBindingRoutes(mux)
 	s.registerDesktopHandoffRoutes(mux)
+	s.registerCredentialRevocationRoutes(mux)
 
 	return mux
 }
@@ -440,6 +454,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil &&
 		operationConfirmationRuntimeReady(s.confirmationRuntime) &&
 		s.handoffRuntime != nil &&
+		s.revocationRuntime != nil &&
 		s.cfg.AuthTokenSecret != "" && validDeviceChallengeSecret(s.cfg.DeviceChallengeSecret, s.cfg.AuthTokenSecret, s.cfg.InternalToken))
 	status := "ok"
 	httpStatus := http.StatusOK

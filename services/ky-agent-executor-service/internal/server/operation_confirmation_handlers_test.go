@@ -412,6 +412,7 @@ func TestReadyzIncludesOperationConfirmationManagerReadiness(t *testing.T) {
 		DeviceChallengeSecret: "ready-independent-device-challenge-secret",
 	}, &fakeReader{}, &fakeControl{}, validOperationConfirmationAuthorizer(operationConfirmationTestDatabaseNow))
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
+	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
 	for _, testCase := range []struct {
 		name       string
 		runtime    operationConfirmationRuntime
