@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -114,129 +115,31 @@ func (s *Server) updateExecutorConfig(w http.ResponseWriter, r *http.Request, wc
 }
 
 func (s *Server) authorizeExecutor(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	item, err := s.store.GetExecutorConfigByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeStoreError(w, r, err)
+	setLegacyExecutorAuthorizationHeaders(w)
+	if legacyExecutorAuthorizationBodyPresent(r) {
+		writeError(w, r, http.StatusUpgradeRequired, "desktop_bridge_upgrade_required", "旧版执行器授权请求已停用，请升级到可信授权桥")
 		return
 	}
-	authMode := "desktop"
-	if item.RuntimeType == "server" || item.RuntimeType == "remote" {
-		authMode = "device_auth"
-	}
-	if item.RuntimeType == "server" {
-		probe := s.detectServerCodexAuthorization(r.Context(), item)
-		if err = s.syncServerCodexAuthProbe(r.Context(), item.ID, probe); err != nil {
-			writeStoreError(w, r, err)
-			return
-		}
-		if probe.Authorized {
-			session := store.ExecutorAuthSession{
-				ExecutorID:  item.ID,
-				RuntimeType: item.RuntimeType,
-				AuthMode:    authMode,
-				AuthStatus:  "authorized",
-				CodexHome:   probe.CodexHome,
-				Message:     "已通过服务端 Codex 真实执行探针，无需重新登录。",
-			}
-			s.audit(r.Context(), r, wc, "ai_executor.auth_detected", "ai_executor", item.ID, map[string]any{
-				"runtimeType": item.RuntimeType,
-				"authMode":    authMode,
-				"authSource":  probe.Source,
-			})
-			writeData(w, r, session)
-			return
-		}
-		if probe.AuthStatus == "error" {
-			session := store.ExecutorAuthSession{
-				ExecutorID:  item.ID,
-				RuntimeType: item.RuntimeType,
-				AuthMode:    authMode,
-				AuthStatus:  "error",
-				CodexHome:   probe.CodexHome,
-				Message:     "服务端 Codex 真实执行探针失败，请检查网络、模型、配置或额度。",
-			}
-			writeData(w, r, session)
-			return
-		}
-	}
-	item, err = s.store.StartExecutorAuthorization(r.Context(), item.ID, authMode)
-	if err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	session := store.ExecutorAuthSession{
-		ExecutorID:  item.ID,
-		RuntimeType: item.RuntimeType,
-		AuthMode:    authMode,
-		AuthStatus:  item.AuthStatus,
-		CodexHome:   codexHomeForExecutor(item),
-	}
-	if authMode == "desktop" {
-		session.Message = "请在 AiCRM Desktop 客户端完成 Codex 浏览器授权。"
-	} else {
-		session.Command = "CODEX_HOME=" + shellQuote(session.CodexHome) + " codex login --device-auth"
-		session.Message = "请在对应运行环境执行设备码授权命令，并在浏览器输入一次性设备码完成认证。"
-	}
-	s.audit(r.Context(), r, wc, "ai_executor.authorize_started", "ai_executor", item.ID, map[string]any{
-		"runtimeType": item.RuntimeType,
-		"authMode":    authMode,
-	})
-	writeData(w, r, session)
+	writeError(w, r, http.StatusServiceUnavailable, "executor_authorization_unavailable", "可信执行器授权服务尚未启用")
 }
 
-type executorAuthStatusInput struct {
-	AuthStatus       string          `json:"authStatus"`
-	AuthMethod       string          `json:"authMethod"`
-	AuthAccountLabel string          `json:"authAccountLabel"`
-	BoundDeviceID    string          `json:"boundDeviceId"`
-	CodexVersion     string          `json:"codexVersion"`
-	Capabilities     json.RawMessage `json:"capabilities"`
+func setLegacyExecutorAuthorizationHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Deprecation", "true")
+}
+
+func legacyExecutorAuthorizationBodyPresent(r *http.Request) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return false
+	}
+	var firstByte [1]byte
+	n, err := r.Body.Read(firstByte[:])
+	return n > 0 || (err != nil && !errors.Is(err, io.EOF))
 }
 
 func (s *Server) syncExecutorAuthStatus(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	var in executorAuthStatusInput
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	in.AuthStatus = strings.TrimSpace(in.AuthStatus)
-	in.AuthMethod = strings.TrimSpace(in.AuthMethod)
-	in.AuthAccountLabel = strings.TrimSpace(in.AuthAccountLabel)
-	in.BoundDeviceID = strings.TrimSpace(in.BoundDeviceID)
-	in.CodexVersion = strings.TrimSpace(in.CodexVersion)
-	if !validStatus(in.AuthStatus, "not_authorized", "authorizing", "authorized", "expired", "error") {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "执行器授权状态无效")
-		return
-	}
-	if in.AuthMethod != "" && !validStatus(in.AuthMethod, "desktop", "device_auth") {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "执行器授权方式无效")
-		return
-	}
-	if len(in.Capabilities) == 0 {
-		in.Capabilities = []byte("{}")
-	}
-	if !json.Valid(in.Capabilities) {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "执行器能力信息格式无效")
-		return
-	}
-	item, err := s.store.UpdateExecutorAuthStatus(
-		r.Context(),
-		r.PathValue("id"),
-		in.AuthStatus,
-		in.AuthMethod,
-		in.AuthAccountLabel,
-		in.BoundDeviceID,
-		in.CodexVersion,
-		in.Capabilities,
-	)
-	if err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	s.audit(r.Context(), r, wc, "ai_executor.auth_status_synced", "ai_executor", item.ID, map[string]any{
-		"authStatus": item.AuthStatus,
-		"authMethod": item.AuthMethod,
-	})
-	writeData(w, r, item)
+	setLegacyExecutorAuthorizationHeaders(w)
+	writeError(w, r, http.StatusGone, "legacy_endpoint_gone", "旧版执行器授权状态同步接口已停用")
 }
 
 func (s *Server) listExecutorTasks(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -862,21 +765,4 @@ func parseInt64Default(value string, fallback int64) int64 {
 		return fallback
 	}
 	return parsed
-}
-
-func codexHomeForExecutor(item store.ExecutorConfig) string {
-	if item.RuntimeType == "server" {
-		return "/data/kyai_crm/codex-executors/" + item.ID
-	}
-	if item.RuntimeType == "remote" {
-		return "$HOME/.aicrm/codex-executors/" + item.ID
-	}
-	return "AiCRM Desktop 用户数据目录/codex-executors/" + item.ID
-}
-
-func shellQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

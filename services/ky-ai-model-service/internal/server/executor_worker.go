@@ -265,28 +265,10 @@ func (s *Server) detectServerCodexAuthorization(ctx context.Context, cfg store.E
 }
 
 func (s *Server) serverCodexHomeCandidates(cfg store.ExecutorConfig) []serverCodexAuthProbe {
-	items := []serverCodexAuthProbe{}
-	add := func(home, source string) {
-		home = strings.TrimSpace(home)
-		if home == "" {
-			return
-		}
-		for _, item := range items {
-			if item.CodexHome == home {
-				return
-			}
-		}
-		items = append(items, serverCodexAuthProbe{CodexHome: home, Source: source})
-	}
-
-	add(codexHomeFromCapabilities(cfg.Capabilities), "configured")
-	add(serverCodexHome(cfg.ID), "executor")
-	add(os.Getenv("CODEX_HOME"), "env")
-	if home, err := os.UserHomeDir(); err == nil {
-		add(filepath.Join(home, ".codex"), "default")
-	}
-	add("/root/.codex", "default")
-	return items
+	return []serverCodexAuthProbe{{
+		CodexHome: serverCodexHome(cfg.ID),
+		Source:    "executor",
+	}}
 }
 
 func (s *Server) probeServerCodexHome(ctx context.Context, codexHome, source string) serverCodexAuthProbe {
@@ -381,20 +363,6 @@ func (s *Server) codexAccountLabel(ctx context.Context, codexHome string) string
 	return parseCodexAccountLabel(string(output))
 }
 
-func codexHomeFromCapabilities(capabilities json.RawMessage) string {
-	if len(capabilities) == 0 {
-		return ""
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(capabilities, &payload); err != nil {
-		return ""
-	}
-	if value, ok := payload["codexHome"].(string); ok {
-		return strings.TrimSpace(value)
-	}
-	return ""
-}
-
 func parseCodexAccountLabel(statusText string) string {
 	statusText = strings.TrimSpace(statusText)
 	if statusText == "" {
@@ -429,8 +397,24 @@ func codexAuthProbeWorkspace() string {
 }
 
 func serverCodexHome(executorID string) string {
+	executorID = strings.TrimSpace(executorID)
 	if executorID == "" {
 		executorID = "aiexec_platform_codex"
 	}
-	return "/data/kyai_crm/codex-executors/" + executorID
+	var safeID strings.Builder
+	for index := 0; index < len(executorID); index++ {
+		character := executorID[index]
+		if character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' ||
+			character == '_' || character == '-' {
+			safeID.WriteByte(character)
+			continue
+		}
+		safeID.WriteByte('_')
+	}
+	if safeID.Len() == 0 {
+		safeID.WriteString("aiexec_platform_codex")
+	}
+	return filepath.Join("/data/kyai_crm/codex-executors", safeID.String())
 }

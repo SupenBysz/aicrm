@@ -86,6 +86,10 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("PATCH /api/v1/ai-executors/codex", s.ws(perms("platform.ai_executors.update"), s.updateExecutorConfig))
 	mux.HandleFunc("GET /api/v1/ai-executors/{id}", s.ws(perms("platform.ai_executors.view"), s.getExecutor))
 	mux.HandleFunc("PATCH /api/v1/ai-executors/{id}", s.ws(perms("platform.ai_executors.update"), s.updateExecutor))
+	// These legacy routes stay registered during the compatibility window, but
+	// their handlers fail closed until the trusted authorization-session service
+	// and Desktop bridge are available. Never restore direct renderer-driven
+	// authorization state writes here.
 	mux.HandleFunc("POST /api/v1/ai-executors/{id}/authorize", s.ws(perms("platform.ai_executors.authorize"), s.authorizeExecutor))
 	mux.HandleFunc("POST /api/v1/ai-executors/{id}/auth-status", s.ws(perms("platform.ai_executors.authorize"), s.syncExecutorAuthStatus))
 	mux.HandleFunc("GET /api/v1/ai-executor-tasks", s.ws(perms("platform.ai_executor_tasks.view"), s.listExecutorTasks))
