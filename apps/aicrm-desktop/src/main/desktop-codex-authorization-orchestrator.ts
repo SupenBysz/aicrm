@@ -177,8 +177,16 @@ interface PendingRequest {
   readonly requestHash: string;
 }
 
+interface AuthorizationRuntimeInput {
+  readonly sessionId: string;
+  readonly executorId: string;
+  readonly sessionRevision: number;
+  readonly handoffId: string;
+  readonly handoffTicket: string | null;
+}
+
 interface RuntimeInstance {
-  readonly input: Readonly<CodexAuthorizationStartInput>;
+  readonly input: Readonly<AuthorizationRuntimeInput>;
   startPromise: Promise<Readonly<CodexAuthorizationSnapshot>>;
   flow: Promise<void> | null;
   record: DesktopCodexAuthorizationSessionRecord | null;
@@ -194,6 +202,11 @@ interface RuntimeInstance {
   pendingRequest: PendingRequest | null;
   stagingQuarantined: boolean;
   promotionQuarantined: boolean;
+}
+
+interface ResumeOperation {
+  readonly expected: DesktopCodexAuthorizationSessionRecord;
+  readonly promise: Promise<void>;
 }
 
 class ShutdownSignal extends Error {}
@@ -216,6 +229,7 @@ export class DesktopCodexAuthorizationOrchestrator {
   private readonly now: () => Date;
   private readonly instances = new Map<string, RuntimeInstance>();
   private readonly activeSessionByExecutor = new Map<string, string>();
+  private readonly resumeOperations = new Map<string, ResumeOperation>();
   private shuttingDown = false;
   private shutdownPromise: Promise<void> | null = null;
 
@@ -303,6 +317,43 @@ export class DesktopCodexAuthorizationOrchestrator {
     return operation;
   }
 
+  /**
+   * Startup-only continuation for a session already reconciled by the durable
+   * recovery coordinator. It never reuses a handoff ticket or replays an
+   * already-completed effect.
+   */
+  resume(input: Readonly<DesktopCodexAuthorizationSessionRecord>): Promise<void> {
+    let expected: DesktopCodexAuthorizationSessionRecord;
+    try {
+      expected = validateResumeRecord(input);
+    } catch {
+      return Promise.reject(invalidInputError());
+    }
+    if (this.shuttingDown) {
+      return Promise.reject(orchestratorError(
+        "desktop_codex_authorization_orchestrator_stopped",
+        "Codex 授权编排器已停止"
+      ));
+    }
+    const pending = this.resumeOperations.get(expected.sessionId);
+    if (pending) {
+      return sameResumeRecord(pending.expected, expected)
+        ? pending.promise
+        : Promise.reject(conflictError());
+    }
+    const operation = this.resumeOnce(expected);
+    const tracked = Object.freeze({ expected, promise: operation });
+    this.resumeOperations.set(expected.sessionId, tracked);
+    void operation
+      .finally(() => {
+        if (this.resumeOperations.get(expected.sessionId) === tracked) {
+          this.resumeOperations.delete(expected.sessionId);
+        }
+      })
+      .catch(() => undefined);
+    return operation;
+  }
+
   async waitForIdle(sessionId: string): Promise<Readonly<CodexAuthorizationSnapshot>> {
     if (!safeId(sessionId)) throw invalidInputError();
     const instance = this.instances.get(sessionId);
@@ -344,7 +395,7 @@ export class DesktopCodexAuthorizationOrchestrator {
       const identity = validateRegisteredIdentity(await this.identityRegistration.register());
       this.assertOpen();
       const facts = validateHandoffFacts(await this.verifyHandoff(Object.freeze({
-        token: instance.input.handoffTicket,
+        token: requireHandoffTicket(instance.input.handoffTicket),
         registeredDeviceId: identity.deviceId,
         sessionId: instance.input.sessionId,
         executorId: instance.input.executorId,
@@ -389,13 +440,115 @@ export class DesktopCodexAuthorizationOrchestrator {
     }
   }
 
+  private async resumeOnce(
+    expected: DesktopCodexAuthorizationSessionRecord
+  ): Promise<void> {
+    const current = await this.sessionStore.read(expected.sessionId);
+    if (this.shuttingDown) {
+      throw orchestratorError(
+        "desktop_codex_authorization_orchestrator_stopped",
+        "Codex 授权编排器已停止"
+      );
+    }
+    if (
+      current === null ||
+      current.sessionId !== expected.sessionId ||
+      current.executorId !== expected.executorId ||
+      current.generation !== expected.generation ||
+      current.status !== expected.status
+    ) {
+      throw conflictError();
+    }
+    const existing = this.instances.get(current.sessionId);
+    if (existing) {
+      if (
+        existing.input.handoffTicket === null &&
+        existing.input.executorId === current.executorId &&
+        existing.record?.generation === current.generation &&
+        existing.record.status === current.status
+      ) {
+        return;
+      }
+      throw conflictError();
+    }
+    const activeSessionId = this.activeSessionByExecutor.get(current.executorId);
+    if (activeSessionId !== undefined) throw conflictError();
+
+    const snapshot = safeSnapshot(current);
+    const instance: RuntimeInstance = {
+      input: Object.freeze({
+        sessionId: current.sessionId,
+        executorId: current.executorId,
+        sessionRevision: current.sessionRevision,
+        handoffId: current.handoffId,
+        handoffTicket: null
+      }),
+      startPromise: Promise.resolve(snapshot),
+      flow: null,
+      record: current,
+      accepted: snapshot,
+      publishedGeneration: current.generation,
+      staging: null,
+      appServerReceipt: null,
+      appServerStartAttempted: false,
+      appServerStopped: false,
+      lease: null,
+      leaseFence: null,
+      promotion: null,
+      pendingRequest: null,
+      stagingQuarantined: false,
+      promotionQuarantined: false
+    };
+    this.instances.set(current.sessionId, instance);
+    this.activeSessionByExecutor.set(current.executorId, current.sessionId);
+    const flow = Promise.resolve().then(() => this.runResumed(instance));
+    instance.flow = flow;
+    void flow.catch(() => undefined);
+  }
+
+  private async runResumed(instance: RuntimeInstance): Promise<void> {
+    try {
+      const status = this.requireRecord(instance).status;
+      if (status === "handoff_claimed") {
+        await this.login(instance);
+        await this.proveAndLease(instance);
+        await this.promote(instance);
+        await this.acknowledge(instance);
+      } else if (status === "login_completed") {
+        await this.recoverStaging(instance);
+        await this.proveAndLease(instance);
+        await this.promote(instance);
+        await this.acknowledge(instance);
+      } else if (status === "proof_prepared") {
+        await this.recoverStaging(instance);
+        await this.startLease(instance, true);
+        await this.promote(instance);
+        await this.acknowledge(instance);
+      } else if (status === "activation_pending") {
+        await this.recoverStaging(instance);
+        await this.startLease(instance, false);
+        await this.promote(instance);
+        await this.acknowledge(instance);
+      } else if (status === "credential_durable") {
+        await this.startLease(instance, false);
+        await this.acknowledge(instance);
+      } else {
+        throw conflictError();
+      }
+      this.releaseExecutor(instance);
+    } catch (error) {
+      await this.handleFlowFailure(instance, error);
+      throw normalizePublicError(error);
+    }
+  }
+
   private async claim(instance: RuntimeInstance): Promise<void> {
     let record = this.requireRecord(instance);
     const result = validateClaimResult(await this.transport.claimDesktopHandoff(
       {
         sessionId: instance.input.sessionId,
         handoffId: instance.input.handoffId,
-        handoffTicket: instance.input.handoffTicket
+        handoffTicket: requireHandoffTicket(instance.input.handoffTicket)
       },
       this.preparedHook(instance, "claim", "handoff_claim_starting")
     ));
@@ -498,20 +651,40 @@ export class DesktopCodexAuthorizationOrchestrator {
       sessionRevision: proof.sessionRevision
     });
     await this.completePending(instance);
+    await this.startLease(instance, true);
+  }
+
+  private async recoverStaging(instance: RuntimeInstance): Promise<void> {
+    if (instance.staging !== null) return;
+    const record = this.requireRecord(instance);
     this.assertOpen();
+    instance.staging = validateStaging(await this.credentialTree.createOrRecoverStaging(
+      record.executorId,
+      record.sessionId
+    ));
+  }
+
+  private async startLease(
+    instance: RuntimeInstance,
+    advanceToActivationPending: boolean
+  ): Promise<void> {
+    let record = this.requireRecord(instance);
+    this.assertOpen();
+    if (instance.lease !== null) throw conflictError();
     const lease = this.createLeaseRuntime(Object.freeze({
       sessionId: record.sessionId,
       executorId: record.executorId
     }));
     validateLeaseRuntime(lease);
     instance.lease = lease;
-    const target = activationTarget(record);
-    await lease.start(target);
+    await lease.start(activationTarget(record));
     const fence = await lease.readFence(requireString(record.activationId));
     if (!fence) throw operationFailedError();
     instance.leaseFence = await lease.requireFresh(fence);
-    record = await this.advance(instance, record, "activation_pending");
-    instance.record = record;
+    if (advanceToActivationPending) {
+      record = await this.advance(instance, record, "activation_pending");
+      instance.record = record;
+    }
   }
 
   private async promote(instance: RuntimeInstance): Promise<void> {
@@ -767,6 +940,9 @@ export class DesktopCodexAuthorizationOrchestrator {
   }
 
   private async performShutdown(): Promise<void> {
+    const resumePromises = [...this.resumeOperations.values()]
+      .map((operation) => operation.promise);
+    await Promise.allSettled(resumePromises);
     const startPromises = [...this.instances.values()].map((instance) => instance.startPromise);
     const stopResults = await Promise.allSettled([
       this.supervisor.shutdownAll(),
@@ -862,6 +1038,34 @@ function validateStartInput(value: unknown): Readonly<CodexAuthorizationStartInp
     throw invalidInputError();
   }
   return Object.freeze({ sessionId, executorId, sessionRevision, handoffId, handoffTicket });
+}
+
+function validateResumeRecord(
+  value: unknown
+): DesktopCodexAuthorizationSessionRecord {
+  const record = value as DesktopCodexAuthorizationSessionRecord;
+  const data = desktopCodexAuthorizationSessionData(record);
+  const metadata = captureRequired(value, [
+    "version", "generation", "createdAt", "updatedAt"
+  ]);
+  const candidate = {
+    version: metadata.version,
+    generation: metadata.generation,
+    ...data,
+    createdAt: metadata.createdAt,
+    updatedAt: metadata.updatedAt
+  } as DesktopCodexAuthorizationSessionRecord;
+  projectDesktopCodexAuthorizationSnapshot(candidate);
+  if (![
+    "handoff_claimed",
+    "login_completed",
+    "proof_prepared",
+    "activation_pending",
+    "credential_durable"
+  ].includes(candidate.status)) {
+    throw invalidInputError();
+  }
+  return candidate;
 }
 
 function validateRegisteredIdentity(value: unknown): DesktopCodexRegisteredIdentity {
@@ -1181,12 +1385,49 @@ function captureDescriptors(
 }
 
 function sameStart(
-  left: Readonly<CodexAuthorizationStartInput>,
+  left: Readonly<AuthorizationRuntimeInput>,
   right: Readonly<CodexAuthorizationStartInput>
 ): boolean {
   return left.sessionId === right.sessionId && left.executorId === right.executorId &&
     left.sessionRevision === right.sessionRevision && left.handoffId === right.handoffId &&
     left.handoffTicket === right.handoffTicket;
+}
+
+function sameResumeRecord(
+  left: DesktopCodexAuthorizationSessionRecord,
+  right: DesktopCodexAuthorizationSessionRecord
+): boolean {
+  if (
+    left.version !== right.version ||
+    left.generation !== right.generation ||
+    left.createdAt !== right.createdAt ||
+    left.updatedAt !== right.updatedAt
+  ) {
+    return false;
+  }
+  const leftData = desktopCodexAuthorizationSessionData(left) as unknown as Record<string, unknown>;
+  const rightData = desktopCodexAuthorizationSessionData(right) as unknown as Record<string, unknown>;
+  const keys = Object.keys(leftData);
+  if (keys.length !== Object.keys(rightData).length) return false;
+  return keys.every((key) => {
+    if (key !== "promotionReceipt") return leftData[key] === rightData[key];
+    return samePromotionReceipt(leftData[key], rightData[key]);
+  });
+}
+
+function samePromotionReceipt(left: unknown, right: unknown): boolean {
+  if (left === null || right === null) return left === right;
+  try {
+    const keys = [
+      "executorId", "revision", "operationId", "digestAlgorithm",
+      "digest", "fileCount", "totalBytes"
+    ];
+    const leftValue = captureExact(left, keys);
+    const rightValue = captureExact(right, keys);
+    return keys.every((key) => leftValue[key] === rightValue[key]);
+  } catch {
+    return false;
+  }
 }
 
 function isTerminal(value: string): boolean {
@@ -1214,6 +1455,11 @@ function requireDigest(value: string | null): string {
 
 function requireString(value: string | null): string {
   if (typeof value !== "string" || value.length === 0) throw operationFailedError();
+  return value;
+}
+
+function requireHandoffTicket(value: string | null): string {
+  if (typeof value !== "string" || !COMPACT_JWS.test(value)) throw conflictError();
   return value;
 }
 

@@ -20,6 +20,11 @@ import { registerNetworkIpc } from "./ipc/network-ipc";
 import { registerWindowIpc } from "./ipc/window-ipc";
 import { installNetworkLogCapture } from "./network-log";
 import { getDesktopDeviceTrustMainServices } from "./desktop-device-trust-main";
+import {
+  getDesktopCodexAuthorizationMainServices,
+  type DesktopCodexAuthorizationMainServices
+} from "./desktop-codex-authorization-main";
+import { DesktopCodexAuthorizationQuitFence } from "./desktop-codex-authorization-main-lifecycle";
 
 process.title = DESKTOP_APPLICATION_NAME;
 app.setName(DESKTOP_APPLICATION_NAME);
@@ -38,6 +43,8 @@ if (!singleInstanceLock) {
 
 const desktopDeviceTrustServices = getDesktopDeviceTrustMainServices();
 const desktopDeviceTrustRuntime = desktopDeviceTrustServices.runtime;
+let desktopCodexAuthorizationServices: DesktopCodexAuthorizationMainServices | null = null;
+let desktopCodexQuitFence: DesktopCodexAuthorizationQuitFence | null = null;
 
 registerApiIpc();
 registerAiExecutorWindowIpc();
@@ -54,6 +61,12 @@ registerNetworkIpc();
 registerWindowIpc();
 
 app.whenReady().then(() => {
+  desktopCodexAuthorizationServices = getDesktopCodexAuthorizationMainServices();
+  desktopCodexQuitFence = new DesktopCodexAuthorizationQuitFence({
+    shutdown: () => desktopCodexAuthorizationServices!.shutdown(),
+    quit: () => app.quit()
+  });
+  void desktopCodexAuthorizationServices.initialize().catch(() => undefined);
   app.setAboutPanelOptions({
     applicationName: DESKTOP_APPLICATION_NAME,
     applicationVersion: app.getVersion()
@@ -73,6 +86,10 @@ app.whenReady().then(() => {
       createMainWindow();
     }
   });
+});
+
+app.on("before-quit", (event) => {
+  desktopCodexQuitFence?.handleBeforeQuit(event);
 });
 
 app.on("window-all-closed", () => {

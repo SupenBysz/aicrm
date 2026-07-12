@@ -105,6 +105,7 @@ class FakeSessionStore {
   }
 
   async read(sessionId) {
+    if (this.options.readGate) await this.options.readGate.promise;
     const value = this.records.get(sessionId);
     return value ? structuredClone(value) : null;
   }
@@ -518,6 +519,78 @@ function fixture(options = {}) {
   };
 }
 
+async function seedResumableRecord(current, targetStatus) {
+  let record = await current.sessionStore.create({
+    sessionId: "session_1",
+    executorId: "executor_1",
+    deviceId: DEVICE_ID,
+    handoffId: "handoff_1",
+    sessionRevision: 1
+  });
+  const advance = async (status, changes = {}) => {
+    record = await current.sessionStore.transition(record, {
+      ...desktopCodexAuthorizationSessionData(record),
+      status,
+      lastProgressStatus: status,
+      ...changes
+    });
+  };
+  await advance("handoff_claim_starting", {
+    claimRequestReference: CLAIM_REFERENCE,
+    claimRequestHash: CLAIM_HASH
+  });
+  await advance("handoff_claimed", {
+    claimToken: CLAIM_TOKEN,
+    claimExpiresAt: "2026-07-13T00:30:00Z",
+    sessionRevision: 2
+  });
+  if (targetStatus === "handoff_claimed") return record;
+  await advance("app_server_starting");
+  await advance("app_server_started");
+  await advance("login_starting");
+  await advance("waiting_user");
+  await advance("login_completed", {
+    loginIdHash: LOGIN_HASH,
+    accountFingerprint: BINDING_DIGEST,
+    candidateBindingDigest: BINDING_DIGEST
+  });
+  if (targetStatus === "login_completed") return record;
+  await advance("proof_submit_starting", {
+    proofRequestReference: PROOF_REFERENCE,
+    proofRequestHash: PROOF_HASH
+  });
+  await advance("proof_prepared", {
+    proofId: "proof_1",
+    activationOperationId: "operation_1",
+    activationId: "activation_1",
+    activationToken: ACTIVATION_TOKEN,
+    activationExpiresAt: "2026-07-13T00:30:00Z",
+    credentialRevision: 3,
+    leaseEpoch: 2,
+    sourceCredentialRevision: 1,
+    revocationEpoch: 4,
+    bindingDigest: BINDING_DIGEST,
+    sessionRevision: 3
+  });
+  if (targetStatus === "proof_prepared") return record;
+  await advance("activation_pending");
+  if (targetStatus === "activation_pending") return record;
+  await advance("credential_promotion_starting");
+  await advance("credential_durable", {
+    promotionReceipt: {
+      executorId: "executor_1",
+      revision: 3,
+      operationId: "operation_1",
+      digestAlgorithm: "aicrm-credential-tree-rfc8785-nfc-v1",
+      digest: BINDING_DIGEST,
+      fileCount: 2,
+      totalBytes: 128
+    }
+  });
+  assert.equal(targetStatus, "credential_durable");
+  return record;
+}
+
 async function waitForStatus(current, status) {
   for (let index = 0; index < 100; index += 1) {
     const record = await current.sessionStore.read("session_1");
@@ -592,6 +665,106 @@ test("happy path publishes every durable generation and preserves the locked cal
   assert.equal(record.activationToken, null);
   assert.equal(record.ackRequestReference, ACK_REFERENCE);
   assert.equal(record.ackRequestHash, ACK_HASH);
+});
+
+test("startup resume singleflights and continues each durable resumable state without replaying prior effects", async (t) => {
+  const cases = [
+    {
+      status: "handoff_claimed",
+      required: ["supervisor:start", "proof:network", "credential:promote", "ack:network"],
+      forbidden: ["identity:register", "handoff:verify", "claim:network"]
+    },
+    {
+      status: "login_completed",
+      required: ["credential:create_staging", "proof:network", "credential:promote", "ack:network"],
+      forbidden: ["identity:register", "handoff:verify", "claim:network", "supervisor:start"]
+    },
+    {
+      status: "proof_prepared",
+      required: ["credential:create_staging", "lease:start", "credential:promote", "ack:network"],
+      forbidden: ["identity:register", "handoff:verify", "claim:network", "proof:network"]
+    },
+    {
+      status: "activation_pending",
+      required: ["credential:create_staging", "lease:start", "credential:promote", "ack:network"],
+      forbidden: ["identity:register", "handoff:verify", "claim:network", "proof:network"]
+    },
+    {
+      status: "credential_durable",
+      required: ["lease:start", "ack:network"],
+      forbidden: [
+        "identity:register", "handoff:verify", "claim:network", "proof:network",
+        "credential:create_staging", "credential:promote"
+      ]
+    }
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario.status, async () => {
+      const current = fixture();
+      const record = await seedResumableRecord(current, scenario.status);
+      current.calls.length = 0;
+      await Promise.all(Array.from({ length: 20 }, () => current.orchestrator.resume(record)));
+      const completed = await current.orchestrator.waitForIdle("session_1");
+      assert.equal(completed.status, "succeeded");
+      for (const call of scenario.required) assert.equal(current.calls.includes(call), true, call);
+      for (const call of scenario.forbidden) assert.equal(current.calls.includes(call), false, call);
+      assert.equal(current.leaseRuntimes.length, 1);
+    });
+  }
+});
+
+test("resume rejects stale or non-resumable records before starting any effect", async () => {
+  const current = fixture();
+  const record = await seedResumableRecord(current, "login_completed");
+  current.calls.length = 0;
+  await assert.rejects(current.orchestrator.resume({
+    ...record,
+    status: "waiting_user",
+    lastProgressStatus: "waiting_user"
+  }), { code: "desktop_codex_authorization_orchestrator_invalid_input" });
+  await assert.rejects(current.orchestrator.resume({
+    ...record,
+    generation: record.generation + 1
+  }), { code: "desktop_codex_authorization_orchestrator_conflict" });
+  assert.deepEqual(current.calls, []);
+});
+
+test("resume singleflight rejects a competing full recovery tuple", async () => {
+  const readGate = deferred();
+  const current = fixture({ sessionStore: { readGate } });
+  const record = await seedResumableRecord(current, "handoff_claimed");
+  current.calls.length = 0;
+  const exact = current.orchestrator.resume(record);
+  await Promise.resolve();
+  await assert.rejects(current.orchestrator.resume({
+    ...record,
+    generation: record.generation + 1
+  }), { code: "desktop_codex_authorization_orchestrator_conflict" });
+  await assert.rejects(current.orchestrator.resume({
+    ...record,
+    executorId: "executor_competing"
+  }), { code: "desktop_codex_authorization_orchestrator_conflict" });
+  readGate.resolve();
+  await exact;
+  assert.equal((await current.orchestrator.waitForIdle("session_1")).status, "succeeded");
+});
+
+test("shutdown waits for a pending resume read and prevents any late instance admission", async () => {
+  const readGate = deferred();
+  const current = fixture({ sessionStore: { readGate } });
+  const record = await seedResumableRecord(current, "handoff_claimed");
+  current.calls.length = 0;
+  const resume = current.orchestrator.resume(record);
+  await Promise.resolve();
+  const shutdown = current.orchestrator.shutdown();
+  readGate.resolve();
+  await assert.rejects(resume, {
+    code: "desktop_codex_authorization_orchestrator_stopped"
+  });
+  await shutdown;
+  assert.equal(current.calls.includes("supervisor:start"), false);
+  assert.equal(current.calls.includes("session:app_server_starting"), false);
+  assert.equal((await current.sessionStore.read("session_1")).status, "handoff_claimed");
 });
 
 test("a converged executor admits a different session while the original session stays idempotent", async () => {
