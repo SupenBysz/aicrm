@@ -151,6 +151,9 @@ test("Bridge v2 contract uses the standard system event envelope and safe snapsh
   assert.match(shared, /supportsAppServerAuth: true/);
   assert.match(shared, /supportsDeviceProof: true/);
   assert.match(shared, /supportsSignedCatalog: true/);
+  assert.match(shared, /supportedReasoningEfforts: string\[\]/);
+  assert.match(shared, /status: string/);
+  assert.equal(shared.includes("reasoningEfforts: string[]"), false);
   const start = shared.indexOf("export interface CodexAuthorizationChangedEvent");
   const end = shared.indexOf("export type MatrixAccountPlatform", start);
   assert.notEqual(start, -1);

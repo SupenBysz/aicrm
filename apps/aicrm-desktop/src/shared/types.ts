@@ -206,9 +206,10 @@ export interface CodexModelCatalogItem {
   modelKey: string;
   displayName: string;
   inputModalities: string[];
-  reasoningEfforts: string[];
+  supportedReasoningEfforts: string[];
   hidden: boolean;
   upgradeModelKey?: string;
+  status: string;
 }
 
 export interface CodexModelCatalogSnapshot {
