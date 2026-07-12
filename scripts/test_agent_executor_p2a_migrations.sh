@@ -59,6 +59,7 @@ BEGIN;
 \ir $ROOT_DIR/ops/db/040_agent_executor_authorization_runtime.sql
 \ir $ROOT_DIR/ops/db/041_agent_executor_p2a_control_api.sql
 \ir $ROOT_DIR/ops/db/042_agent_executor_credential_recovery.sql
+\ir $ROOT_DIR/ops/db/043_agent_executor_operation_confirmation.sql
 ROLLBACK;
 SQL
 after="$(schema_fingerprint)"
@@ -71,6 +72,8 @@ for _ in 1 2; do
     -f "$ROOT_DIR/ops/db/041_agent_executor_p2a_control_api.sql" >/dev/null
   psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
     -f "$ROOT_DIR/ops/db/042_agent_executor_credential_recovery.sql" >/dev/null
+  psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
+    -f "$ROOT_DIR/ops/db/043_agent_executor_operation_confirmation.sql" >/dev/null
 done
 
 assert_scalar() {
@@ -103,6 +106,21 @@ assert_scalar \
 assert_scalar \
   "SELECT count(*) FROM pg_constraint WHERE conname='ky_ai_executor_credential_binding_recovery_fence_check'" \
   "1" "credential recovery fence constraint exists once"
+assert_scalar \
+  "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ky_ai_executor_operation_confirmation' AND column_name IN ('actor_session_id','security_facts_verified','owner_verified','login_authenticated_at','mfa_required','mfa_verified','token_key_id','token_nonce_hash','token_issued_at','consumption_reference')" \
+  "10" "operation confirmation frozen security and token metadata columns exist"
+assert_scalar \
+  "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='ky_ai_executor_operation_confirmation_audit'" \
+  "1" "operation confirmation immutable audit table exists"
+assert_scalar \
+  "SELECT count(*) FROM pg_trigger WHERE tgrelid='ky_ai_executor_operation_confirmation_audit'::regclass AND tgname='ky_ai_executor_operation_confirmation_audit_immutable_trg' AND NOT tgisinternal" \
+  "1" "operation confirmation audit immutable trigger exists once"
+assert_scalar \
+  "SELECT count(*) FROM pg_constraint WHERE conname IN ('ky_ai_executor_confirmation_security_facts_check','ky_ai_executor_confirmation_target_shape_check','ky_ai_executor_confirmation_token_shape_check')" \
+  "3" "operation confirmation security, target and token shapes are enforced"
+assert_scalar \
+  "SELECT count(*) FROM ky_ai_executor_operation_confirmation WHERE actor_id='user_legacy' AND actor_session_id ~ '^legacy_[0-9a-f]{32}$' AND NOT security_facts_verified" \
+  "2" "legacy confirmations remain audit-only and cannot be consumed"
 
 psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 INSERT INTO ky_ai_executor_authorization_session (

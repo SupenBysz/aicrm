@@ -174,16 +174,36 @@ func TestEveryLockedPurposeHasExactLifetimeAndTargetShape(t *testing.T) {
 	logout.ActorID, logout.ExecutorID, logout.DeviceID, logout.OperationID, logout.RevocationID = "user_1", "executor_1", vectorDeviceID, "operation_1", "revocation_1"
 	logout.CredentialRevision, logout.RevocationEpoch = &positive, &positive
 	force := add(AudienceConfirmation, PurposeForceRevoke)
-	force.ActorID, force.ExecutorID, force.ExpectedRevision = "user_1", "executor_1", &positive
+	force.ActorID, force.SessionID, force.ExecutorID, force.ExpectedRevision = "user_1", "session_1", "executor_1", &positive
 	rebind := add(AudienceConfirmation, PurposeRebindDevice)
-	rebind.ActorID, rebind.ExecutorID, rebind.FromDeviceID, rebind.TargetDeviceID, rebind.ExpectedRevision = "user_1", "executor_1", vectorDeviceID, strings.Repeat("b", 64), &positive
+	rebind.ActorID, rebind.SessionID, rebind.ExecutorID, rebind.FromDeviceID, rebind.TargetDeviceID, rebind.ExpectedRevision = "user_1", "session_1", "executor_1", vectorDeviceID, strings.Repeat("b", 64), &positive
 	unbind := add(AudienceConfirmation, PurposeUnbindDevice)
-	unbind.ActorID, unbind.ExecutorID, unbind.FromDeviceID, unbind.ExpectedRevision = "user_1", "executor_1", vectorDeviceID, &positive
+	unbind.ActorID, unbind.SessionID, unbind.ExecutorID, unbind.FromDeviceID, unbind.ExpectedRevision = "user_1", "session_1", "executor_1", vectorDeviceID, &positive
 
 	signer, _ := vectorSigner(t)
 	for _, claims := range tests {
 		if _, err := signer.Issue(claims); err != nil {
 			t.Errorf("%s/%s was rejected: %v", claims.Audience, claims.Purpose, err)
 		}
+	}
+}
+
+func TestConfirmationPurposesRequireFrozenActorSession(t *testing.T) {
+	signer, _ := vectorSigner(t)
+	claims, err := NewClaims(
+		AudienceConfirmation, PurposeForceRevoke, "confirmation_1", vectorNonce,
+		time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := int64(2)
+	claims.ActorID, claims.ExecutorID, claims.ExpectedRevision = "user_1", "executor_1", &revision
+	if _, err := signer.Issue(claims); !errors.Is(err, ErrInvalidClaims) {
+		t.Fatalf("confirmation without actor session was accepted: %v", err)
+	}
+	claims.SessionID = "session_1"
+	if _, err := signer.Issue(claims); err != nil {
+		t.Fatalf("confirmation with frozen actor session was rejected: %v", err)
 	}
 }

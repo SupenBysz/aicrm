@@ -30,6 +30,7 @@ GRANT SELECT ON TABLE
   ky_ai_executor_device_request_ledger,
   ky_ai_executor_device_binding,
   ky_ai_executor_operation_confirmation,
+  ky_ai_executor_operation_confirmation_audit,
   ky_ai_executor_control_outbox,
   ky_ai_executor_task,
   ky_ai_executor_task_event,
@@ -76,6 +77,7 @@ GRANT INSERT ON TABLE
   ky_ai_executor_task_event,
   ky_ai_executor_task_raw_log,
   ky_ai_executor_desktop_authorization_proof,
+  ky_ai_executor_operation_confirmation_audit,
   ky_ai_executor_api_idempotency
 TO ky_agent_executor_writer;
 

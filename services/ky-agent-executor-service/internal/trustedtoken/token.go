@@ -109,6 +109,15 @@ func NewSigner(keyID string, privateKey ed25519.PrivateKey) (*Signer, error) {
 	return &Signer{keyID: keyID, privateKey: copyKey}, nil
 }
 
+// KeyID is safe public metadata used to persist which verification key signed
+// a deterministic ticket. It never exposes private key material.
+func (s *Signer) KeyID() string {
+	if s == nil {
+		return ""
+	}
+	return s.keyID
+}
+
 // NewClaims creates the immutable time envelope. Callers then fill only the
 // target fields required by the selected purpose before calling Issue.
 func NewClaims(audience, purpose, tokenID, nonce string, issuedAt time.Time) (Claims, error) {
@@ -312,15 +321,15 @@ func validatePurposeClaims(c Claims) error {
 			positive(c.CredentialRevision) && positive(c.RevocationEpoch) &&
 			onlyRevisions(c, "credentialRevision", "revocationEpoch"))
 	case PurposeForceRevoke:
-		return validIf(require(c.ActorID, c.ExecutorID) && onlyTargets(c, "actorId", "executorId") &&
+		return validIf(require(c.ActorID, c.SessionID, c.ExecutorID) && onlyTargets(c, "actorId", "sessionId", "executorId") &&
 			positive(c.ExpectedRevision) && onlyRevisions(c, "expectedRevision"))
 	case PurposeRebindDevice:
-		return validIf(require(c.ActorID, c.ExecutorID, c.FromDeviceID, c.TargetDeviceID) && c.FromDeviceID != c.TargetDeviceID &&
-			onlyTargets(c, "actorId", "executorId", "fromDeviceId", "targetDeviceId") &&
+		return validIf(require(c.ActorID, c.SessionID, c.ExecutorID, c.FromDeviceID, c.TargetDeviceID) && c.FromDeviceID != c.TargetDeviceID &&
+			onlyTargets(c, "actorId", "sessionId", "executorId", "fromDeviceId", "targetDeviceId") &&
 			positive(c.ExpectedRevision) && onlyRevisions(c, "expectedRevision"))
 	case PurposeUnbindDevice:
-		return validIf(require(c.ActorID, c.ExecutorID, c.FromDeviceID) &&
-			onlyTargets(c, "actorId", "executorId", "fromDeviceId") &&
+		return validIf(require(c.ActorID, c.SessionID, c.ExecutorID, c.FromDeviceID) &&
+			onlyTargets(c, "actorId", "sessionId", "executorId", "fromDeviceId") &&
 			positive(c.ExpectedRevision) && onlyRevisions(c, "expectedRevision"))
 	default:
 		return ErrInvalidClaims
