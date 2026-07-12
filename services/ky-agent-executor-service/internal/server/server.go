@@ -12,6 +12,7 @@ import (
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/appserver"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/authorization"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/config"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/controltask"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialfs"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
 	"github.com/Kysion/KyaiCRM/shared/auth"
@@ -128,6 +129,23 @@ func (s *Server) Run(ctx context.Context) error {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			runtime.Shutdown(shutdownCtx)
+		}()
+		controlRuntime, err := controltask.New(opened, launcher, credentials, controltask.Config{
+			OwnerInstanceID: s.cfg.OwnerInstanceID,
+			CodexVersion:    s.cfg.CodexVersion,
+		})
+		if err != nil {
+			return err
+		}
+		if err := controlRuntime.Recover(ctx); err != nil {
+			return err
+		}
+		controlRuntime.Start(ctx)
+		s.taskRuntime = controlRuntime
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			controlRuntime.Shutdown(shutdownCtx)
 		}()
 	}
 

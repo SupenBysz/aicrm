@@ -174,6 +174,10 @@ func (m *Manager) Quarantine(executorID, sourcePath, name string) (string, error
 	if err := m.ensureContained(sourcePath); err != nil {
 		return "", err
 	}
+	sourceInfo, err := os.Lstat(sourcePath)
+	if err != nil || !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return "", ErrInvalidPath
+	}
 	target, err := m.QuarantinePath(executorID, name)
 	if err != nil {
 		return "", err
@@ -181,17 +185,39 @@ func (m *Manager) Quarantine(executorID, sourcePath, name string) (string, error
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return "", err
 	}
+	// Linux requires owner-write on a directory whose ".." entry changes
+	// during a cross-parent rename. Immutable revisions are 0500, so add only
+	// owner-write after validating the tree, then restore the exact mode at the
+	// quarantine destination.
+	originalMode := sourceInfo.Mode().Perm()
+	modeAdjusted := originalMode&0o200 == 0
+	if modeAdjusted {
+		if err := ValidateReadOnlyTree(sourcePath); err != nil {
+			return "", err
+		}
+		if err := os.Chmod(sourcePath, originalMode|0o200); err != nil {
+			return "", err
+		}
+	}
 	if err := renameNoReplace(sourcePath, target); err != nil {
+		if modeAdjusted {
+			_ = os.Chmod(sourcePath, originalMode)
+		}
 		if errors.Is(err, fs.ErrExist) {
 			return "", ErrTargetExists
 		}
 		return "", err
 	}
+	if modeAdjusted {
+		if err := os.Chmod(target, originalMode); err != nil {
+			return "", err
+		}
+	}
 	if err := DurableBarrier(target); err != nil {
-		return "", err
+		return "", fmt.Errorf("quarantine durable barrier: %w", err)
 	}
 	if err := syncDirectory(filepath.Dir(target)); err != nil {
-		return "", err
+		return "", fmt.Errorf("quarantine parent barrier: %w", err)
 	}
 	return target, nil
 }

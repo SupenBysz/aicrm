@@ -41,7 +41,32 @@ type CompleteControlTaskInput struct {
 	PromotedBindingDigest      string
 }
 
-func (s *ControlStore) ClaimControlTask(ctx context.Context, ownerInstanceID, codexVersion string) (ControlTaskWork, bool, error) {
+// ControlTaskRecoveryItem is a database-fenced recovery instruction.  A
+// claimed item carries the only lease epoch allowed to touch its credential
+// candidate.  A terminalized item is safe for filesystem quarantine because
+// the database candidate was fenced first.
+type ControlTaskRecoveryItem struct {
+	Work              ControlTaskWork
+	CandidateRevision *int64
+	BindingStatus     string
+	BindingDigest     string
+	CleanupRevisions  []int64
+	Terminalized      bool
+}
+
+type controlTaskCandidate struct {
+	revision               int64
+	status                 string
+	digest                 string
+	accountFingerprint     string
+	planType               string
+	authMode               string
+	runtimeBindingID       string
+	runtimeBindingRevision int64
+}
+
+func (s *ControlStore) ClaimControlTask(ctx context.Context, ownerInstanceID, codexVersion string) (resultWork ControlTaskWork, found bool, err error) {
+	defer func() { err = classifyControlWrite(err) }()
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return ControlTaskWork{}, false, err
@@ -61,6 +86,12 @@ func (s *ControlStore) ClaimControlTask(ctx context.Context, ownerInstanceID, co
 		FROM ky_ai_executor_task task
 		WHERE task.task_type IN ('credential_verify','model_catalog_refresh','readiness_check')
 		  AND task.status='pending'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM ky_ai_executor_task active_task
+		    WHERE active_task.status IN ('waiting_executor','running')
+		      AND COALESCE(NULLIF(active_task.effective_executor_id,''),active_task.executor_id)
+		          = COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id)
+		  )
 		  AND NOT EXISTS (
 		    SELECT 1 FROM ky_ai_executor_operation_lease lease
 		    WHERE lease.executor_id=COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id)
@@ -224,6 +255,420 @@ func (s *ControlStore) ClaimControlTask(ctx context.Context, ownerInstanceID, co
 	return work, true, nil
 }
 
+// ClaimExpiredControlTaskRecovery uses the database clock for the complete
+// expiry decision and atomically transfers every persistent fence.  It never
+// returns a credential candidate until lease, task and binding all carry the
+// new epoch.  Invalid or non-resumable states are terminalized in the same
+// transaction before callers may quarantine filesystem paths.
+func (s *ControlStore) ClaimExpiredControlTaskRecovery(ctx context.Context, ownerInstanceID, codexVersion string) (resultItem ControlTaskRecoveryItem, found bool, err error) {
+	defer func() { err = classifyControlWrite(err) }()
+	if ownerInstanceID == "" || codexVersion == "" {
+		return ControlTaskRecoveryItem{}, false, ErrConflict
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	defer tx.Rollback()
+
+	var item ControlTaskRecoveryItem
+	work := &item.Work
+	var taskStatus, previousOwner string
+	var taskRevision, taskSequence int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT task.id,task.workspace_type,task.workspace_id,
+		       COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id),
+		       task.task_type,task.operation_id,
+		       COALESCE(task.executor_config_revision,0),
+		       COALESCE(task.credential_binding_revision,0),
+		       COALESCE(task.model_catalog_revision,0),task.runtime_binding_id,
+		       COALESCE(task.runtime_binding_revision,0),task.revocation_epoch,
+		       task.status,task.current_sequence,task.revision,
+		       lease.owner_instance_id,lease.lease_epoch
+		FROM ky_ai_executor_task task
+		JOIN ky_ai_executor_operation_lease lease
+		  ON lease.executor_id=COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id)
+		 AND lease.operation_id=task.operation_id
+		 AND lease.lease_epoch=task.lease_epoch
+		 AND lease.source_credential_revision=task.source_credential_revision
+		 AND lease.revocation_epoch=task.revocation_epoch
+		WHERE task.task_type IN ('credential_verify','model_catalog_refresh','readiness_check')
+		  AND task.status IN ('waiting_executor','running')
+		  AND lease.status='active' AND lease.lease_expires_at <= now()
+		ORDER BY task.updated_at,task.id
+		FOR UPDATE OF task,lease SKIP LOCKED LIMIT 1
+	`).Scan(
+		&work.TaskID, &work.WorkspaceType, &work.WorkspaceID, &work.ExecutorID,
+		&work.TaskType, &work.OperationID, &work.ExecutorConfigRevision,
+		&work.CredentialRevision, &work.CatalogRevision, &work.RuntimeBindingID,
+		&work.RuntimeBindingRevision, &work.RevocationEpoch, &taskStatus,
+		&taskSequence, &taskRevision, &previousOwner, &work.LeaseEpoch,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ControlTaskRecoveryItem{}, false, nil
+	}
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	work.OwnerInstanceID = previousOwner
+
+	var runtimeType, executorStatus, credentialStatus, runtimeBindingID, defaultModel string
+	var configRevision, currentCredential, catalogRevision, runtimeBindingRevision, revocationEpoch int64
+	var timeoutSeconds int
+	err = tx.QueryRowContext(ctx, `
+		SELECT runtime_type,status,config_revision,credential_status,
+		       COALESCE(current_credential_revision,0),catalog_revision,
+		       runtime_binding_id,runtime_binding_revision,revocation_epoch,
+		       COALESCE(default_model_key,''),task_timeout_seconds
+		FROM ky_ai_executor_config WHERE id=$1 FOR UPDATE
+	`, work.ExecutorID).Scan(
+		&runtimeType, &executorStatus, &configRevision, &credentialStatus,
+		&currentCredential, &catalogRevision, &runtimeBindingID,
+		&runtimeBindingRevision, &revocationEpoch, &defaultModel, &timeoutSeconds,
+	)
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	work.DefaultModelKey = defaultModel
+	work.TaskTimeoutSeconds = timeoutSeconds
+
+	var sourceStatus string
+	err = tx.QueryRowContext(ctx, `
+		SELECT status,account_fingerprint,plan_type,auth_mode,binding_digest
+		FROM ky_ai_executor_credential_binding
+		WHERE executor_id=$1 AND revision=$2 AND revocation_epoch=$3 FOR UPDATE
+	`, work.ExecutorID, work.CredentialRevision, work.RevocationEpoch).Scan(
+		&sourceStatus, &work.AccountFingerprint, &work.PlanType, &work.AuthMode, &work.BindingDigest,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		sourceStatus = ""
+	} else if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT revision,status,binding_digest,account_fingerprint,plan_type,auth_mode,
+		       runtime_binding_id,runtime_binding_revision
+		FROM ky_ai_executor_credential_binding
+		WHERE executor_id=$1 AND operation_id=$2 AND lease_epoch=$3
+		  AND source_credential_revision=$4 AND revocation_epoch=$5
+		  AND authorization_session_id IS NULL
+		  AND status IN ('prepared','committing')
+		ORDER BY revision FOR UPDATE
+	`, work.ExecutorID, work.OperationID, work.LeaseEpoch,
+		work.CredentialRevision, work.RevocationEpoch)
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	candidates := []controlTaskCandidate{}
+	for rows.Next() {
+		var candidate controlTaskCandidate
+		if err := rows.Scan(&candidate.revision, &candidate.status, &candidate.digest,
+			&candidate.accountFingerprint, &candidate.planType, &candidate.authMode,
+			&candidate.runtimeBindingID, &candidate.runtimeBindingRevision); err != nil {
+			_ = rows.Close()
+			return ControlTaskRecoveryItem{}, false, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Close(); err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+
+	validCredentialStatus := credentialStatus == "authorized" ||
+		(work.TaskType == "credential_verify" && credentialStatus == "expired")
+	validBase := taskStatus == "running" && runtimeType == "server" &&
+		executorStatus == "enabled" && validCredentialStatus && sourceStatus == "active" &&
+		configRevision == work.ExecutorConfigRevision && currentCredential == work.CredentialRevision &&
+		catalogRevision == work.CatalogRevision && runtimeBindingID == work.RuntimeBindingID &&
+		runtimeBindingRevision == work.RuntimeBindingRevision && revocationEpoch == work.RevocationEpoch &&
+		work.AccountFingerprint != "" && work.BindingDigest != ""
+	validCandidate := false
+	if validBase && len(candidates) == 1 {
+		candidate := candidates[0]
+		validCandidate = candidate.accountFingerprint == work.AccountFingerprint &&
+			candidate.planType == work.PlanType && candidate.authMode == work.AuthMode &&
+			candidate.runtimeBindingID == work.RuntimeBindingID &&
+			candidate.runtimeBindingRevision == work.RuntimeBindingRevision &&
+			candidate.digest != ""
+	}
+	if !validCandidate {
+		for _, candidate := range candidates {
+			item.CleanupRevisions = append(item.CleanupRevisions, candidate.revision)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE ky_ai_executor_credential_binding SET status='quarantined'
+			WHERE executor_id=$1 AND operation_id=$2 AND lease_epoch=$3
+			  AND source_credential_revision=$4 AND revocation_epoch=$5
+			  AND authorization_session_id IS NULL
+			  AND status IN ('prepared','committing')
+		`, work.ExecutorID, work.OperationID, work.LeaseEpoch,
+			work.CredentialRevision, work.RevocationEpoch); err != nil {
+			return ControlTaskRecoveryItem{}, false, err
+		}
+		failureCode := "executor_app_server_unavailable"
+		if len(candidates) > 0 {
+			failureCode = "credential_commit_failed"
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE ky_ai_executor_config SET readiness_status='degraded',
+			  readiness_reason_code='runtime_error',readiness_revision=readiness_revision+1,
+			  updated_at=now()
+			WHERE id=$1 AND current_credential_revision=$2 AND revocation_epoch=$3
+		`, work.ExecutorID, work.CredentialRevision, work.RevocationEpoch); err != nil {
+			return ControlTaskRecoveryItem{}, false, err
+		}
+		meta := taskEventMeta{
+			TaskID: work.TaskID, Status: "failed", WorkspaceType: work.WorkspaceType,
+			WorkspaceID: work.WorkspaceID, ExecutorID: work.ExecutorID,
+			OperationID: work.OperationID, LeaseEpoch: work.LeaseEpoch,
+			SourceCredentialRevision: work.CredentialRevision, RevocationEpoch: work.RevocationEpoch,
+		}
+		if err := terminalizeControlTask(ctx, tx, meta, taskRevision, taskSequence,
+			"failed", failureCode, nil); err != nil {
+			return ControlTaskRecoveryItem{}, false, err
+		}
+		result, err := tx.ExecContext(ctx, `
+			UPDATE ky_ai_executor_operation_lease SET status='expired',updated_at=now()
+			WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3
+			  AND lease_epoch=$4 AND status='active' AND lease_expires_at <= now()
+		`, work.ExecutorID, work.OperationID, previousOwner, work.LeaseEpoch)
+		if err != nil {
+			return ControlTaskRecoveryItem{}, false, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return ControlTaskRecoveryItem{}, false, ErrExecutorFenced
+		}
+		if err := tx.Commit(); err != nil {
+			return ControlTaskRecoveryItem{}, false, classifyControlWrite(err)
+		}
+		item.Terminalized = true
+		return item, true, nil
+	}
+
+	candidate := candidates[0]
+	newLeaseEpoch := work.LeaseEpoch + 1
+	result, err := tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_operation_lease
+		SET owner_instance_id=$1,lease_epoch=$2,lease_expires_at=now()+interval '30 seconds',
+		    status='active',updated_at=now()
+		WHERE executor_id=$3 AND operation_id=$4 AND owner_instance_id=$5
+		  AND lease_epoch=$6 AND source_credential_revision=$7 AND revocation_epoch=$8
+		  AND status='active' AND lease_expires_at <= now()
+	`, ownerInstanceID, newLeaseEpoch, work.ExecutorID, work.OperationID, previousOwner,
+		work.LeaseEpoch, work.CredentialRevision, work.RevocationEpoch)
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ControlTaskRecoveryItem{}, false, ErrExecutorFenced
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_credential_binding SET lease_epoch=$1
+		WHERE executor_id=$2 AND revision=$3 AND status=$4 AND operation_id=$5
+		  AND lease_epoch=$6 AND source_credential_revision=$7 AND revocation_epoch=$8
+	`, newLeaseEpoch, work.ExecutorID, candidate.revision, candidate.status,
+		work.OperationID, work.LeaseEpoch, work.CredentialRevision, work.RevocationEpoch)
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ControlTaskRecoveryItem{}, false, ErrExecutorFenced
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_task
+		SET lease_epoch=$1,revision=revision+1,current_sequence=current_sequence+1,updated_at=now()
+		WHERE id=$2 AND revision=$3 AND status='running' AND lease_epoch=$4
+		  AND operation_id=$5 AND source_credential_revision=$6 AND revocation_epoch=$7
+	`, newLeaseEpoch, work.TaskID, taskRevision, work.LeaseEpoch, work.OperationID,
+		work.CredentialRevision, work.RevocationEpoch)
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ControlTaskRecoveryItem{}, false, ErrExecutorFenced
+	}
+	work.LeaseEpoch = newLeaseEpoch
+	work.OwnerInstanceID = ownerInstanceID
+	meta := taskEventMeta{
+		TaskID: work.TaskID, Status: "running", WorkspaceType: work.WorkspaceType,
+		WorkspaceID: work.WorkspaceID, ExecutorID: work.ExecutorID,
+		OperationID: work.OperationID, LeaseEpoch: work.LeaseEpoch,
+		SourceCredentialRevision: work.CredentialRevision, RevocationEpoch: work.RevocationEpoch,
+	}
+	if err := insertTaskEvent(ctx, tx, meta, taskSequence+1, TaskEventChanged, "warning",
+		map[string]any{"status": "running", "recovery": "lease_takeover"}); err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO ky_ai_executor_runtime_worker (
+		  executor_id,runtime_binding_id,runtime_binding_revision,owner_instance_id,
+		  codex_version,queue_enabled,status,heartbeat_at
+		) VALUES ($1,$2,$3,$4,$5,false,'online',now())
+		ON CONFLICT (executor_id) DO UPDATE SET
+		  runtime_binding_id=EXCLUDED.runtime_binding_id,
+		  runtime_binding_revision=EXCLUDED.runtime_binding_revision,
+		  owner_instance_id=EXCLUDED.owner_instance_id,codex_version=EXCLUDED.codex_version,
+		  queue_enabled=false,status='online',revision=ky_ai_executor_runtime_worker.revision+1,
+		  heartbeat_at=now(),updated_at=now()
+	`, work.ExecutorID, work.RuntimeBindingID, work.RuntimeBindingRevision,
+		ownerInstanceID, codexVersion); err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ControlTaskRecoveryItem{}, false, classifyControlWrite(err)
+	}
+	item.CandidateRevision = &candidate.revision
+	item.BindingStatus = candidate.status
+	item.BindingDigest = candidate.digest
+	item.CleanupRevisions = []int64{candidate.revision}
+	return item, true, nil
+}
+
+// ListControlTaskCredentialCleanup first fences candidates belonging to an
+// already-terminal task, then returns idempotent filesystem cleanup work.  The
+// query intentionally continues to return old terminal rows: a crash between
+// the DB fence and filesystem quarantine is repaired on the next startup.
+func (s *ControlStore) ListControlTaskCredentialCleanup(ctx context.Context) ([]ControlTaskRecoveryItem, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_credential_binding binding
+		SET status='quarantined'
+		FROM ky_ai_executor_task task
+		WHERE task.task_type IN ('credential_verify','model_catalog_refresh','readiness_check')
+		  AND task.status IN ('completed','failed','cancelled','timeout')
+		  AND task.operation_id=binding.operation_id
+		  AND COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id)=binding.executor_id
+		  AND binding.authorization_session_id IS NULL
+		  AND binding.status IN ('prepared','committing')
+	`); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, classifyControlWrite(err)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT task.id,COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id),
+		       task.operation_id,binding.revision
+		FROM ky_ai_executor_task task
+		LEFT JOIN ky_ai_executor_credential_binding binding
+		  ON binding.executor_id=COALESCE(NULLIF(task.effective_executor_id,''),task.executor_id)
+		 AND binding.operation_id=task.operation_id
+		 AND binding.authorization_session_id IS NULL
+		 AND binding.status='quarantined'
+		WHERE task.task_type IN ('credential_verify','model_catalog_refresh','readiness_check')
+		  AND task.status IN ('completed','failed','cancelled','timeout')
+		  AND task.operation_id<>''
+		ORDER BY task.id,binding.revision
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	itemsByTask := map[string]*ControlTaskRecoveryItem{}
+	order := []string{}
+	for rows.Next() {
+		var taskID, executorID, operationID string
+		var revision sql.NullInt64
+		if err := rows.Scan(&taskID, &executorID, &operationID, &revision); err != nil {
+			return nil, err
+		}
+		item := itemsByTask[taskID]
+		if item == nil {
+			item = &ControlTaskRecoveryItem{Work: ControlTaskWork{
+				TaskID: taskID, ExecutorID: executorID, OperationID: operationID,
+			}, Terminalized: true}
+			itemsByTask[taskID] = item
+			order = append(order, taskID)
+		}
+		if revision.Valid {
+			item.CleanupRevisions = append(item.CleanupRevisions, revision.Int64)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items := make([]ControlTaskRecoveryItem, 0, len(order))
+	for _, taskID := range order {
+		items = append(items, *itemsByTask[taskID])
+	}
+	return items, nil
+}
+
+// ReconcileTerminalControlTaskCredential is the bounded runtime-cancel
+// cleanup path.  It authorizes filesystem cleanup only after locking the exact
+// task and proving that the same fenced operation is already terminal.  A
+// running task owned by a newer epoch is never modified.
+func (s *ControlStore) ReconcileTerminalControlTaskCredential(ctx context.Context, work ControlTaskWork) (ControlTaskRecoveryItem, bool, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	defer tx.Rollback()
+	var status, executorID, operationID string
+	var leaseEpoch, sourceRevision, revocationEpoch int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT status,COALESCE(NULLIF(effective_executor_id,''),executor_id),operation_id,
+		       lease_epoch,source_credential_revision,revocation_epoch
+		FROM ky_ai_executor_task WHERE id=$1 FOR UPDATE
+	`, work.TaskID).Scan(&status, &executorID, &operationID, &leaseEpoch, &sourceRevision, &revocationEpoch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ControlTaskRecoveryItem{}, false, ErrExecutorFenced
+	}
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if !terminalTaskStatus(status) || executorID != work.ExecutorID ||
+		operationID != work.OperationID || leaseEpoch != work.LeaseEpoch ||
+		sourceRevision != work.CredentialRevision || revocationEpoch != work.RevocationEpoch {
+		return ControlTaskRecoveryItem{}, false, ErrExecutorFenced
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT revision FROM ky_ai_executor_credential_binding
+		WHERE executor_id=$1 AND operation_id=$2 AND lease_epoch=$3
+		  AND source_credential_revision=$4 AND revocation_epoch=$5
+		  AND authorization_session_id IS NULL
+		  AND status IN ('prepared','committing')
+		ORDER BY revision FOR UPDATE
+	`, work.ExecutorID, work.OperationID, work.LeaseEpoch,
+		work.CredentialRevision, work.RevocationEpoch)
+	if err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	revisions := []int64{}
+	for rows.Next() {
+		var revision int64
+		if err := rows.Scan(&revision); err != nil {
+			_ = rows.Close()
+			return ControlTaskRecoveryItem{}, false, err
+		}
+		revisions = append(revisions, revision)
+	}
+	if err := rows.Close(); err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_credential_binding SET status='quarantined'
+		WHERE executor_id=$1 AND operation_id=$2 AND lease_epoch=$3
+		  AND source_credential_revision=$4 AND revocation_epoch=$5
+		  AND authorization_session_id IS NULL
+		  AND status IN ('prepared','committing')
+	`, work.ExecutorID, work.OperationID, work.LeaseEpoch,
+		work.CredentialRevision, work.RevocationEpoch); err != nil {
+		return ControlTaskRecoveryItem{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ControlTaskRecoveryItem{}, false, classifyControlWrite(err)
+	}
+	return ControlTaskRecoveryItem{
+		Work: work, CleanupRevisions: revisions, Terminalized: true,
+	}, true, nil
+}
+
 func (s *ControlStore) StartControlTask(ctx context.Context, work ControlTaskWork) error {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -283,7 +728,7 @@ func (s *ControlStore) RenewControlTaskLease(ctx context.Context, work ControlTa
 		WHERE lease.executor_id=$1 AND lease.operation_id=$2
 		  AND lease.owner_instance_id=$3 AND lease.lease_epoch=$4
 		  AND lease.source_credential_revision=$5 AND lease.revocation_epoch=$6
-		  AND lease.status='active' AND task.id=$7
+		  AND lease.status='active' AND lease.lease_expires_at>now() AND task.id=$7
 		  AND task.status IN ('waiting_executor','running')
 		  AND task.operation_id=lease.operation_id AND task.lease_epoch=lease.lease_epoch
 	`, work.ExecutorID, work.OperationID, work.OwnerInstanceID, work.LeaseEpoch,

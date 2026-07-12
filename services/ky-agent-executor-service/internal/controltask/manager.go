@@ -24,8 +24,13 @@ var safeCatalogValue = regexp.MustCompile(`^[A-Za-z0-9._:/+-]{1,160}$`)
 
 var controlTaskLeaseRenewalInterval = 10 * time.Second
 
+const controlTaskDatabaseTimeout = 10 * time.Second
+
 type RuntimeStore interface {
 	ClaimControlTask(context.Context, string, string) (store.ControlTaskWork, bool, error)
+	ClaimExpiredControlTaskRecovery(context.Context, string, string) (store.ControlTaskRecoveryItem, bool, error)
+	ListControlTaskCredentialCleanup(context.Context) ([]store.ControlTaskRecoveryItem, error)
+	ReconcileTerminalControlTaskCredential(context.Context, store.ControlTaskWork) (store.ControlTaskRecoveryItem, bool, error)
 	StartControlTask(context.Context, store.ControlTaskWork) error
 	RenewControlTaskLease(context.Context, store.ControlTaskWork) error
 	PrepareControlTaskCredentialRotation(context.Context, store.ControlTaskWork, string) (int64, error)
@@ -125,6 +130,17 @@ func (m *Manager) loop() {
 		if m.rootCtx.Err() != nil {
 			return
 		}
+		recoveryCtx, recoveryCancel := context.WithTimeout(m.rootCtx, 15*time.Second)
+		recovered, recoveryErr := m.reconcileOne(recoveryCtx)
+		recoveryCancel()
+		if recoveryErr != nil {
+			m.reportError(fmt.Errorf("reconcile expired control task: %w", recoveryErr))
+			m.waitForWork()
+			continue
+		}
+		if recovered {
+			continue
+		}
 		claimCtx, cancel := context.WithTimeout(m.rootCtx, 5*time.Second)
 		work, found, err := m.store.ClaimControlTask(claimCtx, m.cfg.OwnerInstanceID, m.cfg.CodexVersion)
 		cancel()
@@ -132,17 +148,20 @@ func (m *Manager) loop() {
 			m.process(work)
 			continue
 		}
-		timer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-m.rootCtx.Done():
-			timer.Stop()
-			return
-		case <-m.wake:
-			if !timer.Stop() {
-				<-timer.C
-			}
-		case <-timer.C:
+		m.waitForWork()
+	}
+}
+
+func (m *Manager) waitForWork() {
+	timer := time.NewTimer(500 * time.Millisecond)
+	select {
+	case <-m.rootCtx.Done():
+		timer.Stop()
+	case <-m.wake:
+		if !timer.Stop() {
+			<-timer.C
 		}
+	case <-timer.C:
 	}
 }
 
@@ -184,9 +203,10 @@ func (m *Manager) process(work store.ControlTaskWork) {
 		if failErr == nil {
 			m.cleanupFailedOperation(work, promotedRevision)
 		} else {
-			// A fenced or ambiguous database result must never cause a revision
-			// that may have become active to be moved on the filesystem.
-			m.cleanupFailedOperation(work, nil)
+			// Cancellation may have terminalized and fenced the task before the
+			// worker observes it.  Only an exact task-scoped DB reconciliation may
+			// authorize filesystem cleanup; ambiguous/new-epoch states touch none.
+			m.cleanupTerminalAfterFencedFailure(work)
 		}
 	}
 
@@ -242,9 +262,11 @@ func (m *Manager) process(work store.ControlTaskWork) {
 		verified := false
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = m.store.CompleteControlTask(ctx, store.CompleteControlTaskInput{
+		if err := m.store.CompleteControlTask(ctx, store.CompleteControlTaskInput{
 			Work: work, CredentialAuthorized: &verified, CodexVersion: m.cfg.CodexVersion,
-		})
+		}); err != nil {
+			m.reportError(fmt.Errorf("complete unauthorized credential verification task %s: %w", work.TaskID, err))
+		}
 		return
 	}
 
@@ -253,10 +275,13 @@ func (m *Manager) process(work store.ControlTaskWork) {
 		fail("verification_failed", false, nil)
 		return
 	}
-	catalog, err := sanitizeModels(models)
-	if err != nil {
-		fail("executor_app_server_unsupported", false, nil)
-		return
+	var catalog []store.ModelCatalogEntry
+	if work.TaskType != "credential_verify" {
+		catalog, err = sanitizeModels(models)
+		if err != nil {
+			fail("executor_app_server_unsupported", false, nil)
+			return
+		}
 	}
 	operationDigest, err := credentialfs.DigestTree(operationHome)
 	if err != nil {
@@ -297,7 +322,7 @@ func (m *Manager) process(work store.ControlTaskWork) {
 		if failErr == nil {
 			m.cleanupFailedOperation(work, promotedRevision)
 		} else {
-			m.cleanupFailedOperation(work, nil)
+			m.cleanupTerminalAfterFencedFailure(work)
 		}
 		return
 	}
@@ -318,7 +343,6 @@ func (m *Manager) process(work store.ControlTaskWork) {
 	if err := m.store.CompleteControlTask(ctx, input); err != nil {
 		// Commit errors are potentially ambiguous. Recovery reconciles a
 		// committing revision; never quarantine a revision that may be active.
-		m.cleanupFailedOperation(work, nil)
 		m.reportError(fmt.Errorf("complete control task %s: %w", work.TaskID, err))
 	}
 }
@@ -469,6 +493,22 @@ func (m *Manager) cleanupFailedOperation(work store.ControlTaskWork, promotedRev
 	}
 	if path, err := m.credentials.OperationPath(work.ExecutorID, work.OperationID); err == nil && existsDirectory(path) {
 		_ = m.credentials.RemoveEphemeral(path)
+	}
+}
+
+func (m *Manager) cleanupTerminalAfterFencedFailure(work store.ControlTaskWork) {
+	ctx, cancel := context.WithTimeout(context.Background(), controlTaskDatabaseTimeout)
+	defer cancel()
+	item, terminal, err := m.store.ReconcileTerminalControlTaskCredential(ctx, work)
+	if err != nil {
+		m.reportError(fmt.Errorf("reconcile terminal task %s after fenced failure: %w", work.TaskID, err))
+		return
+	}
+	if !terminal {
+		return
+	}
+	if err := m.quarantineRecoveryPaths(item); err != nil {
+		m.reportError(fmt.Errorf("cleanup terminal task %s after fenced failure: %w", work.TaskID, err))
 	}
 }
 

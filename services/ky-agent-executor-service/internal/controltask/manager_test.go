@@ -178,6 +178,82 @@ func TestManagerCredentialVerifyRecordsExpiredWithoutPromotingCOW(t *testing.T) 
 	}
 }
 
+func TestManagerCredentialVerifyAuthorizedDoesNotRequireModelCatalog(t *testing.T) {
+	credentials, _ := credentialfs.New(filepath.Join(t.TempDir(), "executors"))
+	staging, _ := credentials.CreateStaging("aiexec_1", "auth_1")
+	_ = os.WriteFile(filepath.Join(staging, "auth.json"), []byte("original"), 0o600)
+	digest, _ := credentialfs.DigestTree(staging)
+	_, _ = credentials.Promote("aiexec_1", "auth_1", 1, digest)
+	email := "owner@example.com"
+	work := store.ControlTaskWork{
+		TaskID: "task_verify_authorized", WorkspaceType: "platform", WorkspaceID: "platform_root",
+		ExecutorID: "aiexec_1", TaskType: "credential_verify", OperationID: "control_verify_authorized",
+		OwnerInstanceID: "owner_1", LeaseEpoch: 1, ExecutorConfigRevision: 7,
+		CredentialRevision: 1, CatalogRevision: 2, RuntimeBindingID: "server_1",
+		RuntimeBindingRevision: 1, RevocationEpoch: 4,
+		AccountFingerprint: digestString("chatgpt\n" + email), BindingDigest: digest,
+		TaskTimeoutSeconds: 30,
+	}
+	runtimeStore := newFakeRuntimeStore(work)
+	manager, _ := New(runtimeStore, &scriptedLauncher{email: email}, credentials, Config{
+		OwnerInstanceID: "owner_1", CodexVersion: "0.144.1",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+	select {
+	case completed := <-runtimeStore.completed:
+		if completed.CredentialAuthorized == nil || !*completed.CredentialAuthorized ||
+			len(completed.Models) != 0 {
+			t.Fatalf("completion=%#v", completed)
+		}
+	case failure := <-runtimeStore.failed:
+		t.Fatalf("authorized credential verification failed: %#v", failure)
+	case <-time.After(5 * time.Second):
+		t.Fatal("authorized credential verification did not complete")
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	manager.Shutdown(shutdownCtx)
+}
+
+func TestManagerCredentialVerifyExpiredReportsCompletionError(t *testing.T) {
+	credentials, _ := credentialfs.New(filepath.Join(t.TempDir(), "executors"))
+	staging, _ := credentials.CreateStaging("aiexec_1", "auth_1")
+	_ = os.WriteFile(filepath.Join(staging, "auth.json"), []byte("original"), 0o600)
+	digest, _ := credentialfs.DigestTree(staging)
+	_, _ = credentials.Promote("aiexec_1", "auth_1", 1, digest)
+	work := store.ControlTaskWork{
+		TaskID: "task_verify_expired_error", WorkspaceType: "platform", WorkspaceID: "platform_root",
+		ExecutorID: "aiexec_1", TaskType: "credential_verify", OperationID: "control_verify_expired_error",
+		OwnerInstanceID: "owner_1", LeaseEpoch: 1, ExecutorConfigRevision: 7,
+		CredentialRevision: 1, CatalogRevision: 2, RuntimeBindingID: "server_1",
+		RuntimeBindingRevision: 1, RevocationEpoch: 4,
+		AccountFingerprint: digestString("chatgpt\nowner@example.com"), BindingDigest: digest,
+		TaskTimeoutSeconds: 30,
+	}
+	runtimeStore := newFakeRuntimeStore(work)
+	runtimeStore.completeErr = context.DeadlineExceeded
+	reported := make(chan error, 1)
+	manager, _ := New(runtimeStore, &scriptedLauncher{requiresAuth: true}, credentials, Config{
+		OwnerInstanceID: "owner_1", CodexVersion: "0.144.1", ReportError: func(err error) { reported <- err },
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager.Start(ctx)
+	select {
+	case err := <-reported:
+		if err == nil || !strings.Contains(err.Error(), work.TaskID) {
+			t.Fatalf("reported error=%v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("unauthorized credential completion error was silently discarded")
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutdownCancel()
+	manager.Shutdown(shutdownCtx)
+}
+
 type fakeRuntimeStore struct {
 	mu              sync.Mutex
 	work            store.ControlTaskWork
@@ -189,6 +265,9 @@ type fakeRuntimeStore struct {
 	completed       chan store.CompleteControlTaskInput
 	failed          chan fakeTaskFailure
 	completeErr     error
+	recoveryItems   []store.ControlTaskRecoveryItem
+	recoveryIndex   int
+	cleanupItems    []store.ControlTaskRecoveryItem
 }
 
 type fakeTaskFailure struct {
@@ -212,6 +291,27 @@ func (s *fakeRuntimeStore) ClaimControlTask(context.Context, string, string) (st
 	}
 	s.claimed = true
 	return s.work, true, nil
+}
+
+func (s *fakeRuntimeStore) ClaimExpiredControlTaskRecovery(context.Context, string, string) (store.ControlTaskRecoveryItem, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.recoveryIndex >= len(s.recoveryItems) {
+		return store.ControlTaskRecoveryItem{}, false, nil
+	}
+	item := s.recoveryItems[s.recoveryIndex]
+	s.recoveryIndex++
+	return item, true, nil
+}
+
+func (s *fakeRuntimeStore) ListControlTaskCredentialCleanup(context.Context) ([]store.ControlTaskRecoveryItem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]store.ControlTaskRecoveryItem(nil), s.cleanupItems...), nil
+}
+
+func (s *fakeRuntimeStore) ReconcileTerminalControlTaskCredential(context.Context, store.ControlTaskWork) (store.ControlTaskRecoveryItem, bool, error) {
+	return store.ControlTaskRecoveryItem{}, false, store.ErrExecutorFenced
 }
 
 func (s *fakeRuntimeStore) StartControlTask(context.Context, store.ControlTaskWork) error {

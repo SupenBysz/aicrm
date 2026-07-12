@@ -65,6 +65,8 @@ assert_scalar "SELECT has_table_privilege('ky_agent_executor_writer','ky_matrix_
 CONTROL_URL="postgresql://${LOGIN_ROLE}:${LOGIN_PASSWORD}@127.0.0.1:5432/${TEST_DB}?sslmode=disable"
 (cd "$ROOT_DIR/services/ky-agent-executor-service" && \
   GOWORK=off KY_AGENT_EXECUTOR_CONTROL_TEST_DATABASE_URL="$CONTROL_URL" \
-  go test -run 'Test(ControlStoreAgainstPostgres|PublicTaskCancelPersistsTerminalStreamsAgainstPostgres|ControlTaskCommandsAgainstPostgres)' -v ./internal/store)
+  go test -run 'Test(ControlStoreAgainstPostgres|PublicTaskCancelPersistsTerminalStreamsAgainstPostgres|ControlTaskCommandsAgainstPostgres|ControlTaskWorkerLifecycleAgainstPostgres|ControlTaskWorkerConcurrentClaimAgainstPostgres|ControlTaskWorkerExpiredLeaseRecoveryFencesOldEpochAgainstPostgres|ControlTaskWorkerCancelReconcilesExactCredentialCandidateAgainstPostgres)' -v ./internal/store && \
+  GOWORK=off KY_AGENT_EXECUTOR_CONTROL_TEST_DATABASE_URL="$CONTROL_URL" \
+  go test -run 'TestControlTaskRecovery(FilesystemMatrix|NoCandidate)AgainstPostgres' -v ./internal/controltask)
 
 echo 'Agent Executor P2A control contract passed'

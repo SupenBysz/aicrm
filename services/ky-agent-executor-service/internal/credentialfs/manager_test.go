@@ -148,6 +148,30 @@ func TestOperationPromotionCreatesANewImmutableRevision(t *testing.T) {
 	}
 }
 
+func TestImmutableRevisionCanBeQuarantinedWithoutRemainingWritable(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server quarantine is Linux-only")
+	}
+	manager, _ := New(filepath.Join(t.TempDir(), "executors"))
+	staging, _ := manager.CreateStaging("executor_1", "session_1")
+	_ = os.WriteFile(filepath.Join(staging, "auth.json"), []byte("credential"), 0o600)
+	digest, _ := DigestTree(staging)
+	revision, err := manager.Promote("executor_1", "session_1", 1, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	quarantined, err := manager.Quarantine("executor_1", revision, "revision_1_failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(revision); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("revision source survived quarantine: %v", err)
+	}
+	if err := ValidateReadOnlyTree(quarantined); err != nil {
+		t.Fatalf("quarantined revision became writable: %v", err)
+	}
+}
+
 func TestPathsRejectTraversalSymlinksAndArbitraryDeletion(t *testing.T) {
 	manager, _ := New(filepath.Join(t.TempDir(), "executors"))
 	for _, value := range []string{"../escape", "with/slash", "", "with:colon"} {
