@@ -5,22 +5,63 @@ import {
   rejectLegacyCodexExecutorAuthorization
 } from "../codex-executor-auth-safety-policy";
 import {
-  cancelCodexAuthorization,
-  checkCodexAuthorizationReadiness,
-  logoutCodexCredential,
-  queryCodexAuthorizationCapabilities,
-  queryCodexAuthorizationSnapshot,
-  queryCodexModelCatalog,
-  refreshCodexModelCatalog,
-  reopenCodexAuthorization,
-  startCodexAuthorization,
-  verifyCodexAuthorization
+  CODEX_AUTHORIZATION_INPUT_INVALID_ERROR,
+  CODEX_AUTHORIZATION_RUNTIME_FAILED_ERROR,
+  CODEX_DESKTOP_AUTHORIZATION_RUNTIME_READY,
+  createCodexAuthorizationBridgeV2Handlers,
+  type CodexAuthorizationBridgeV2Handlers,
+  type CodexAuthorizationBridgeV2RuntimeProvider
 } from "../codex-authorization-bridge-v2-policy";
+import type { DesktopCommandResult } from "../../shared/types";
 
-type FailClosedHandler = (input: unknown) => unknown;
+type BridgeHandler<T = unknown> = (input: unknown) => Promise<DesktopCommandResult<T>>;
 
-function invokeSingleArgument(args: readonly unknown[], handler: FailClosedHandler) {
-  return handler(args.length === 1 ? args[0] : undefined);
+interface IpcMainLike {
+  handle(
+    channel: string,
+    listener: (event: unknown, ...args: unknown[]) => unknown
+  ): unknown;
+}
+
+export interface RegisterCodexExecutorIpcOptions {
+  registrar?: IpcMainLike;
+  bridgeV2Handlers?: CodexAuthorizationBridgeV2Handlers;
+  runtimeProvider?: CodexAuthorizationBridgeV2RuntimeProvider;
+  ready?: boolean;
+}
+
+function invalid<T>(): DesktopCommandResult<T> {
+  return { ok: false, error: { ...CODEX_AUTHORIZATION_INPUT_INVALID_ERROR } };
+}
+
+function runtimeFailed<T>(): DesktopCommandResult<T> {
+  return { ok: false, error: { ...CODEX_AUTHORIZATION_RUNTIME_FAILED_ERROR } };
+}
+
+async function invokeSafely<T>(
+  operation: () => Promise<DesktopCommandResult<T>>
+): Promise<DesktopCommandResult<T>> {
+  try {
+    return await operation();
+  } catch {
+    return runtimeFailed();
+  }
+}
+
+function invokeNoArguments<T>(
+  args: readonly unknown[],
+  handler: () => Promise<DesktopCommandResult<T>>
+): Promise<DesktopCommandResult<T>> {
+  return args.length === 0 ? invokeSafely(handler) : Promise.resolve(invalid());
+}
+
+function invokeSingleArgument<T>(
+  args: readonly unknown[],
+  handler: BridgeHandler<T>
+): Promise<DesktopCommandResult<T>> {
+  return args.length === 1
+    ? invokeSafely(() => handler(args[0]))
+    : Promise.resolve(invalid());
 }
 
 /**
@@ -28,43 +69,50 @@ function invokeSingleArgument(args: readonly unknown[], handler: FailClosedHandl
  * start Codex, inspect credential directories, or report authorization state.
  * Bridge v2 will replace these channels with ticket-bound trusted commands.
  */
-export function registerCodexExecutorIpc() {
-  ipcMain.handle(IPC_CHANNELS.codexExecutorAuthorize, async () => rejectLegacyCodexExecutorAuthorization());
-  ipcMain.handle(IPC_CHANNELS.codexExecutorGetAuthStatus, async (_event, ...args: unknown[]) =>
+export function registerCodexExecutorIpc(
+  options: RegisterCodexExecutorIpcOptions = {}
+): void {
+  const registrar = options.registrar ?? ipcMain;
+  const bridge = options.bridgeV2Handlers ?? createCodexAuthorizationBridgeV2Handlers({
+    ready: options.ready ?? CODEX_DESKTOP_AUTHORIZATION_RUNTIME_READY,
+    runtimeProvider: options.runtimeProvider
+  });
+
+  registrar.handle(IPC_CHANNELS.codexExecutorAuthorize, async () => rejectLegacyCodexExecutorAuthorization());
+  registrar.handle(IPC_CHANNELS.codexExecutorGetAuthStatus, async (_event, ...args: unknown[]) =>
     queryLegacyCodexExecutorAuthStatus(args)
   );
 
-  // Bridge v2 is intentionally registered before the trusted device runtime
-  // exists. Every method validates the locked DTO and then fails closed. No
-  // ticket is decoded, no App Server starts, and no credential state changes.
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationGetCapabilities, async (_event, ...args: unknown[]) =>
-    queryCodexAuthorizationCapabilities(args)
+  // Production passes no runtime provider and keeps the independent ready gate
+  // false. Tests may inject either the already-gated handler set or a provider.
+  registrar.handle(IPC_CHANNELS.codexAuthorizationGetCapabilities, async (_event, ...args: unknown[]) =>
+    invokeNoArguments(args, bridge.getCapabilities)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationStart, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, startCodexAuthorization)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationStart, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.start)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationGetSnapshot, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, queryCodexAuthorizationSnapshot)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationGetSnapshot, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.getSnapshot)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationCancel, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, cancelCodexAuthorization)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationCancel, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.cancel)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationReopen, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, reopenCodexAuthorization)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationReopen, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.reopen)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationVerify, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, verifyCodexAuthorization)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationVerify, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.verify)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationCheckReadiness, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, checkCodexAuthorizationReadiness)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationCheckReadiness, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.readiness)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationGetModelCatalog, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, queryCodexModelCatalog)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationGetModelCatalog, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.getCatalog)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationRefreshModelCatalog, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, refreshCodexModelCatalog)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationRefreshModelCatalog, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.refresh)
   );
-  ipcMain.handle(IPC_CHANNELS.codexAuthorizationLogout, async (_event, ...args: unknown[]) =>
-    invokeSingleArgument(args, logoutCodexCredential)
+  registrar.handle(IPC_CHANNELS.codexAuthorizationLogout, async (_event, ...args: unknown[]) =>
+    invokeSingleArgument(args, bridge.logout)
   );
 }

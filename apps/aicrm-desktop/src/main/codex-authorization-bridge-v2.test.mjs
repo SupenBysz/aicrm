@@ -3,9 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   CODEX_AUTHORIZATION_INPUT_INVALID_ERROR,
+  CODEX_AUTHORIZATION_RUNTIME_FAILED_ERROR,
   CODEX_AUTHORIZATION_RUNTIME_UNAVAILABLE_ERROR,
+  CODEX_DESKTOP_AUTHORIZATION_RUNTIME_READY,
   cancelCodexAuthorization,
   checkCodexAuthorizationReadiness,
+  createCodexAuthorizationBridgeV2Handlers,
   logoutCodexCredential,
   queryCodexAuthorizationCapabilities,
   queryCodexAuthorizationSnapshot,
@@ -57,6 +60,47 @@ const validLogout = {
   commandTicket
 };
 
+function runtimeFixture(implementation = async (method, input) => ({
+  ok: true,
+  data: { method, input }
+})) {
+  const calls = [];
+  const invoke = async (method, input) => {
+    calls.push([method, input]);
+    return implementation(method, input);
+  };
+  return {
+    calls,
+    runtime: {
+      capabilities: () => invoke("capabilities", undefined),
+      start: (input) => invoke("start", input),
+      getSnapshot: (input) => invoke("getSnapshot", input),
+      cancel: (input) => invoke("cancel", input),
+      reopen: (input) => invoke("reopen", input),
+      verify: (input) => invoke("verify", input),
+      readiness: (input) => invoke("readiness", input),
+      getCatalog: (input) => invoke("getCatalog", input),
+      refresh: (input) => invoke("refresh", input),
+      logout: (input) => invoke("logout", input)
+    }
+  };
+}
+
+function handlerCases(handlers) {
+  return [
+    ["capabilities", () => handlers.getCapabilities(), undefined],
+    ["start", () => handlers.start(validStart), validStart],
+    ["getSnapshot", () => handlers.getSnapshot("authsession_1"), "authsession_1"],
+    ["cancel", () => handlers.cancel(validSessionCommand), validSessionCommand],
+    ["reopen", () => handlers.reopen(validSessionCommand), validSessionCommand],
+    ["verify", () => handlers.verify(validVerify), validVerify],
+    ["readiness", () => handlers.readiness(validReadiness), validReadiness],
+    ["getCatalog", () => handlers.getCatalog("aiexec_1"), "aiexec_1"],
+    ["refresh", () => handlers.refresh(validCatalogRefresh), validCatalogRefresh],
+    ["logout", () => handlers.logout(validLogout), validLogout]
+  ];
+}
+
 test("Bridge v2 methods exist but never advertise or execute an unavailable trusted runtime", () => {
   const cases = [
     ["capabilities", () => queryCodexAuthorizationCapabilities([])],
@@ -79,6 +123,133 @@ test("Bridge v2 methods exist but never advertise or execute an unavailable trus
     assert.equal(serialized.includes(handoffTicket), false, `${name} echoed handoff ticket`);
     assert.equal(serialized.includes(commandTicket), false, `${name} echoed command ticket`);
   }
+});
+
+test("Bridge v2 independent production gate is source-locked false and never consults an injected runtime", async () => {
+  assert.equal(CODEX_DESKTOP_AUTHORIZATION_RUNTIME_READY, false);
+  const current = runtimeFixture();
+  let providerCalls = 0;
+  const handlers = createCodexAuthorizationBridgeV2Handlers({
+    ready: CODEX_DESKTOP_AUTHORIZATION_RUNTIME_READY,
+    runtimeProvider() {
+      providerCalls += 1;
+      return current.runtime;
+    }
+  });
+
+  for (const [name, execute] of handlerCases(handlers)) {
+    assert.deepEqual(
+      await execute(),
+      { ok: false, error: CODEX_AUTHORIZATION_RUNTIME_UNAVAILABLE_ERROR },
+      String(name)
+    );
+  }
+  assert.equal(providerCalls, 0);
+  assert.deepEqual(current.calls, []);
+
+  const missingRuntime = createCodexAuthorizationBridgeV2Handlers({
+    ready: true,
+    runtime: null
+  });
+  for (const [name, execute] of handlerCases(missingRuntime)) {
+    assert.deepEqual(
+      await execute(),
+      { ok: false, error: CODEX_AUTHORIZATION_RUNTIME_UNAVAILABLE_ERROR },
+      `missing ${name}`
+    );
+  }
+
+  const [policy, index] = await Promise.all([
+    readFile(new URL("./codex-authorization-bridge-v2-policy.ts", import.meta.url), "utf8"),
+    readFile(new URL("./index.ts", import.meta.url), "utf8")
+  ]);
+  assert.match(
+    policy,
+    /export const CODEX_DESKTOP_AUTHORIZATION_RUNTIME_READY = false;/
+  );
+  assert.match(index, /registerCodexExecutorIpc\(\);/);
+});
+
+test("Bridge v2 true-gated runtime delegates every exact DTO asynchronously without cloning", async () => {
+  const results = new Map();
+  const current = runtimeFixture(async (method, input) => {
+    await Promise.resolve();
+    const result = { ok: true, data: { delegatedBy: method } };
+    results.set(method, result);
+    return result;
+  });
+  const handlers = createCodexAuthorizationBridgeV2Handlers({
+    ready: true,
+    runtime: current.runtime
+  });
+
+  const expectedCalls = [];
+  for (const [method, execute, input] of handlerCases(handlers)) {
+    const result = await execute();
+    assert.strictEqual(result, results.get(method));
+    expectedCalls.push([method, input]);
+  }
+  assert.deepEqual(current.calls, expectedCalls);
+  for (let index = 0; index < expectedCalls.length; index += 1) {
+    assert.strictEqual(current.calls[index][1], expectedCalls[index][1]);
+  }
+});
+
+test("Bridge v2 exact validators run before true-gated delegation", async () => {
+  const current = runtimeFixture();
+  const handlers = createCodexAuthorizationBridgeV2Handlers({ ready: true, runtime: current.runtime });
+  const invalidCases = [
+    () => handlers.start({ ...validStart, extra: true }),
+    () => handlers.getSnapshot("../authsession_1"),
+    () => handlers.cancel({ ...validSessionCommand, commandTicket: "raw-ticket" }),
+    () => handlers.reopen({ ...validSessionCommand, expectedSessionRevision: 0 }),
+    () => handlers.verify({ ...validVerify, expectedCredentialRevision: 0 }),
+    () => handlers.readiness({ ...validReadiness, expectedCatalogRevision: -1 }),
+    () => handlers.getCatalog("https://example.invalid"),
+    () => handlers.refresh({ ...validCatalogRefresh, result: "ready" }),
+    () => handlers.logout({ ...validLogout, credentialRevision: 1.5 })
+  ];
+  for (const execute of invalidCases) {
+    assert.deepEqual(await execute(), {
+      ok: false,
+      error: CODEX_AUTHORIZATION_INPUT_INVALID_ERROR
+    });
+  }
+  assert.deepEqual(current.calls, []);
+});
+
+test("Bridge v2 normalizes every runtime exception without ticket, path, or raw message leakage", async () => {
+  const sensitive = `${handoffTicket} ${commandTicket} /Users/private/.codex raw runtime failure`;
+  const current = runtimeFixture(async () => {
+    await Promise.resolve();
+    throw new Error(sensitive);
+  });
+  const handlers = createCodexAuthorizationBridgeV2Handlers({ ready: true, runtime: current.runtime });
+  for (const [name, execute] of handlerCases(handlers)) {
+    const result = await execute();
+    assert.deepEqual(
+      result,
+      { ok: false, error: CODEX_AUTHORIZATION_RUNTIME_FAILED_ERROR },
+      String(name)
+    );
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes(handoffTicket), false);
+    assert.equal(serialized.includes(commandTicket), false);
+    assert.equal(serialized.includes("/Users/private"), false);
+    assert.equal(serialized.includes("raw runtime failure"), false);
+  }
+  assert.equal(current.calls.length, 10);
+
+  const providerFailure = createCodexAuthorizationBridgeV2Handlers({
+    ready: true,
+    runtimeProvider() {
+      throw new Error(sensitive);
+    }
+  });
+  assert.deepEqual(await providerFailure.getCapabilities(), {
+    ok: false,
+    error: CODEX_AUTHORIZATION_RUNTIME_FAILED_ERROR
+  });
 });
 
 test("Bridge v2 rejects raw IDs, missing tickets, extra fields, and malformed revisions", () => {
@@ -141,8 +312,16 @@ test("Bridge v2 physical channels, preload surface, and unsubscribe are explicit
   }
   assert.match(preloadBridge, /ipcRenderer\.off\(IPC_CHANNELS\.codexAuthorizationChanged, handler\)/);
   assert.match(preloadBridge, /try\s*{\s*listener\(payload\)/);
-  assert.match(mainIpc, /invokeSingleArgument\(args, startCodexAuthorization\)/);
-  assert.match(mainIpc, /invokeSingleArgument\(args, logoutCodexCredential\)/);
+  assert.match(mainIpc, /bridgeV2Handlers\?: CodexAuthorizationBridgeV2Handlers/);
+  assert.match(mainIpc, /runtimeProvider\?: CodexAuthorizationBridgeV2RuntimeProvider/);
+  assert.match(mainIpc, /return args\.length === 0 \? invokeSafely\(handler\) : Promise\.resolve\(invalid\(\)\)/);
+  assert.match(mainIpc, /return args\.length === 1/);
+  assert.match(mainIpc, /catch\s*{\s*return runtimeFailed\(\)/);
+  assert.match(mainIpc, /invokeNoArguments\(args, bridge\.getCapabilities\)/);
+  assert.match(mainIpc, /invokeSingleArgument\(args, bridge\.start\)/);
+  assert.match(mainIpc, /invokeSingleArgument\(args, bridge\.logout\)/);
+  assert.match(mainIpc, /rejectLegacyCodexExecutorAuthorization\(\)/);
+  assert.match(mainIpc, /queryLegacyCodexExecutorAuthStatus\(args\)/);
 });
 
 test("Bridge v2 contract uses the standard system event envelope and safe snapshot", async () => {
