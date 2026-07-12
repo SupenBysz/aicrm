@@ -35,12 +35,26 @@ func (f *runtimeStoreFake) PrepareServerCredential(_ context.Context, input stor
 func (f *runtimeStoreFake) MarkCredentialCommitting(context.Context, store.CredentialPreparation, string) error {
 	return nil
 }
+func (f *runtimeStoreFake) RenewServerCredentialLease(context.Context, store.CredentialPreparation, string) error {
+	return nil
+}
 func (f *runtimeStoreFake) ActivateServerCredential(_ context.Context, input store.ActivateServerCredentialInput) (store.AuthorizationSessionProjection, error) {
 	f.mu.Lock()
 	f.activated = input
 	f.mu.Unlock()
 	close(f.done)
 	return store.AuthorizationSessionProjection{ID: input.SessionID, Status: "succeeded"}, nil
+}
+func (f *runtimeStoreFake) QuarantineServerCredential(_ context.Context, sessionID string, _ store.CredentialPreparation, _ string, status, code string) (store.AuthorizationSessionProjection, bool, error) {
+	f.mu.Lock()
+	f.failed = code
+	f.mu.Unlock()
+	select {
+	case <-f.done:
+	default:
+		close(f.done)
+	}
+	return store.AuthorizationSessionProjection{ID: sessionID, Status: status}, true, nil
 }
 func (f *runtimeStoreFake) FailAuthorizationSession(_ context.Context, _ string, _ string, _ string, code string) (store.AuthorizationSessionProjection, error) {
 	f.mu.Lock()
@@ -54,12 +68,31 @@ func (f *runtimeStoreFake) FailAuthorizationSession(_ context.Context, _ string,
 	return store.AuthorizationSessionProjection{Status: "failed"}, nil
 }
 
-type fakeLauncher struct{ complete chan struct{} }
+type fakeLauncher struct {
+	complete          chan struct{}
+	verificationEmail string
+	mu                sync.Mutex
+	launches          int
+	refreshTokens     []bool
+}
 
 func (l *fakeLauncher) Launch(_ context.Context, _ string, home string) (appserver.Process, error) {
 	_ = os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"credential":"test"}`), 0o600)
+	l.mu.Lock()
+	l.launches++
+	launchNumber := l.launches
+	l.mu.Unlock()
 	p := newProtocolProcess()
-	go serveProtocol(p, l.complete)
+	go serveProtocol(p, l.complete, func(refresh bool) {
+		l.mu.Lock()
+		l.refreshTokens = append(l.refreshTokens, refresh)
+		l.mu.Unlock()
+	}, func() string {
+		if launchNumber > 1 && l.verificationEmail != "" {
+			return l.verificationEmail
+		}
+		return "person@example.com"
+	})
 	return p, nil
 }
 
@@ -84,7 +117,7 @@ func (p *protocolProcess) Kill() error {
 	return nil
 }
 
-func serveProtocol(p *protocolProcess, complete <-chan struct{}) {
+func serveProtocol(p *protocolProcess, complete <-chan struct{}, recordRefresh func(bool), accountEmail func() string) {
 	decoder := json.NewDecoder(p.inR)
 	for {
 		var request map[string]any
@@ -101,7 +134,10 @@ func serveProtocol(p *protocolProcess, complete <-chan struct{}) {
 		case "account/login/start":
 			result = map[string]any{"type": "chatgptDeviceCode", "loginId": "login-memory-only", "verificationUrl": "https://auth.openai.com/codex/device", "userCode": "ABCD-EFGH"}
 		case "account/read":
-			result = map[string]any{"account": map[string]any{"type": "chatgpt", "email": "person@example.com", "planType": "plus"}, "requiresOpenaiAuth": false}
+			params, _ := request["params"].(map[string]any)
+			refresh, _ := params["refreshToken"].(bool)
+			recordRefresh(refresh)
+			result = map[string]any{"account": map[string]any{"type": "chatgpt", "email": accountEmail(), "planType": "plus"}, "requiresOpenaiAuth": false}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "catalog_1", "model": "gpt-5.6", "displayName": "GPT-5.6", "hidden": false, "inputModalities": []string{"text", "image"}, "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "high", "description": "safe"}}}}, "nextCursor": nil}
 		}
@@ -175,6 +211,73 @@ func TestManagerKeepsChallengeInMemoryAndPromotesVerifiedCredential(t *testing.T
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	manager.Shutdown(shutdownCtx)
+	launcher.mu.Lock()
+	launches := launcher.launches
+	refreshTokens := append([]bool(nil), launcher.refreshTokens...)
+	launcher.mu.Unlock()
+	if launches != 2 || len(refreshTokens) != 2 || !refreshTokens[0] || refreshTokens[1] {
+		t.Fatalf("post-promotion verification contract launches=%d refreshTokens=%v", launches, refreshTokens)
+	}
+	verificationHome, err := credentials.OperationPath("executor_1", "auth_session_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(verificationHome); !os.IsNotExist(err) {
+		t.Fatalf("verification COW survived: %v", err)
+	}
+}
+
+func TestManagerQuarantinesPromotedRevisionWhenCOWAccountChanges(t *testing.T) {
+	credentials, err := credentialfs.New(filepath.Join(t.TempDir(), "executors"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeStore := &runtimeStoreFake{done: make(chan struct{})}
+	launcher := &fakeLauncher{complete: make(chan struct{}), verificationEmail: "other@example.com"}
+	manager, err := New(runtimeStore, launcher, credentials, Config{OwnerInstanceID: "owner_1", CodexVersion: "0.144.1", RuntimeBindingID: "server_1", RuntimeBindingRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := store.AuthorizationSessionProjection{ID: "session_2", ExecutorID: "executor_1", RuntimeType: "server", FlowType: "device_code", Status: "starting", Revision: 1, Sequence: 1, RequestedBy: "user_1", SessionDeadlineAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)}
+	if err := manager.Start(session); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := manager.UserAction(session.ID, "user_1"); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(launcher.complete)
+	select {
+	case <-runtimeStore.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("authorization did not finish")
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	manager.Shutdown(shutdownCtx)
+	runtimeStore.mu.Lock()
+	activated, failed := runtimeStore.activated, runtimeStore.failed
+	runtimeStore.mu.Unlock()
+	if activated.SessionID != "" || failed != "verification_failed" {
+		t.Fatalf("activated=%#v failed=%q", activated, failed)
+	}
+	revision, err := credentials.RevisionPath("executor_1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(revision); !os.IsNotExist(err) {
+		t.Fatalf("failed revision was not removed from active namespace: %v", err)
+	}
+	quarantine, err := credentials.QuarantinePath("executor_1", "failed_revision_1_"+digestString(session.ID)[:24])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(quarantine); err != nil || !info.IsDir() {
+		t.Fatalf("failed revision was not quarantined: %s err=%v", quarantine, err)
+	}
 }
 
 func TestChallengeValidationAndCatalogSafety(t *testing.T) {

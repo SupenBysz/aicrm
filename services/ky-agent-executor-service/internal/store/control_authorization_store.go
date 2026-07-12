@@ -325,6 +325,7 @@ type CredentialPreparationInput struct {
 
 type CredentialPreparation struct {
 	ExecutorID               string
+	OwnerInstanceID          string
 	CredentialRevision       int64
 	SessionRevision          int64
 	LeaseEpoch               int64
@@ -400,11 +401,13 @@ func (s *ControlStore) PrepareServerCredential(ctx context.Context, input Creden
 		INSERT INTO ky_ai_executor_credential_binding (
 		  executor_id, revision, status, authorization_session_id, runtime_type,
 		  runtime_binding_id, runtime_binding_revision, account_fingerprint,
-		  auth_mode, plan_type, binding_digest, revocation_epoch
-		) VALUES ($1,$2,'prepared',$3,'server',$4,$5,$6,'device_code',$7,$8,$9)
+		  auth_mode, plan_type, binding_digest, revocation_epoch,
+		  operation_id, lease_epoch, source_credential_revision, digest_algorithm
+		) VALUES ($1,$2,'prepared',$3,'server',$4,$5,$6,'device_code',$7,$8,$9,$10,$11,$12,$13)
 	`, executorID, credentialRevision, input.SessionID, input.RuntimeBindingID,
 		input.RuntimeBindingRevision, input.AccountFingerprint, input.PlanType,
-		input.BindingDigest, revocationEpoch)
+		input.BindingDigest, revocationEpoch, input.OperationID, leaseEpoch,
+		sourceRevision, "aicrm-credential-tree-rfc8785-nfc-v1")
 	if err != nil {
 		return CredentialPreparation{}, classifyControlWrite(err)
 	}
@@ -436,8 +439,9 @@ func (s *ControlStore) PrepareServerCredential(ctx context.Context, input Creden
 		return CredentialPreparation{}, classifyControlWrite(err)
 	}
 	return CredentialPreparation{
-		ExecutorID: executorID, CredentialRevision: credentialRevision,
-		SessionRevision: input.ExpectedSessionRevision + 1, LeaseEpoch: leaseEpoch,
+		ExecutorID: executorID, OwnerInstanceID: input.OwnerInstanceID,
+		CredentialRevision: credentialRevision,
+		SessionRevision:    input.ExpectedSessionRevision + 1, LeaseEpoch: leaseEpoch,
 		SourceCredentialRevision: sourceRevision, RevocationEpoch: revocationEpoch,
 		BindingDigest: input.BindingDigest,
 	}, nil
@@ -447,15 +451,19 @@ func (s *ControlStore) MarkCredentialCommitting(ctx context.Context, prep Creden
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE ky_ai_executor_credential_binding binding
 		SET status='committing'
-		WHERE binding.executor_id=$1 AND binding.revision=$2 AND binding.status='prepared'
+		WHERE binding.executor_id=$1 AND binding.revision=$2 AND binding.status IN ('prepared','committing')
 		  AND binding.binding_digest=$3 AND binding.revocation_epoch=$4
+		  AND binding.operation_id=$5 AND binding.lease_epoch=$6
+		  AND binding.source_credential_revision=$7
 		  AND EXISTS (
 		    SELECT 1 FROM ky_ai_executor_operation_lease lease
 		    WHERE lease.executor_id=binding.executor_id AND lease.operation_id=$5
-		      AND lease.lease_epoch=$6 AND lease.status='active' AND lease.lease_expires_at>now()
+		      AND lease.owner_instance_id=$8 AND lease.lease_epoch=$6
+		      AND lease.source_credential_revision=$7 AND lease.revocation_epoch=$4
+		      AND lease.status='active' AND lease.lease_expires_at>now()
 		  )
 	`, prep.ExecutorID, prep.CredentialRevision, prep.BindingDigest, prep.RevocationEpoch,
-		operationID, prep.LeaseEpoch)
+		operationID, prep.LeaseEpoch, prep.SourceCredentialRevision, prep.OwnerInstanceID)
 	if err != nil {
 		return err
 	}
@@ -463,6 +471,132 @@ func (s *ControlStore) MarkCredentialCommitting(ctx context.Context, prep Creden
 		return ErrExecutorFenced
 	}
 	return nil
+}
+
+func (s *ControlStore) RenewServerCredentialLease(ctx context.Context, prep CredentialPreparation, operationID string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE ky_ai_executor_operation_lease
+		SET lease_expires_at=now()+interval '30 seconds',updated_at=now()
+		WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3
+		  AND lease_epoch=$4 AND source_credential_revision=$5 AND revocation_epoch=$6
+		  AND status='active' AND lease_expires_at>now()
+	`, prep.ExecutorID, operationID, prep.OwnerInstanceID, prep.LeaseEpoch,
+		prep.SourceCredentialRevision, prep.RevocationEpoch)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrExecutorFenced
+	}
+	return nil
+}
+
+func (s *ControlStore) QuarantineServerCredential(ctx context.Context, sessionID string, prep CredentialPreparation, operationID, terminalStatus, failureCode string) (AuthorizationSessionProjection, bool, error) {
+	if terminalStatus != "failed" && terminalStatus != "expired" && terminalStatus != "interrupted" {
+		return AuthorizationSessionProjection{}, false, ErrConflict
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	defer tx.Rollback()
+	var sessionStatus, owner string
+	var sessionRevision, sequence int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT status,revision,current_sequence,runtime_owner_instance_id
+		FROM ky_ai_executor_authorization_session WHERE id=$1 FOR UPDATE
+	`, sessionID).Scan(&sessionStatus, &sessionRevision, &sequence, &owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AuthorizationSessionProjection{}, false, ErrNotFound
+	}
+	if err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	var bindingStatus, digest string
+	err = tx.QueryRowContext(ctx, `
+		SELECT status,binding_digest FROM ky_ai_executor_credential_binding
+		WHERE executor_id=$1 AND revision=$2 AND operation_id=$3 AND lease_epoch=$4
+		  AND source_credential_revision=$5 AND revocation_epoch=$6 FOR UPDATE
+	`, prep.ExecutorID, prep.CredentialRevision, operationID, prep.LeaseEpoch,
+		prep.SourceCredentialRevision, prep.RevocationEpoch).Scan(&bindingStatus, &digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AuthorizationSessionProjection{}, false, ErrExecutorFenced
+	}
+	if err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	terminal := sessionStatus == "succeeded" || sessionStatus == "failed" || sessionStatus == "cancelled" ||
+		sessionStatus == "expired" || sessionStatus == "interrupted" || sessionStatus == "superseded"
+	if terminal {
+		_ = tx.Rollback()
+		item, getErr := s.GetAuthorizationSession(ctx, sessionID)
+		return item, bindingStatus == "quarantined", getErr
+	}
+	if sessionStatus != "verifying" || sessionRevision != prep.SessionRevision ||
+		owner != prep.OwnerInstanceID || bindingStatus != "prepared" && bindingStatus != "committing" ||
+		digest != prep.BindingDigest {
+		return AuthorizationSessionProjection{}, false, ErrExecutorFenced
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_credential_binding
+		SET status='quarantined'
+		WHERE executor_id=$1 AND revision=$2 AND status IN ('prepared','committing')
+		  AND operation_id=$3 AND lease_epoch=$4 AND source_credential_revision=$5
+		  AND revocation_epoch=$6 AND binding_digest=$7
+	`, prep.ExecutorID, prep.CredentialRevision, operationID, prep.LeaseEpoch,
+		prep.SourceCredentialRevision, prep.RevocationEpoch, prep.BindingDigest)
+	if err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationSessionProjection{}, false, ErrExecutorFenced
+	}
+	safeFailure := safeStoredCode(failureCode)
+	result, err = tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_authorization_session
+		SET status=$1,failure_code=$2,current_sequence=current_sequence+3,
+		    revision=revision+1,finished_at=now(),updated_at=now()
+		WHERE id=$3 AND revision=$4 AND status='verifying' AND runtime_owner_instance_id=$5
+	`, terminalStatus, safeFailure, sessionID, prep.SessionRevision, prep.OwnerInstanceID)
+	if err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationSessionProjection{}, false, ErrExecutorFenced
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE ky_ai_executor_operation_lease SET status='fenced',updated_at=now()
+		WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3
+		  AND lease_epoch=$4 AND source_credential_revision=$5 AND revocation_epoch=$6
+		  AND status='active'
+	`, prep.ExecutorID, operationID, prep.OwnerInstanceID, prep.LeaseEpoch,
+		prep.SourceCredentialRevision, prep.RevocationEpoch)
+	if err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationSessionProjection{}, false, ErrExecutorFenced
+	}
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence+1, AuthorizationEventChanged, map[string]any{"change": terminalStatus, "failureCode": safeFailure}); err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence+2, AuthorizationEventTerminal, map[string]any{"status": terminalStatus, "failureCode": safeFailure}); err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if err := insertSessionEvent(ctx, tx, sessionID, sequence+3, AuthorizationEventClosed, map[string]any{"reason": "terminal"}); err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if err := insertControlOutbox(ctx, tx, "credential_binding", prep.ExecutorID+":"+itoa64(prep.CredentialRevision), 2, "credential_quarantined", map[string]any{"executorId": prep.ExecutorID, "sessionId": sessionID, "failureCode": safeFailure}); err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if err := insertControlOutbox(ctx, tx, "authorization_session", sessionID, prep.SessionRevision+1, terminalStatus, map[string]any{"executorId": prep.ExecutorID, "failureCode": safeFailure}); err != nil {
+		return AuthorizationSessionProjection{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AuthorizationSessionProjection{}, false, classifyControlWrite(err)
+	}
+	item, err := s.GetAuthorizationSession(ctx, sessionID)
+	return item, true, err
 }
 
 type ModelCatalogEntry struct {
@@ -516,9 +650,9 @@ func (s *ControlStore) ActivateServerCredential(ctx context.Context, input Activ
 	var leaseExpiry time.Time
 	err = tx.QueryRowContext(ctx, `
 		SELECT status, lease_expires_at FROM ky_ai_executor_operation_lease
-		WHERE executor_id=$1 AND operation_id=$2 AND lease_epoch=$3
-		  AND source_credential_revision=$4 AND revocation_epoch=$5 FOR UPDATE
-	`, prep.ExecutorID, input.OperationID, prep.LeaseEpoch,
+		WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3 AND lease_epoch=$4
+		  AND source_credential_revision=$5 AND revocation_epoch=$6 FOR UPDATE
+	`, prep.ExecutorID, input.OperationID, input.OwnerInstanceID, prep.LeaseEpoch,
 		prep.SourceCredentialRevision, prep.RevocationEpoch).Scan(&leaseStatus, &leaseExpiry)
 	if err != nil || leaseStatus != "active" || !leaseExpiry.After(time.Now()) {
 		return AuthorizationSessionProjection{}, ErrExecutorFenced
@@ -538,25 +672,35 @@ func (s *ControlStore) ActivateServerCredential(ctx context.Context, input Activ
 	var bindingStatus, digest string
 	err = tx.QueryRowContext(ctx, `
 		SELECT status, binding_digest FROM ky_ai_executor_credential_binding
-		WHERE executor_id=$1 AND revision=$2 FOR UPDATE
-	`, prep.ExecutorID, prep.CredentialRevision).Scan(&bindingStatus, &digest)
+		WHERE executor_id=$1 AND revision=$2 AND operation_id=$3 AND lease_epoch=$4
+		  AND source_credential_revision=$5 AND revocation_epoch=$6 FOR UPDATE
+	`, prep.ExecutorID, prep.CredentialRevision, input.OperationID, prep.LeaseEpoch,
+		prep.SourceCredentialRevision, prep.RevocationEpoch).Scan(&bindingStatus, &digest)
 	if err != nil || bindingStatus != "committing" || digest != prep.BindingDigest {
 		return AuthorizationSessionProjection{}, ErrExecutorFenced
 	}
 	if current > 0 {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE ky_ai_executor_credential_binding
-			SET status='quarantined' WHERE executor_id=$1 AND revision=$2 AND status='active'
+			SET status='revoked',revoked_at=now()
+			WHERE executor_id=$1 AND revision=$2 AND status='active'
 		`, prep.ExecutorID, current); err != nil {
 			return AuthorizationSessionProjection{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 		UPDATE ky_ai_executor_credential_binding
 		SET status='active', verified_at=now(), activated_at=now()
 		WHERE executor_id=$1 AND revision=$2 AND status='committing'
-	`, prep.ExecutorID, prep.CredentialRevision); err != nil {
+		  AND operation_id=$3 AND lease_epoch=$4 AND source_credential_revision=$5
+		  AND revocation_epoch=$6
+	`, prep.ExecutorID, prep.CredentialRevision, input.OperationID, prep.LeaseEpoch,
+		prep.SourceCredentialRevision, prep.RevocationEpoch)
+	if err != nil {
 		return AuthorizationSessionProjection{}, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return AuthorizationSessionProjection{}, ErrExecutorFenced
 	}
 	newCatalogRevision := catalogRevision + 1
 	for _, model := range input.Models {
@@ -594,7 +738,7 @@ func (s *ControlStore) ActivateServerCredential(ctx context.Context, input Activ
 			reason = "model_unavailable"
 		}
 	}
-	result, err := tx.ExecContext(ctx, `
+	result, err = tx.ExecContext(ctx, `
 		UPDATE ky_ai_executor_config
 		SET credential_status='authorized', current_credential_revision=$1,
 		    runtime_binding_id=$2, runtime_binding_revision=$3,
@@ -718,8 +862,8 @@ func (s *ControlStore) FailAuthorizationSession(ctx context.Context, sessionID, 
 	if operationID != "" {
 		_, _ = tx.ExecContext(ctx, `
 			UPDATE ky_ai_executor_operation_lease SET status='released', updated_at=now()
-			WHERE executor_id=$1 AND operation_id=$2 AND status='active'
-		`, executorID, operationID)
+			WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3 AND status='active'
+		`, executorID, operationID, owner)
 	}
 	safeFailure := safeStoredCode(failureCode)
 	if err := insertSessionEvent(ctx, tx, sessionID, sequence+1, AuthorizationEventChanged, map[string]any{"change": terminalStatus, "failureCode": safeFailure}); err != nil {
@@ -882,14 +1026,14 @@ func (s *ControlStore) CancelAuthorizationSession(ctx context.Context, input Can
 	if !errors.Is(err, sql.ErrNoRows) {
 		return AuthorizationSessionProjection{}, false, err
 	}
-	var status, executorID, operationID, requestedBy string
+	var status, executorID, operationID, requestedBy, runtimeOwner string
 	var revision, sequence int64
 	var prepared sql.NullInt64
 	err = tx.QueryRowContext(ctx, `
-		SELECT status,revision,current_sequence,executor_id,prepared_credential_revision,operation_id,requested_by
+		SELECT status,revision,current_sequence,executor_id,prepared_credential_revision,operation_id,requested_by,runtime_owner_instance_id
 		FROM ky_ai_executor_authorization_session
 		WHERE id=$1 FOR UPDATE
-	`, input.SessionID).Scan(&status, &revision, &sequence, &executorID, &prepared, &operationID, &requestedBy)
+	`, input.SessionID).Scan(&status, &revision, &sequence, &executorID, &prepared, &operationID, &requestedBy, &runtimeOwner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthorizationSessionProjection{}, false, ErrNotFound
 	}
@@ -940,8 +1084,8 @@ func (s *ControlStore) CancelAuthorizationSession(ctx context.Context, input Can
 		if operationID != "" {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE ky_ai_executor_operation_lease SET status='released',updated_at=now()
-				WHERE executor_id=$1 AND operation_id=$2 AND status='active'
-			`, executorID, operationID); err != nil {
+				WHERE executor_id=$1 AND operation_id=$2 AND owner_instance_id=$3 AND status='active'
+			`, executorID, operationID, runtimeOwner); err != nil {
 				return AuthorizationSessionProjection{}, false, err
 			}
 		}

@@ -1,11 +1,14 @@
 package credentialfs
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestPromotionIsDigestBoundNoReplaceAndReadOnly(t *testing.T) {
@@ -112,5 +115,191 @@ func TestPathsRejectTraversalSymlinksAndArbitraryDeletion(t *testing.T) {
 	}
 	if err := manager.RemoveEphemeral("/tmp"); !errors.Is(err, ErrInvalidPath) {
 		t.Fatalf("arbitrary delete accepted: %v", err)
+	}
+}
+
+func TestDigestTreeMatchesLockedCanonicalJSONVector(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "目录"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "目录", "é.txt"), []byte{0x00, 0xff, 'A', 'i', 'C', 'R', 'M'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := DigestTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = "49d15c1f078a22e6a917007dd4c8957bdb47f4cd6b205d7004db5145e2922743"
+	if digest != expected {
+		t.Fatalf("digest=%s expected=%s", digest, expected)
+	}
+	if err := os.Chmod(filepath.Join(root, "a.txt"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	changedTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(filepath.Join(root, "a.txt"), changedTime, changedTime); err != nil {
+		t.Fatal(err)
+	}
+	afterMetadataChange, err := DigestTree(root)
+	if err != nil || afterMetadataChange != expected {
+		t.Fatalf("metadata changed digest=%s err=%v", afterMetadataChange, err)
+	}
+}
+
+func TestDigestTreeNormalizesNFCAndRejectsNormalizedCollisions(t *testing.T) {
+	composedRoot := t.TempDir()
+	decomposedRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(composedRoot, "é.txt"), []byte("same"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(decomposedRoot, "e\u0301.txt"), []byte("same"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	composed, err := DigestTree(composedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decomposed, err := DigestTree(decomposedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if composed != decomposed {
+		t.Fatalf("NFC-equivalent paths diverged: %s != %s", composed, decomposed)
+	}
+	collisionRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(collisionRoot, "é.txt"), []byte("one"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(collisionRoot, "e\u0301.txt"), []byte("two"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DigestTree(collisionRoot); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("normalized collision err=%v", err)
+	}
+}
+
+func TestDigestTreeRejectsHardlinksAndSpecialFiles(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server credential filesystem is Linux-only")
+	}
+	hardlinkRoot := t.TempDir()
+	original := filepath.Join(hardlinkRoot, "auth.json")
+	if err := os.WriteFile(original, []byte("credential"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(original, filepath.Join(hardlinkRoot, "alias.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DigestTree(hardlinkRoot); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("hardlink digest err=%v", err)
+	}
+
+	fifoRoot := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(fifoRoot, "credential.pipe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DigestTree(fifoRoot); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("FIFO digest err=%v", err)
+	}
+}
+
+func TestDigestTreeEmptyDirectoriesDoNotChangeCanonicalFileList(t *testing.T) {
+	root := t.TempDir()
+	digest, err := DigestTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const emptyDigest = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+	if digest != emptyDigest {
+		t.Fatalf("empty digest=%s", digest)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "empty", "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	withDirectories, err := DigestTree(root)
+	if err != nil || withDirectories != emptyDigest {
+		t.Fatalf("empty directories changed digest=%s err=%v", withDirectories, err)
+	}
+}
+
+func TestDigestTreeUsesJCSStringEscaping(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ampersand<&>.txt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "unicode"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "unicode", "line\u2028separator.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := DigestTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = "4f19a416ea7b40e89cd21a6dd508c850578c1daa6be50b9c3aa0e7eb2ee6a890"
+	if digest != expected {
+		t.Fatalf("JCS edge digest=%s expected=%s", digest, expected)
+	}
+}
+
+func TestDigestTreeAllowsFilenameBeginningWithTwoDots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "..profile"), []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DigestTree(root); err != nil {
+		t.Fatalf("legal filename was rejected: %v", err)
+	}
+}
+
+func TestExecutorLockSerializesCredentialOperations(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server credential filesystem is Linux-only")
+	}
+	manager, err := New(filepath.Join(t.TempDir(), "executors"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.AcquireExecutorLock(context.Background(), "executor_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan *ExecutorLock, 1)
+	errorsCh := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() {
+		lock, err := manager.AcquireExecutorLock(ctx, "executor_1")
+		if err != nil {
+			errorsCh <- err
+			return
+		}
+		acquired <- lock
+	}()
+	select {
+	case lock := <-acquired:
+		_ = lock.Close()
+		t.Fatal("second operation acquired the executor lock concurrently")
+	case err := <-errorsCh:
+		t.Fatalf("second lock failed early: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case lock := <-acquired:
+		if err := lock.Close(); err != nil {
+			t.Fatal(err)
+		}
+	case err := <-errorsCh:
+		t.Fatal(err)
+	case <-ctx.Done():
+		t.Fatal("second operation did not acquire the released lock")
 	}
 }

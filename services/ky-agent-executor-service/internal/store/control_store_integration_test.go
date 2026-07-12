@@ -101,6 +101,14 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 	if err := control.MarkCredentialCommitting(ctx, prep, "auth_operation_"+suffix); err != nil {
 		t.Fatal(err)
 	}
+	stalePrep := prep
+	stalePrep.OwnerInstanceID = "stale_owner"
+	if err := control.RenewServerCredentialLease(ctx, stalePrep, "auth_operation_"+suffix); !errors.Is(err, ErrExecutorFenced) {
+		t.Fatalf("stale owner renewed lease: %v", err)
+	}
+	if err := control.RenewServerCredentialLease(ctx, prep, "auth_operation_"+suffix); err != nil {
+		t.Fatalf("current owner could not renew lease: %v", err)
+	}
 	summary := []byte(`{"accountFingerprint":"7777777777777777777777777777777777777777777777777777777777777777","emailDomainHash":"9999999999999999999999999999999999999999999999999999999999999999","planType":"plus"}`)
 	activated, err := control.ActivateServerCredential(ctx, ActivateServerCredentialInput{
 		SessionID: verifying.ID, OwnerInstanceID: "owner_test", OperationID: "auth_operation_" + suffix,
@@ -215,7 +223,7 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = control.PrepareServerCredential(ctx, CredentialPreparationInput{
+	preparedCandidate, err := control.PrepareServerCredential(ctx, CredentialPreparationInput{
 		SessionID: preparedVerifying.ID, ExpectedSessionRevision: preparedVerifying.Revision,
 		OwnerInstanceID: "owner_prepared_restart", OperationID: "auth_prepared_operation_" + suffix,
 		RuntimeBindingID: "server_test", RuntimeBindingRevision: 1,
@@ -231,5 +239,28 @@ func TestControlStoreAgainstPostgres(t *testing.T) {
 	stillVerifying, err := control.GetAuthorizationSession(ctx, preparedVerifying.ID)
 	if err != nil || stillVerifying.Status != "verifying" || stillVerifying.PreparedCredentialRev == nil {
 		t.Fatalf("prepared candidate changed during fail-closed recovery: %#v err=%v", stillVerifying, err)
+	}
+	staleCandidate := preparedCandidate
+	staleCandidate.OwnerInstanceID = "stale_prepared_owner"
+	if _, _, err := control.QuarantineServerCredential(ctx, preparedVerifying.ID, staleCandidate,
+		"auth_prepared_operation_"+suffix, "failed", "credential_commit_failed"); !errors.Is(err, ErrExecutorFenced) {
+		t.Fatalf("stale owner quarantined candidate: %v", err)
+	}
+	quarantined, shouldQuarantineFS, err := control.QuarantineServerCredential(ctx, preparedVerifying.ID, preparedCandidate,
+		"auth_prepared_operation_"+suffix, "failed", "credential_commit_failed")
+	if err != nil || !shouldQuarantineFS || quarantined.Status != "failed" {
+		t.Fatalf("quarantined=%#v cleanup=%v err=%v", quarantined, shouldQuarantineFS, err)
+	}
+	var bindingStatus, leaseStatus string
+	if err := control.db.QueryRowContext(ctx, `SELECT status FROM ky_ai_executor_credential_binding WHERE executor_id=$1 AND revision=$2`,
+		preparedCandidate.ExecutorID, preparedCandidate.CredentialRevision).Scan(&bindingStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := control.db.QueryRowContext(ctx, `SELECT status FROM ky_ai_executor_operation_lease WHERE executor_id=$1`,
+		preparedCandidate.ExecutorID).Scan(&leaseStatus); err != nil {
+		t.Fatal(err)
+	}
+	if bindingStatus != "quarantined" || leaseStatus != "fenced" {
+		t.Fatalf("binding=%s lease=%s", bindingStatus, leaseStatus)
 	}
 }

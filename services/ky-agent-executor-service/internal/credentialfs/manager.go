@@ -1,6 +1,7 @@
 package credentialfs
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -13,6 +14,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -221,11 +225,19 @@ func DigestTree(root string) (string, error) {
 		return "", ErrInvalidPath
 	}
 	type entry struct {
-		path string
-		rel  string
-		mode fs.FileMode
+		raw    string
+		rel    string
+		size   int64
+		digest string
 	}
 	entries := make([]entry, 0, 32)
+	normalizedPaths := make(map[string]struct{}, 32)
+	var totalSize int64
+	reader, err := openSecureDigestRoot(root)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
 	err = filepath.WalkDir(root, func(path string, item fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -240,44 +252,176 @@ func DigestTree(root string) (string, error) {
 		if metadata.Mode()&os.ModeSymlink != 0 || (!metadata.IsDir() && !metadata.Mode().IsRegular()) {
 			return ErrInvalidPath
 		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil || strings.HasPrefix(relative, "..") {
+		if metadata.IsDir() {
+			return nil
+		}
+		if regularFileHasMultipleLinks(metadata) {
 			return ErrInvalidPath
 		}
-		entries = append(entries, entry{path: path, rel: filepath.ToSlash(relative), mode: metadata.Mode()})
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return ErrInvalidPath
+		}
+		rawRelative := filepath.ToSlash(relative)
+		if !utf8.ValidString(rawRelative) {
+			return ErrInvalidPath
+		}
+		relative = norm.NFC.String(rawRelative)
+		if relative == "" || strings.HasPrefix(relative, "/") {
+			return ErrInvalidPath
+		}
+		for _, segment := range strings.Split(relative, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return ErrInvalidPath
+			}
+		}
+		if _, exists := normalizedPaths[relative]; exists {
+			return ErrInvalidPath
+		}
+		normalizedPaths[relative] = struct{}{}
+		size, fileDigest, err := reader.DigestFile(rawRelative)
+		if err != nil {
+			return err
+		}
+		if size != metadata.Size() || size < 0 || size > 9_007_199_254_740_991 {
+			return ErrInvalidPath
+		}
+		totalSize += size
+		if len(entries) >= 4096 || totalSize > 128<<20 {
+			return ErrInvalidPath
+		}
+		entries = append(entries, entry{
+			raw: rawRelative, rel: relative, size: size, digest: fileDigest,
+		})
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].rel < entries[j].rel })
-	hash := sha256.New()
-	for _, item := range entries {
-		kind := byte('f')
-		if item.mode.IsDir() {
-			kind = 'd'
-		}
-		_, _ = hash.Write([]byte{kind, 0})
-		_, _ = hash.Write([]byte(item.rel))
-		_, _ = hash.Write([]byte{0})
-		if item.mode.IsDir() {
-			continue
-		}
-		file, err := os.Open(item.path)
-		if err != nil {
-			return "", err
-		}
-		_, copyErr := io.Copy(hash, file)
-		closeErr := file.Close()
-		if copyErr != nil {
-			return "", copyErr
-		}
-		if closeErr != nil {
-			return "", closeErr
-		}
-		_, _ = hash.Write([]byte{0})
+	if err := reader.EnsureStable(); err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	observedPaths, err := collectDigestFilePaths(root)
+	if err != nil || len(observedPaths) != len(entries) {
+		return "", ErrInvalidPath
+	}
+	expectedPaths := make([]string, 0, len(entries))
+	for _, item := range entries {
+		expectedPaths = append(expectedPaths, item.raw)
+	}
+	sort.Strings(expectedPaths)
+	for index := range observedPaths {
+		if observedPaths[index] != expectedPaths[index] {
+			return "", ErrInvalidPath
+		}
+	}
+	for _, item := range entries {
+		size, digest, err := reader.DigestFile(item.raw)
+		if err != nil || size != item.size || digest != item.digest {
+			return "", ErrInvalidPath
+		}
+	}
+	if err := reader.EnsureStable(); err != nil {
+		return "", err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return bytes.Compare([]byte(entries[i].rel), []byte(entries[j].rel)) < 0
+	})
+	// RFC 8785 canonical JSON sorts these ASCII object keys as path, sha256,
+	// size. Paths are already NFC UTF-8 and sizes are safe non-negative
+	// integers, so the specialized writer below covers the full manifest shape.
+	var canonical bytes.Buffer
+	canonical.WriteByte('[')
+	for index, item := range entries {
+		if index > 0 {
+			canonical.WriteByte(',')
+		}
+		canonical.WriteString(`{"path":`)
+		appendJCSString(&canonical, item.rel)
+		canonical.WriteString(`,"sha256":"`)
+		canonical.WriteString(item.digest)
+		canonical.WriteString(`","size":`)
+		canonical.WriteString(strconv.FormatInt(item.size, 10))
+		canonical.WriteByte('}')
+	}
+	canonical.WriteByte(']')
+	treeHash := sha256.Sum256(canonical.Bytes())
+	return hex.EncodeToString(treeHash[:]), nil
+}
+
+func collectDigestFilePaths(root string) ([]string, error) {
+	paths := make([]string, 0, 32)
+	err := filepath.WalkDir(root, func(path string, item fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		metadata, err := os.Lstat(path)
+		if err != nil || metadata.Mode()&os.ModeSymlink != 0 ||
+			(!metadata.IsDir() && !metadata.Mode().IsRegular()) {
+			return ErrInvalidPath
+		}
+		if metadata.IsDir() {
+			return nil
+		}
+		if regularFileHasMultipleLinks(metadata) {
+			return ErrInvalidPath
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return ErrInvalidPath
+		}
+		relative = filepath.ToSlash(relative)
+		if !utf8.ValidString(relative) {
+			return ErrInvalidPath
+		}
+		for _, segment := range strings.Split(relative, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return ErrInvalidPath
+			}
+		}
+		paths = append(paths, relative)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func appendJCSString(target *bytes.Buffer, value string) {
+	const lowerHex = "0123456789abcdef"
+	target.WriteByte('"')
+	for _, char := range value {
+		switch char {
+		case '"':
+			target.WriteString(`\"`)
+		case '\\':
+			target.WriteString(`\\`)
+		case '\b':
+			target.WriteString(`\b`)
+		case '\t':
+			target.WriteString(`\t`)
+		case '\n':
+			target.WriteString(`\n`)
+		case '\f':
+			target.WriteString(`\f`)
+		case '\r':
+			target.WriteString(`\r`)
+		default:
+			if char < 0x20 {
+				target.WriteString(`\u00`)
+				target.WriteByte(lowerHex[byte(char)>>4])
+				target.WriteByte(lowerHex[byte(char)&0x0f])
+				continue
+			}
+			target.WriteRune(char)
+		}
+	}
+	target.WriteByte('"')
 }
 
 func DurableBarrier(root string) error {

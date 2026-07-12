@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,7 +32,9 @@ type RuntimeStore interface {
 	MarkAuthorizationVerifying(context.Context, string, string, int64) (store.AuthorizationSessionProjection, error)
 	PrepareServerCredential(context.Context, store.CredentialPreparationInput) (store.CredentialPreparation, error)
 	MarkCredentialCommitting(context.Context, store.CredentialPreparation, string) error
+	RenewServerCredentialLease(context.Context, store.CredentialPreparation, string) error
 	ActivateServerCredential(context.Context, store.ActivateServerCredentialInput) (store.AuthorizationSessionProjection, error)
+	QuarantineServerCredential(context.Context, string, store.CredentialPreparation, string, string, string) (store.AuthorizationSessionProjection, bool, error)
 	FailAuthorizationSession(context.Context, string, string, string, string) (store.AuthorizationSessionProjection, error)
 }
 
@@ -40,7 +44,13 @@ type Launcher interface {
 
 type CredentialManager interface {
 	CreateStaging(string, string) (string, error)
+	AcquireExecutorLock(context.Context, string) (*credentialfs.ExecutorLock, error)
+	StagingPath(string, string) (string, error)
+	CloneRevision(string, int64, string) (string, error)
+	OperationPath(string, string) (string, error)
 	Promote(string, string, int64, string) (string, error)
+	RevisionPath(string, int64) (string, error)
+	Quarantine(string, string, string) (string, error)
 	RemoveEphemeral(string) error
 }
 
@@ -172,17 +182,22 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 	session := owned.session
 	staging, err := m.credentials.CreateStaging(session.ExecutorID, session.ID)
 	if err != nil {
-		m.fail(session.ID, "executor_credential_staging_failed", ctx)
+		m.fail(session.ID, "credential_commit_failed", ctx)
 		return
 	}
 	m.mu.Lock()
 	owned.staging = staging
 	m.mu.Unlock()
-	defer func() { _ = m.credentials.RemoveEphemeral(staging) }()
+	removeStagingOnExit := true
+	defer func() {
+		if removeStagingOnExit {
+			_ = m.credentials.RemoveEphemeral(staging)
+		}
+	}()
 	operationID := "auth_" + session.ID
 	process, err := m.launcher.Launch(ctx, operationID, staging)
 	if err != nil {
-		m.fail(session.ID, "executor_app_server_unavailable", ctx)
+		m.fail(session.ID, "app_server_start_failed", ctx)
 		return
 	}
 	client := appserver.NewClient(process)
@@ -196,12 +211,12 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 		}
 	}()
 	if err := client.Initialize(ctx, "aicrm-agent-executor"); err != nil {
-		m.fail(session.ID, "executor_app_server_unsupported", ctx)
+		m.fail(session.ID, "app_server_protocol_unsupported", ctx)
 		return
 	}
 	challenge, err := client.StartDeviceCodeLogin(ctx)
 	if err != nil || !validVerificationURL(challenge.VerificationURL) || !validUserCode(challenge.UserCode) {
-		m.fail(session.ID, "executor_app_server_unsupported", ctx)
+		m.fail(session.ID, "device_code_unavailable", ctx)
 		return
 	}
 	m.mu.Lock()
@@ -221,18 +236,18 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 	completion, err := client.WaitLoginCompleted(ctx, challenge.LoginID)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			m.fail(session.ID, "authorization_session_expired", ctx)
+			m.fail(session.ID, "session_deadline_exceeded", ctx)
 			return
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			m.fail(session.ID, "service_restarted", ctx)
 			return
 		}
-		m.fail(session.ID, "executor_app_server_unavailable", ctx)
+		m.fail(session.ID, "app_server_start_failed", ctx)
 		return
 	}
 	if !completion.Success {
-		m.fail(session.ID, "authorization_login_failed", ctx)
+		m.fail(session.ID, "login_failed", ctx)
 		return
 	}
 	verifying, err := m.store.MarkAuthorizationVerifying(ctx, session.ID, m.ownerInstanceID, waiting.Revision)
@@ -244,37 +259,28 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 	owned.challenge = nil
 	m.mu.Unlock()
 	accountResult, err := client.ReadAccount(ctx, true)
-	if err != nil || accountResult.Account == nil {
-		m.fail(session.ID, "credential_verification_failed", ctx)
-		return
-	}
-	models, err := client.ListModels(ctx)
-	if err != nil {
-		m.fail(session.ID, "model_catalog_refresh_failed", ctx)
-		return
-	}
-	catalog, err := sanitizeModels(models)
-	if err != nil {
-		m.fail(session.ID, "executor_app_server_unsupported", ctx)
+	if err != nil || accountResult.Account == nil || accountResult.RequiresOpenAIAuth {
+		m.fail(session.ID, "verification_failed", ctx)
 		return
 	}
 	// Freeze the credential home before hashing and promotion. The App Server
 	// must not be able to refresh or rewrite auth files between the digest and
 	// the no-replace rename/durable barrier.
 	if err := client.Close(); err != nil {
-		m.fail(session.ID, "executor_app_server_unavailable", ctx)
+		m.fail(session.ID, "app_server_start_failed", ctx)
 		return
 	}
 	clientClosed = true
 	m.mu.Lock()
 	owned.client = nil
 	m.mu.Unlock()
-	fingerprint, summary, planType := safeAccount(accountResult.Account)
+	fingerprint, _, planType := safeAccount(accountResult.Account)
 	digest, err := credentialfs.DigestTree(staging)
 	if err != nil {
-		m.fail(session.ID, "credential_digest_failed", ctx)
+		m.fail(session.ID, "credential_commit_failed", ctx)
 		return
 	}
+	removeStagingOnExit = false
 	prep, err := m.store.PrepareServerCredential(ctx, store.CredentialPreparationInput{
 		SessionID: session.ID, ExpectedSessionRevision: verifying.Revision,
 		OwnerInstanceID: m.ownerInstanceID, OperationID: operationID,
@@ -282,15 +288,116 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 		AccountFingerprint: fingerprint, PlanType: planType, BindingDigest: digest,
 	})
 	if err != nil {
-		m.fail(session.ID, "credential_prepare_failed", ctx)
+		m.fail(session.ID, "credential_commit_failed", ctx)
 		return
 	}
-	if err := m.store.MarkCredentialCommitting(ctx, prep, operationID); err != nil {
-		m.fail(session.ID, "executor_operation_fenced", ctx)
+	leaseCtx, stopLeaseRenewal := m.startLeaseRenewal(ctx, prep, operationID)
+	leaseRenewalStopped := false
+	defer func() {
+		if !leaseRenewalStopped {
+			_ = stopLeaseRenewal()
+		}
+	}()
+	executorLock, err := m.credentials.AcquireExecutorLock(leaseCtx, session.ExecutorID)
+	if err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+		return
+	}
+	defer executorLock.Close()
+	if err := m.store.MarkCredentialCommitting(leaseCtx, prep, operationID); err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
 		return
 	}
 	if _, err := m.credentials.Promote(session.ExecutorID, session.ID, prep.CredentialRevision, digest); err != nil {
-		m.fail(session.ID, "credential_promotion_failed", ctx)
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+		return
+	}
+	verificationOperationID := operationID
+	verificationHome, err := m.credentials.CloneRevision(session.ExecutorID, prep.CredentialRevision, verificationOperationID)
+	if err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "verification_failed", ctx)
+		return
+	}
+	verificationHomeRemoved := false
+	defer func() {
+		if !verificationHomeRemoved {
+			_ = m.credentials.RemoveEphemeral(verificationHome)
+		}
+	}()
+	verificationProcess, err := m.launcher.Launch(leaseCtx, verificationOperationID, verificationHome)
+	if err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "app_server_start_failed", ctx)
+		return
+	}
+	verificationClient := appserver.NewClient(verificationProcess)
+	m.mu.Lock()
+	owned.client = verificationClient
+	m.mu.Unlock()
+	verificationClosed := false
+	defer func() {
+		if !verificationClosed {
+			_ = verificationClient.Close()
+		}
+	}()
+	if err := verificationClient.Initialize(leaseCtx, "aicrm-agent-executor-verifier"); err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "app_server_protocol_unsupported", ctx)
+		return
+	}
+	verifiedAccount, err := verificationClient.ReadAccount(leaseCtx, false)
+	if err != nil || verifiedAccount.Account == nil || verifiedAccount.RequiresOpenAIAuth {
+		m.failCredentialCandidate(session, prep, operationID, "verification_failed", ctx)
+		return
+	}
+	models, err := verificationClient.ListModels(leaseCtx)
+	if err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "verification_failed", ctx)
+		return
+	}
+	catalog, err := sanitizeModels(models)
+	if err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "app_server_protocol_unsupported", ctx)
+		return
+	}
+	if err := verificationClient.Close(); err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "app_server_start_failed", ctx)
+		return
+	}
+	verificationClosed = true
+	m.mu.Lock()
+	owned.client = nil
+	m.mu.Unlock()
+	if err := m.credentials.RemoveEphemeral(verificationHome); err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+		return
+	}
+	verificationHomeRemoved = true
+	verifiedFingerprint, summary, verifiedPlanType := safeAccount(verifiedAccount.Account)
+	if verifiedFingerprint != fingerprint || verifiedPlanType != planType {
+		m.failCredentialCandidate(session, prep, operationID, "verification_failed", ctx)
+		return
+	}
+	if ctx.Err() != nil {
+		m.failCredentialCandidate(session, prep, operationID, "service_restarted", ctx)
+		return
+	}
+	revisionPath, err := m.credentials.RevisionPath(session.ExecutorID, prep.CredentialRevision)
+	if err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+		return
+	}
+	verifiedDigest, err := credentialfs.DigestTree(revisionPath)
+	if err != nil || verifiedDigest != prep.BindingDigest {
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+		return
+	}
+	if err := stopLeaseRenewal(); err != nil {
+		leaseRenewalStopped = true
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+		return
+	}
+	leaseRenewalStopped = true
+	if err := m.store.RenewServerCredentialLease(ctx, prep, operationID); err != nil {
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
 		return
 	}
 	_, err = m.store.ActivateServerCredential(ctx, store.ActivateServerCredentialInput{
@@ -301,7 +408,96 @@ func (m *Manager) run(ctx context.Context, owned *ownedSession) {
 		CodexVersion: m.codexVersion, Models: catalog,
 	})
 	if err != nil {
-		m.fail(session.ID, "credential_activation_failed", ctx)
+		m.failCredentialCandidate(session, prep, operationID, "credential_commit_failed", ctx)
+	}
+}
+
+func (m *Manager) startLeaseRenewal(parent context.Context, prep store.CredentialPreparation, operationID string) (context.Context, func() error) {
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				renewCtx, renewCancel := context.WithTimeout(ctx, 5*time.Second)
+				err := m.store.RenewServerCredentialLease(renewCtx, prep, operationID)
+				renewCancel()
+				if err != nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, func() error {
+		cancel()
+		<-done
+		select {
+		case err := <-errCh:
+			return err
+		default:
+			return nil
+		}
+	}
+}
+
+func (m *Manager) failCredentialCandidate(session store.AuthorizationSessionProjection, prep store.CredentialPreparation, operationID, code string, runCtx context.Context) {
+	status := "failed"
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		status, code = "expired", "session_deadline_exceeded"
+	} else if errors.Is(runCtx.Err(), context.Canceled) {
+		status, code = "interrupted", "service_restarted"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, shouldQuarantine, err := m.store.QuarantineServerCredential(ctx, session.ID, prep, operationID, status, code)
+	if err != nil || !shouldQuarantine {
+		return
+	}
+	digestSuffix := digestString(session.ID)[:24]
+	candidates := []struct {
+		path string
+		name string
+	}{}
+	if stagingPath, pathErr := m.credentials.StagingPath(session.ExecutorID, session.ID); pathErr == nil {
+		candidates = append(candidates, struct {
+			path string
+			name string
+		}{stagingPath, fmt.Sprintf("failed_staging_%d_%s", prep.CredentialRevision, digestSuffix)})
+	}
+	if revisionPath, pathErr := m.credentials.RevisionPath(session.ExecutorID, prep.CredentialRevision); pathErr == nil {
+		candidates = append(candidates, struct {
+			path string
+			name string
+		}{revisionPath, fmt.Sprintf("failed_revision_%d_%s", prep.CredentialRevision, digestSuffix)})
+	}
+	for _, candidate := range candidates {
+		info, statErr := os.Lstat(candidate.path)
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		_, _ = m.credentials.Quarantine(session.ExecutorID, candidate.path, candidate.name)
+	}
+	operationPath, err := m.credentials.OperationPath(session.ExecutorID, operationID)
+	if err != nil {
+		return
+	}
+	info, err := os.Lstat(operationPath)
+	if err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+		_ = m.credentials.RemoveEphemeral(operationPath)
 	}
 }
 
@@ -309,6 +505,7 @@ func (m *Manager) fail(sessionID, code string, runCtx context.Context) {
 	status := "failed"
 	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 		status = "expired"
+		code = "session_deadline_exceeded"
 	} else if errors.Is(runCtx.Err(), context.Canceled) {
 		status = "interrupted"
 		code = "service_restarted"

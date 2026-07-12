@@ -58,6 +58,7 @@ psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
 BEGIN;
 \ir $ROOT_DIR/ops/db/040_agent_executor_authorization_runtime.sql
 \ir $ROOT_DIR/ops/db/041_agent_executor_p2a_control_api.sql
+\ir $ROOT_DIR/ops/db/042_agent_executor_credential_recovery.sql
 ROLLBACK;
 SQL
 after="$(schema_fingerprint)"
@@ -68,6 +69,8 @@ for _ in 1 2; do
     -f "$ROOT_DIR/ops/db/040_agent_executor_authorization_runtime.sql" >/dev/null
   psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
     -f "$ROOT_DIR/ops/db/041_agent_executor_p2a_control_api.sql" >/dev/null
+  psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
+    -f "$ROOT_DIR/ops/db/042_agent_executor_credential_recovery.sql" >/dev/null
 done
 
 assert_scalar() {
@@ -94,6 +97,12 @@ assert_scalar \
 assert_scalar \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='ky_ai_executor_api_idempotency'" \
   "1" "P2A API idempotency table exists"
+assert_scalar \
+  "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ky_ai_executor_credential_binding' AND column_name IN ('operation_id','lease_epoch','source_credential_revision','digest_algorithm')" \
+  "4" "credential recovery fence columns exist"
+assert_scalar \
+  "SELECT count(*) FROM pg_constraint WHERE conname='ky_ai_executor_credential_binding_recovery_fence_check'" \
+  "1" "credential recovery fence constraint exists once"
 
 psql -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<'SQL'
 INSERT INTO ky_ai_executor_authorization_session (
