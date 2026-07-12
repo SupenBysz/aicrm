@@ -317,6 +317,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	s.registerControlTaskRoutes(mux)
 	s.registerDeviceRoutes(mux)
 	s.registerOperationConfirmationRoutes(mux)
+	s.registerDeviceBindingRoutes(mux)
 
 	return mux
 }
