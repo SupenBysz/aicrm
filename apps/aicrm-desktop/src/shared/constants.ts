@@ -60,6 +60,7 @@ export const IPC_CHANNELS = {
   codexAuthorizationRefreshModelCatalog: "codex-authorization:refresh-model-catalog",
   codexAuthorizationLogout: "codex-authorization:logout",
   codexAuthorizationChanged: "codex-authorization:changed",
+  desktopDeviceGetIdentity: "desktop-device:get-identity",
   networkLogSnapshot: "network-log:snapshot",
   networkLogClear: "network-log:clear"
 } as const;

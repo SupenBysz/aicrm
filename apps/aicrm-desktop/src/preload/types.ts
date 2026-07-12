@@ -16,6 +16,7 @@ import type {
   CodexVerifyCommandInput,
   DesktopConfig,
   DesktopCommandResult,
+  DesktopDeviceIdentityProjection,
   MatrixAccountBrowserInput,
   MatrixAccountBrowserResult,
   MatrixAccountCapabilities,
@@ -104,6 +105,9 @@ export interface AiCrmDesktopBridge {
       logout: (input: CodexCredentialLogoutCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
       onChanged: (listener: (event: CodexAuthorizationChangedEvent) => void) => () => void;
     };
+  };
+  desktopDevice: {
+    getIdentity: () => Promise<DesktopCommandResult<DesktopDeviceIdentityProjection>>;
   };
   matrixAccount: {
     getCapabilities: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;

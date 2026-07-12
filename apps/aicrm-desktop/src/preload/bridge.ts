@@ -64,6 +64,9 @@ const bridge: AiCrmDesktopBridge = {
       }
     }
   },
+  desktopDevice: {
+    getIdentity: () => ipcRenderer.invoke(IPC_CHANNELS.desktopDeviceGetIdentity)
+  },
   matrixAccount: {
     getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountGetCapabilities),
     startLogin: (input) => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountStartLogin, input),

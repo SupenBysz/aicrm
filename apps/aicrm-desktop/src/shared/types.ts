@@ -235,6 +235,15 @@ export interface CodexAuthorizationChangedEvent {
   payload: CodexAuthorizationSnapshot;
 }
 
+export interface DesktopDeviceIdentityProjection {
+  deviceId: string;
+  publicKey: string;
+  keyGeneration: number;
+  registrationStatus: "unregistered" | "registered" | "revoked";
+  createdAt: string;
+  registeredAt: string | null;
+}
+
 export type MatrixAccountPlatform = "douyin" | "kuaishou" | "xiaohongshu";
 
 export type MatrixAccountLoginStatus =
