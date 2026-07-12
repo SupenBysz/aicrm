@@ -458,6 +458,7 @@ func TestReadyzRequiresCredentialRevocationRuntime(t *testing.T) {
 	}, &fakeReader{}, &fakeCredentialRevocationControl{}, &fakeAuthorizer{})
 	server.confirmationRuntime = &fakeOperationConfirmationRuntime{}
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
+	server.activationRuntime = &fakeDesktopActivationRuntime{}
 
 	recorder := httptest.NewRecorder()
 	server.buildMux().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))

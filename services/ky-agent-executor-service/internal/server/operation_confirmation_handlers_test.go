@@ -413,6 +413,7 @@ func TestReadyzIncludesOperationConfirmationManagerReadiness(t *testing.T) {
 	}, &fakeReader{}, &fakeControl{}, validOperationConfirmationAuthorizer(operationConfirmationTestDatabaseNow))
 	server.handoffRuntime = &fakeDesktopHandoffRuntime{}
 	server.revocationRuntime = &fakeCredentialRevocationRuntime{}
+	server.activationRuntime = &fakeDesktopActivationRuntime{}
 	for _, testCase := range []struct {
 		name       string
 		runtime    operationConfirmationRuntime
