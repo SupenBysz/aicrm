@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   DESKTOP_DEVICE_REGISTRATION_CHALLENGE_PATH,
   DESKTOP_DEVICE_REGISTRATION_PATH,
   DesktopDeviceRegistrationClient
 } from "./desktop-device-registration-client.ts";
+import { DesktopDeviceIdentityStore } from "./desktop-device-identity.ts";
+import { DesktopDevicePendingRegistrationStore } from "./desktop-device-registration-pending.ts";
 import {
   buildDesktopDeviceProof,
-  desktopDeviceKeyMaterialFromSeed
+  desktopDeviceKeyMaterialFromSeed,
+  sha256Hex
 } from "./desktop-device-proof.ts";
 
 const deviceId = "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c";
@@ -24,6 +29,96 @@ const challenge = {
 const fixedKey = desktopDeviceKeyMaterialFromSeed(
   Uint8Array.from({ length: 32 }, (_, index) => index)
 );
+
+class FakeSafeStorage {
+  isEncryptionAvailable() {
+    return true;
+  }
+
+  getSelectedStorageBackend() {
+    return "gnome_libsecret";
+  }
+
+  encryptString(value) {
+    const source = Buffer.from(value, "utf8");
+    return Buffer.concat([
+      Buffer.from("TEST-ENCRYPTED\0"),
+      Buffer.from(source.map((byte) => byte ^ 0xa5))
+    ]);
+  }
+
+  decryptString(value) {
+    const prefix = Buffer.from("TEST-ENCRYPTED\0");
+    if (!value.subarray(0, prefix.length).equals(prefix)) throw new Error("ciphertext invalid");
+    return Buffer.from(value.subarray(prefix.length).map((byte) => byte ^ 0xa5)).toString("utf8");
+  }
+}
+
+function durableStores(root, storage) {
+  return {
+    identityStore: new DesktopDeviceIdentityStore({
+      root,
+      safeStorage: storage,
+      keyFactory: () => fixedKey,
+      now: () => now
+    }),
+    pendingRegistrationStore: new DesktopDevicePendingRegistrationStore({ root, safeStorage: storage })
+  };
+}
+
+function durableClient({ root, storage, fetch, token = sessionToken }) {
+  const stores = durableStores(root, storage);
+  const client = new DesktopDeviceRegistrationClient({
+    ...stores,
+    deviceLabel: "AiCRM Desktop",
+    appVersion: "0.1.0",
+    loadHostSession: async () => ({ token, expiresAt: "2026-07-12T01:00:00.000Z" }),
+    loadTrustedApiBaseUrl: () => "https://aicrm.example.test",
+    now: () => now,
+    requestIdFactory: (() => {
+      let sequence = 0;
+      return () => `durable-request-${++sequence}`;
+    })(),
+    requestTimeoutMs: 5_000,
+    fetch
+  });
+  return { ...stores, client };
+}
+
+async function ambiguousDurableState() {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-registration-replay-"));
+  const root = path.join(base, "identity");
+  const storage = new FakeSafeStorage();
+  const initial = durableStores(root, storage);
+  await initial.identityStore.getIdentity();
+  const identityBefore = await readFile(path.join(root, "identity.sec"));
+  const sequenceBefore = await readFile(path.join(root, "sequence.sec"));
+  const requests = [];
+  const runtime = durableClient({
+    root,
+    storage,
+    fetch: async (url, init) => {
+      requests.push({ url, init });
+      if (url.endsWith(DESKTOP_DEVICE_REGISTRATION_CHALLENGE_PATH)) {
+        return jsonResponse(201, { data: challenge });
+      }
+      throw new Error("response lost after server commit may have happened");
+    }
+  });
+  await assert.rejects(runtime.client.register(), {
+    code: "desktop_device_registration_transport_failed"
+  });
+  return {
+    base,
+    root,
+    storage,
+    requests,
+    identityBefore,
+    sequenceBefore,
+    identityStore: runtime.identityStore,
+    pendingRegistrationStore: runtime.pendingRegistrationStore
+  };
+}
 
 function jsonResponse(status, data) {
   return {
@@ -49,6 +144,7 @@ class FakeIdentityStore {
     };
     this.signed = [];
     this.marked = [];
+    this.repaired = [];
   }
 
   async getIdentity() {
@@ -78,6 +174,16 @@ class FakeIdentityStore {
     };
   }
 
+  async prepareRegistrationRequest(input, persistPending) {
+    const signed = await this.signRequest(input);
+    await persistPending(signed);
+    return signed;
+  }
+
+  async repairRegistrationSequence(fence) {
+    this.repaired.push({ ...fence });
+  }
+
   async markRegistration(status, expectedDeviceId) {
     this.marked.push({ status, expectedDeviceId });
     this.identity = {
@@ -89,18 +195,56 @@ class FakeIdentityStore {
   }
 }
 
+class FakePendingRegistrationStore {
+  constructor(value = null) {
+    this.value = value;
+    this.created = [];
+    this.cleared = [];
+  }
+
+  async load() {
+    return this.value ? structuredClone(this.value) : null;
+  }
+
+  async create(value) {
+    this.created.push(structuredClone(value));
+    if (this.value && JSON.stringify(this.value) !== JSON.stringify(value)) {
+      const error = new Error("pending conflict");
+      error.code = "desktop_device_registration_recovery_required";
+      throw error;
+    }
+    this.value = structuredClone(value);
+  }
+
+  async clear(expectedDeviceId, expectedRequestHash) {
+    this.cleared.push({ expectedDeviceId, expectedRequestHash });
+    if (
+      this.value &&
+      (this.value.deviceId !== expectedDeviceId || this.value.requestHash !== expectedRequestHash)
+    ) {
+      const error = new Error("pending fence mismatch");
+      error.code = "desktop_device_registration_recovery_required";
+      throw error;
+    }
+    this.value = null;
+  }
+}
+
 function fixture(overrides = {}) {
   const identityStore = overrides.identityStore ?? new FakeIdentityStore();
+  const pendingRegistrationStore =
+    overrides.pendingRegistrationStore ?? new FakePendingRegistrationStore();
   const requests = [];
   const responses = overrides.responses ?? [
     jsonResponse(200, { data: challenge }),
-    jsonResponse(200, { data: { deviceId, status: "active", keyGeneration: 1 } })
+    jsonResponse(200, { data: { deviceId } })
   ];
   let responseIndex = 0;
   const requestIds = ["desktop-request-1", "desktop-request-2"];
   let requestIdIndex = 0;
   const client = new DesktopDeviceRegistrationClient({
     identityStore,
+    pendingRegistrationStore,
     deviceLabel: "AiCRM Desktop",
     appVersion: "0.1.0",
     loadHostSession:
@@ -119,7 +263,7 @@ function fixture(overrides = {}) {
         return response;
       })
   });
-  return { client, identityStore, requests };
+  return { client, identityStore, pendingRegistrationStore, requests };
 }
 
 test("Main registration uses Host session and signs the exact create body plus the same Bearer", async () => {
@@ -139,6 +283,11 @@ test("Main registration uses Host session and signs the exact create body plus t
     deviceLabel: "AiCRM Desktop",
     appVersion: "0.1.0"
   });
+  assert.equal(
+    challengeRequest.init.headers["Idempotency-Key"],
+    `desktop-device-challenge:${sha256Hex(Buffer.from(challengeRequest.init.body, "utf8"))}`
+  );
+  assert.equal("Idempotency-Key" in createRequest.init.headers, false);
   const expectedCreateBody = JSON.stringify({
     challengeId: challenge.challengeId,
     challenge: challenge.challenge,
@@ -173,6 +322,28 @@ test("Main registration uses Host session and signs the exact create body plus t
   assert.equal(serializedRequests.includes("privateKey"), false);
 });
 
+test("challenge Idempotency-Key is legal and stable for the exact canonical request across client rebuilds", async () => {
+  const identityStore = new FakeIdentityStore();
+  const keys = [];
+  for (let index = 0; index < 2; index += 1) {
+    const current = fixture({
+      identityStore,
+      pendingRegistrationStore: new FakePendingRegistrationStore(),
+      fetch: async (_url, init) => {
+        keys.push(init.headers["Idempotency-Key"]);
+        return jsonResponse(503, { error: { code: "temporarily_unavailable" } });
+      }
+    });
+    await assert.rejects(current.client.register(), {
+      code: "desktop_device_registration_rejected"
+    });
+  }
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.match(keys[0], /^[A-Za-z0-9._:-]{8,160}$/);
+  assert.equal(identityStore.signed.length, 0);
+});
+
 test("concurrent Main registration calls coalesce and already-registered state performs no network call", async () => {
   let release;
   const waiting = new Promise((resolve) => {
@@ -184,7 +355,7 @@ test("concurrent Main registration calls coalesce and already-registered state p
       if (current.requests.length === 1) await waiting;
       return current.requests.length === 1
         ? jsonResponse(200, { data: challenge })
-        : jsonResponse(200, { data: { deviceId, status: "active", keyGeneration: 1 } });
+        : jsonResponse(200, { data: { deviceId } });
     }
   });
   const first = current.client.register();
@@ -194,7 +365,10 @@ test("concurrent Main registration calls coalesce and already-registered state p
   await Promise.all([first, second]);
   assert.equal(current.requests.length, 2);
 
-  const registered = fixture({ identityStore: current.identityStore });
+  const registered = fixture({
+    identityStore: current.identityStore,
+    pendingRegistrationStore: current.pendingRegistrationStore
+  });
   const projection = await registered.client.register();
   assert.equal(projection.registrationStatus, "registered");
   assert.equal(registered.requests.length, 0);
@@ -270,20 +444,18 @@ test("challenge and device responses are exact, bounded, and cannot forge local 
       name: "mismatched device",
       responses: [
         jsonResponse(200, { data: challenge }),
-        jsonResponse(200, {
-          data: { deviceId: "a".repeat(64), status: "active", keyGeneration: 1 }
-        })
+        jsonResponse(200, { data: { deviceId: "a".repeat(64) } })
       ]
     },
     {
-      name: "inactive server projection",
+      name: "untrusted status projection",
       responses: [
         jsonResponse(200, { data: challenge }),
         jsonResponse(200, { data: { deviceId, status: "revoked", keyGeneration: 1 } })
       ]
     },
     {
-      name: "wrong key generation",
+      name: "untrusted key generation projection",
       responses: [
         jsonResponse(200, { data: challenge }),
         jsonResponse(200, { data: { deviceId, status: "active", keyGeneration: 2 } })
@@ -343,6 +515,218 @@ test("server errors are sanitized and never mark a device registered", async () 
       !error.message.includes(sessionToken)
   );
   assert.equal(current.identityStore.marked.length, 0);
+});
+
+test("ambiguous create transport persists an encrypted request and a rebuilt client exact-replays it", async (t) => {
+  const state = await ambiguousDurableState();
+  t.after(() => rm(state.base, { recursive: true, force: true }));
+  assert.equal(state.requests.length, 2);
+  const firstCreate = state.requests[1];
+  const pendingPath = path.join(state.root, "registration-pending.sec");
+  const ciphertext = await readFile(pendingPath);
+  assert.equal(ciphertext.includes(Buffer.from(sessionToken)), false);
+  assert.equal(ciphertext.includes(Buffer.from(firstCreate.init.body)), false);
+  const pending = await state.pendingRegistrationStore.load();
+  assert.equal(pending.authorization, `Bearer ${sessionToken}`);
+  assert.equal(pending.sequence, "1");
+
+  const replayed = [];
+  const restarted = durableClient({
+    root: state.root,
+    storage: state.storage,
+    fetch: async (url, init) => {
+      replayed.push({ url, init });
+      return jsonResponse(201, { data: { deviceId } });
+    }
+  });
+  const registered = await restarted.client.register();
+  assert.equal(registered.registrationStatus, "registered");
+  assert.equal(replayed.length, 1);
+  assert.equal(replayed[0].url.endsWith(DESKTOP_DEVICE_REGISTRATION_PATH), true);
+  assert.equal(replayed[0].init.body, firstCreate.init.body);
+  assert.equal(replayed[0].init.headers.Authorization, firstCreate.init.headers.Authorization);
+  for (const header of [
+    "X-AiCRM-Content-SHA256",
+    "X-AiCRM-Device-Id",
+    "X-AiCRM-Device-Nonce",
+    "X-AiCRM-Device-Sequence",
+    "X-AiCRM-Device-Signature",
+    "X-AiCRM-Device-Timestamp"
+  ]) {
+    assert.equal(replayed[0].init.headers[header], firstCreate.init.headers[header], header);
+  }
+  assert.equal(await restarted.pendingRegistrationStore.load(), null);
+  const next = await restarted.identityStore.signRequest({
+    method: "POST",
+    path: `/api/v1/ai-executor-devices/${deviceId}/heartbeat`,
+    body: Buffer.from("{}")
+  });
+  assert.equal(next.sequence, "2");
+});
+
+test("pending-first ordering recovers every identity/sequence high-water crash point", async (t) => {
+  const states = [
+    { name: "pending durable before identity and sequence", rollbackIdentity: true, rollbackSequence: true },
+    { name: "identity durable before sequence", rollbackIdentity: false, rollbackSequence: true },
+    { name: "sequence durable before identity", rollbackIdentity: true, rollbackSequence: false },
+    { name: "both high-water records durable", rollbackIdentity: false, rollbackSequence: false }
+  ];
+  for (const crash of states) {
+    await t.test(crash.name, async (t) => {
+      const state = await ambiguousDurableState();
+      t.after(() => rm(state.base, { recursive: true, force: true }));
+      if (crash.rollbackIdentity) {
+        await writeFile(path.join(state.root, "identity.sec"), state.identityBefore, { mode: 0o600 });
+      }
+      if (crash.rollbackSequence) {
+        await writeFile(path.join(state.root, "sequence.sec"), state.sequenceBefore, { mode: 0o600 });
+      }
+      const requests = [];
+      const restarted = durableClient({
+        root: state.root,
+        storage: state.storage,
+        fetch: async (url, init) => {
+          requests.push({ url, init });
+          return jsonResponse(201, { data: { deviceId } });
+        }
+      });
+      assert.equal((await restarted.client.register()).registrationStatus, "registered");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].url.endsWith(DESKTOP_DEVICE_REGISTRATION_PATH), true);
+      const next = await restarted.identityStore.signRequest({
+        method: "POST",
+        path: `/api/v1/ai-executor-devices/${deviceId}/heartbeat`,
+        body: Buffer.from("{}")
+      });
+      assert.equal(next.sequence, "2");
+    });
+  }
+});
+
+test("pending persistence failure never advances either identity high-water record", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-registration-pending-failure-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, "identity");
+  const storage = new FakeSafeStorage();
+  const stores = durableStores(root, storage);
+  const failingPendingStore = {
+    async load() {
+      return null;
+    },
+    async create() {
+      throw new Error("simulated fsync failure before durable pending");
+    },
+    async clear() {}
+  };
+  const client = new DesktopDeviceRegistrationClient({
+    identityStore: stores.identityStore,
+    pendingRegistrationStore: failingPendingStore,
+    deviceLabel: "AiCRM Desktop",
+    appVersion: "0.1.0",
+    loadHostSession: async () => ({ token: sessionToken, expiresAt: "2026-07-12T01:00:00Z" }),
+    loadTrustedApiBaseUrl: () => "https://aicrm.example.test",
+    now: () => now,
+    requestIdFactory: () => "pending-failure-request",
+    requestTimeoutMs: 5_000,
+    fetch: async () => jsonResponse(201, { data: challenge })
+  });
+  await assert.rejects(client.register(), /simulated fsync failure/);
+  const first = await stores.identityStore.signRequest({
+    method: "POST",
+    path: `/api/v1/ai-executor-devices/${deviceId}/heartbeat`,
+    body: Buffer.from("{}")
+  });
+  assert.equal(first.sequence, "1");
+});
+
+test("missing pending after sequence 1 fails recovery and never signs a sequence 2 registration", async (t) => {
+  const state = await ambiguousDurableState();
+  t.after(() => rm(state.base, { recursive: true, force: true }));
+  await rm(path.join(state.root, "registration-pending.sec"));
+  const requests = [];
+  const restarted = durableClient({
+    root: state.root,
+    storage: state.storage,
+    fetch: async (url, init) => {
+      requests.push({ url, init });
+      return jsonResponse(201, { data: challenge });
+    }
+  });
+  await assert.rejects(restarted.client.register(), {
+    code: "desktop_device_registration_recovery_required"
+  });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url.endsWith(DESKTOP_DEVICE_REGISTRATION_CHALLENGE_PATH), true);
+});
+
+test("a changed Bearer cannot replay or replace a pending sequence 1 registration", async (t) => {
+  const state = await ambiguousDurableState();
+  t.after(() => rm(state.base, { recursive: true, force: true }));
+  let fetchCalls = 0;
+  const restarted = durableClient({
+    root: state.root,
+    storage: state.storage,
+    token: "different.session.token",
+    fetch: async () => {
+      fetchCalls += 1;
+      return jsonResponse(201, { data: { deviceId } });
+    }
+  });
+  await assert.rejects(restarted.client.register(), {
+    code: "desktop_device_registration_recovery_required"
+  });
+  assert.equal(fetchCalls, 0);
+  assert.notEqual(await restarted.pendingRegistrationStore.load(), null);
+});
+
+test("corrupt or forged encrypted pending records fail closed before network", async (t) => {
+  for (const mode of ["corrupt", "forged"]) {
+    await t.test(mode, async (t) => {
+      const state = await ambiguousDurableState();
+      t.after(() => rm(state.base, { recursive: true, force: true }));
+      const pendingPath = path.join(state.root, "registration-pending.sec");
+      if (mode === "corrupt") {
+        await writeFile(pendingPath, Buffer.from("not-safe-storage"), { mode: 0o600 });
+      } else {
+        const decoded = JSON.parse(
+          state.storage.decryptString(await readFile(pendingPath))
+        );
+        decoded.headers["X-AiCRM-Content-SHA256"] = "0".repeat(64);
+        await writeFile(pendingPath, state.storage.encryptString(JSON.stringify(decoded)), { mode: 0o600 });
+      }
+      let fetchCalls = 0;
+      const restarted = durableClient({
+        root: state.root,
+        storage: state.storage,
+        fetch: async () => {
+          fetchCalls += 1;
+          return jsonResponse(201, { data: { deviceId } });
+        }
+      });
+      await assert.rejects(restarted.client.register(), {
+        code: "desktop_device_registration_recovery_required"
+      });
+      assert.equal(fetchCalls, 0);
+    });
+  }
+});
+
+test("registered identity validates and durably clears a leftover pending request without network", async (t) => {
+  const state = await ambiguousDurableState();
+  t.after(() => rm(state.base, { recursive: true, force: true }));
+  await state.identityStore.markRegistration("registered", deviceId);
+  let fetchCalls = 0;
+  const restarted = durableClient({
+    root: state.root,
+    storage: state.storage,
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("registered cleanup must not call network");
+    }
+  });
+  assert.equal((await restarted.client.register()).registrationStatus, "registered");
+  assert.equal(fetchCalls, 0);
+  assert.equal(await restarted.pendingRegistrationStore.load(), null);
 });
 
 test("registration remains Main-only and is not exposed as IPC or a Codex capability", async () => {

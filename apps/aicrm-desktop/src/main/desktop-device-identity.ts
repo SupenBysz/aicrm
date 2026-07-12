@@ -13,12 +13,14 @@ import {
 
 const IDENTITY_FILE = "identity.sec";
 const SEQUENCE_FILE = "sequence.sec";
+const DEVICE_REGISTRATION_PATH = "/api/v1/ai-executor-devices";
 const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
 
 export type DesktopDeviceIdentityErrorCode =
   | "desktop_secure_storage_unavailable"
   | "desktop_device_identity_corrupt"
   | "desktop_device_identity_unsafe"
+  | "desktop_device_registration_recovery_required"
   | "desktop_device_sequence_exhausted";
 
 export class DesktopDeviceIdentityError extends Error {
@@ -59,6 +61,13 @@ export interface SignDesktopDeviceRequestInput {
 }
 
 export interface SignedDesktopDeviceRequest extends DesktopDeviceProof {
+  deviceId: string;
+  publicKey: string;
+  keyGeneration: number;
+  sequence: string;
+}
+
+export interface DesktopDeviceRegistrationSequenceFence {
   deviceId: string;
   publicKey: string;
   keyGeneration: number;
@@ -151,6 +160,93 @@ export class DesktopDeviceIdentityStore {
         keyGeneration: identity.keyGeneration,
         sequence: identity.lastSequence
       };
+    });
+  }
+
+  /**
+   * Persists the exact signed registration request before advancing either
+   * local high-water record. If Main crashes after `persistPending` returns,
+   * the pending request is sufficient to repair sequence 1 and replay the
+   * server ledger entry without ever allocating sequence 2.
+   */
+  prepareRegistrationRequest(
+    input: SignDesktopDeviceRequestInput,
+    persistPending: (request: SignedDesktopDeviceRequest) => Promise<void>
+  ): Promise<SignedDesktopDeviceRequest> {
+    return this.exclusive(async () => {
+      const identity = await this.loadOrCreate();
+      if (
+        identity.registrationStatus !== "unregistered" ||
+        parseSequence(identity.lastSequence) !== 0n ||
+        input.method !== "POST" ||
+        input.path !== DEVICE_REGISTRATION_PATH ||
+        typeof input.authorization !== "string" ||
+        !input.authorization.startsWith("Bearer ") ||
+        input.allowedAuthorizationSchemes?.length !== 1 ||
+        input.allowedAuthorizationSchemes[0] !== "Bearer"
+      ) {
+        throw identityError(
+          "desktop_device_registration_recovery_required",
+          "设备首次登记序列需要恢复"
+        );
+      }
+      const timestamp = input.timestamp ?? this.now().getTime();
+      const nonce = input.nonce ?? createDeviceNonce();
+      const proof = buildDesktopDeviceProof({
+        key: identity,
+        method: input.method,
+        path: input.path,
+        body: input.body,
+        authorization: input.authorization,
+        allowedAuthorizationSchemes: input.allowedAuthorizationSchemes,
+        timestamp,
+        nonce,
+        sequence: 1n
+      });
+      const signed: SignedDesktopDeviceRequest = {
+        ...proof,
+        deviceId: identity.deviceId,
+        publicKey: identity.publicKey,
+        keyGeneration: identity.keyGeneration,
+        sequence: "1"
+      };
+      // This must complete and fsync before either high-water file advances.
+      await persistPending(signed);
+      identity.lastSequence = "1";
+      await this.writeEncrypted(this.identityPath, identity);
+      await this.writeEncrypted(this.sequencePath, sequenceState(identity));
+      return signed;
+    });
+  }
+
+  /** Repairs a crash between durable pending creation and high-water commit. */
+  repairRegistrationSequence(fence: DesktopDeviceRegistrationSequenceFence): Promise<void> {
+    return this.exclusive(async () => {
+      const identity = await this.loadOrCreate();
+      if (
+        identity.registrationStatus !== "unregistered" ||
+        fence.sequence !== "1" ||
+        fence.deviceId !== identity.deviceId ||
+        fence.publicKey !== identity.publicKey ||
+        fence.keyGeneration !== identity.keyGeneration ||
+        identity.keyGeneration !== 1
+      ) {
+        throw identityError(
+          "desktop_device_registration_recovery_required",
+          "设备登记恢复栅栏不匹配"
+        );
+      }
+      const current = parseSequence(identity.lastSequence);
+      if (current > 1n) {
+        throw identityError(
+          "desktop_device_registration_recovery_required",
+          "设备登记序列已越过首次登记"
+        );
+      }
+      if (current === 1n) return;
+      identity.lastSequence = "1";
+      await this.writeEncrypted(this.identityPath, identity);
+      await this.writeEncrypted(this.sequencePath, sequenceState(identity));
     });
   }
 

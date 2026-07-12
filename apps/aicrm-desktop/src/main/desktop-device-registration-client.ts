@@ -6,6 +6,13 @@ import type {
   SignedDesktopDeviceRequest
 } from "./desktop-device-identity.ts";
 import {
+  createDesktopDevicePendingRegistration,
+  pendingRegistrationBody,
+  pendingRegistrationSignedRequest,
+  type DesktopDevicePendingRegistration,
+  type DesktopDevicePendingRegistrationStore
+} from "./desktop-device-registration-pending.ts";
+import {
   hashAuthorizationToken,
   sha256Hex,
   verifyDesktopDeviceSigningInput
@@ -81,12 +88,19 @@ export interface DesktopDeviceRegistrationCreateRequest {
  */
 export interface DesktopDeviceRegistrationCreateResponse {
   deviceId: string;
-  status: "active";
-  keyGeneration: 1;
 }
 
 interface RegistrationIdentityStore
-  extends Pick<DesktopDeviceIdentityStore, "getIdentity" | "signRequest" | "markRegistration"> {}
+  extends Pick<
+    DesktopDeviceIdentityStore,
+    | "getIdentity"
+    | "prepareRegistrationRequest"
+    | "repairRegistrationSequence"
+    | "markRegistration"
+  > {}
+
+interface RegistrationPendingStore
+  extends Pick<DesktopDevicePendingRegistrationStore, "load" | "create" | "clear"> {}
 
 interface HttpResponseLike {
   ok: boolean;
@@ -98,6 +112,7 @@ type HostFetch = (url: string, init: RequestInit) => Promise<HttpResponseLike>;
 
 export interface DesktopDeviceRegistrationClientOptions {
   identityStore: RegistrationIdentityStore;
+  pendingRegistrationStore: RegistrationPendingStore;
   deviceLabel: string;
   appVersion: string;
   /** Main-owned host session. Never source this value from Renderer input. */
@@ -117,6 +132,7 @@ export interface DesktopDeviceRegistrationClientOptions {
  */
 export class DesktopDeviceRegistrationClient {
   private readonly identityStore: RegistrationIdentityStore;
+  private readonly pendingRegistrationStore: RegistrationPendingStore;
   private readonly deviceLabel: string;
   private readonly appVersion: string;
   private readonly loadHostSession: () => Promise<DesktopSession | null>;
@@ -126,10 +142,10 @@ export class DesktopDeviceRegistrationClient {
   private readonly requestIdFactory: () => string;
   private readonly requestTimeoutMs: number;
   private inFlight: Promise<DesktopDeviceIdentityProjection> | null = null;
-  private signedRegistration: SignedDesktopDeviceRequest | null = null;
 
   constructor(options: DesktopDeviceRegistrationClientOptions) {
     this.identityStore = options.identityStore;
+    this.pendingRegistrationStore = options.pendingRegistrationStore;
     this.deviceLabel = validateDeviceLabel(options.deviceLabel);
     this.appVersion = validateAppVersion(options.appVersion);
     this.loadHostSession =
@@ -155,30 +171,42 @@ export class DesktopDeviceRegistrationClient {
 
   private async registerOnce(): Promise<DesktopDeviceIdentityProjection> {
     const identity = await this.identityStore.getIdentity();
-    if (identity.registrationStatus === "registered") return identity;
+    const pending = await this.pendingRegistrationStore.load();
+    if (identity.registrationStatus === "registered") {
+      if (pending) {
+        validatePendingForIdentity(pending, identity);
+        await this.pendingRegistrationStore.clear(identity.deviceId, pending.requestHash);
+      }
+      return identity;
+    }
     if (identity.registrationStatus === "revoked") {
       throw registrationError("desktop_device_already_revoked", "设备身份已撤销，禁止重新登记");
-    }
-    if (this.signedRegistration) {
-      throw registrationError(
-        "desktop_device_registration_recovery_required",
-        "设备登记结果不确定，需要受信恢复流程"
-      );
     }
 
     const authorization = await this.loadBearerAuthorization();
     const origin = trustedApiOrigin(await this.loadTrustedApiBaseUrl());
+    if (pending) {
+      if (pending.authorization !== authorization) {
+        throw registrationError(
+          "desktop_device_registration_recovery_required",
+          "Host Bearer 已变化，禁止重签首次登记"
+        );
+      }
+      return this.replayPending(identity, pending, origin, authorization);
+    }
     const challengeRequest: DesktopDeviceRegistrationChallengeRequest = {
       publicKey: identity.publicKey,
       deviceLabel: this.deviceLabel,
       appVersion: this.appVersion
     };
+    const challengeBody = encodeJson(challengeRequest);
     const challenge = await this.postJson<DesktopDeviceRegistrationChallenge>(
       origin,
       DESKTOP_DEVICE_REGISTRATION_CHALLENGE_PATH,
       authorization,
-      encodeJson(challengeRequest),
-      validateChallenge
+      challengeBody,
+      validateChallenge,
+      { "Idempotency-Key": challengeIdempotencyKey(challengeBody) }
     );
     if (Date.parse(challenge.expiresAt) <= this.now().getTime()) {
       throw registrationError(
@@ -195,35 +223,85 @@ export class DesktopDeviceRegistrationClient {
       appVersion: this.appVersion
     };
     const createBody = encodeJson(createRequest);
-    const signed = await this.identityStore.signRequest({
-      method: "POST",
-      path: DESKTOP_DEVICE_REGISTRATION_PATH,
-      body: createBody,
-      authorization,
-      allowedAuthorizationSchemes: ["Bearer"]
-    });
-    this.signedRegistration = signed;
-    validateSignedRegistration(signed, identity, createBody, authorization, this.now().getTime());
+    let prepared: DesktopDevicePendingRegistration | null = null;
+    await this.identityStore.prepareRegistrationRequest(
+      {
+        method: "POST",
+        path: DESKTOP_DEVICE_REGISTRATION_PATH,
+        body: createBody,
+        authorization,
+        allowedAuthorizationSchemes: ["Bearer"]
+      },
+      async (signed) => {
+        validateSignedRegistration(
+          signed,
+          identity,
+          createBody,
+          authorization,
+          this.now().getTime(),
+          true
+        );
+        prepared = createDesktopDevicePendingRegistration({
+          body: createBody,
+          authorization,
+          signed,
+          createdAt: this.now().toISOString()
+        });
+        await this.pendingRegistrationStore.create(prepared);
+      }
+    );
+    if (!prepared) {
+      throw registrationError(
+        "desktop_device_registration_recovery_required",
+        "设备登记待定请求未持久化"
+      );
+    }
+    return this.submitPending(identity, prepared, origin, authorization);
+  }
 
+  private async replayPending(
+    identity: DesktopDeviceIdentityProjection,
+    pending: DesktopDevicePendingRegistration,
+    origin: string,
+    authorization: string
+  ): Promise<DesktopDeviceIdentityProjection> {
+    validatePendingForIdentity(pending, identity);
+    await this.identityStore.repairRegistrationSequence({
+      deviceId: pending.deviceId,
+      publicKey: pending.publicKey,
+      keyGeneration: pending.keyGeneration,
+      sequence: pending.sequence
+    });
+    return this.submitPending(identity, pending, origin, authorization);
+  }
+
+  private async submitPending(
+    identity: DesktopDeviceIdentityProjection,
+    pending: DesktopDevicePendingRegistration,
+    origin: string,
+    authorization: string
+  ): Promise<DesktopDeviceIdentityProjection> {
+    const body = pendingRegistrationBody(pending);
+    const signed = pendingRegistrationSignedRequest(pending);
+    validatePendingCreateBody(body, identity);
+    validateSignedRegistration(signed, identity, body, authorization, this.now().getTime(), false);
     const created = await this.postJson<DesktopDeviceRegistrationCreateResponse>(
       origin,
       DESKTOP_DEVICE_REGISTRATION_PATH,
       authorization,
-      createBody,
+      body,
       validateCreateResponse,
       signed.headers
     );
-    if (
-      created.deviceId !== identity.deviceId ||
-      created.status !== "active" ||
-      created.keyGeneration !== identity.keyGeneration
-    ) {
+    if (created.deviceId !== identity.deviceId) {
       throw registrationError(
         "desktop_device_registration_response_invalid",
         "服务端设备标识与本机密钥不匹配"
       );
     }
-    return this.identityStore.markRegistration("registered", identity.deviceId);
+    const registered = await this.identityStore.markRegistration("registered", identity.deviceId);
+    await this.pendingRegistrationStore.clear(identity.deviceId, pending.requestHash);
+    return registered;
   }
 
   private async loadBearerAuthorization(): Promise<string> {
@@ -351,18 +429,14 @@ function validateChallenge(value: unknown): DesktopDeviceRegistrationChallenge {
 }
 
 function validateCreateResponse(value: unknown): DesktopDeviceRegistrationCreateResponse {
-  if (!exactObject(value, ["deviceId", "status", "keyGeneration"])) {
+  if (!exactObject(value, ["deviceId"])) {
     throw registrationError(
       "desktop_device_registration_response_invalid",
       "设备登记响应不是安全投影"
     );
   }
   const response = value as unknown as DesktopDeviceRegistrationCreateResponse;
-  if (
-    !DEVICE_ID_PATTERN.test(response.deviceId) ||
-    response.status !== "active" ||
-    response.keyGeneration !== 1
-  ) {
+  if (!DEVICE_ID_PATTERN.test(response.deviceId)) {
     throw registrationError(
       "desktop_device_registration_response_invalid",
       "设备登记响应标识无效"
@@ -376,7 +450,8 @@ function validateSignedRegistration(
   identity: DesktopDeviceIdentityProjection,
   body: Uint8Array,
   authorization: string,
-  nowMilliseconds: number
+  nowMilliseconds: number,
+  enforceClockWindow: boolean
 ): void {
   const requiredHeaderNames = [
     "X-AiCRM-Content-SHA256",
@@ -408,7 +483,7 @@ function validateSignedRegistration(
     signed.authorizationTokenHash !== expectedTokenHash ||
     signed.requestHash !== sha256Hex(Buffer.from(signed.signingInput, "utf8")) ||
     !Number.isSafeInteger(timestamp) ||
-    Math.abs(timestamp - nowMilliseconds) > 5 * 60 * 1000 ||
+    (enforceClockWindow && Math.abs(timestamp - nowMilliseconds) > 5 * 60 * 1000) ||
     !verifyDesktopDeviceSigningInput(identity.publicKey, signed.signingInput, signature)
   ) {
     throw registrationError(
@@ -416,6 +491,88 @@ function validateSignedRegistration(
       "设备首次登记签名、序列或密钥代次无效"
     );
   }
+}
+
+function validatePendingForIdentity(
+  pending: DesktopDevicePendingRegistration,
+  identity: DesktopDeviceIdentityProjection
+): void {
+  const body = pendingRegistrationBody(pending);
+  const signed = pendingRegistrationSignedRequest(pending);
+  if (
+    pending.deviceId !== identity.deviceId ||
+    pending.publicKey !== identity.publicKey ||
+    pending.keyGeneration !== identity.keyGeneration ||
+    pending.sequence !== "1"
+  ) {
+    throw registrationError(
+      "desktop_device_registration_recovery_required",
+      "设备登记待定请求与身份不匹配"
+    );
+  }
+  validatePendingCreateBody(body, identity);
+  validateSignedRegistration(
+    signed,
+    identity,
+    body,
+    pending.authorization,
+    Date.parse(pending.createdAt),
+    false
+  );
+}
+
+function validatePendingCreateBody(
+  body: Uint8Array,
+  identity: DesktopDeviceIdentityProjection
+): DesktopDeviceRegistrationCreateRequest {
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.from(body).toString("utf8")) as unknown;
+  } catch {
+    throw registrationError(
+      "desktop_device_registration_recovery_required",
+      "设备登记待定 body 无效"
+    );
+  }
+  if (!exactObject(value, ["challengeId", "challenge", "publicKey", "deviceLabel", "appVersion"])) {
+    throw registrationError(
+      "desktop_device_registration_recovery_required",
+      "设备登记待定 body 结构无效"
+    );
+  }
+  const create = value as unknown as DesktopDeviceRegistrationCreateRequest;
+  if (
+    !validOpaque(create.challengeId, 160) ||
+    typeof create.challenge !== "string" ||
+    create.challenge.length < 16 ||
+    create.challenge.length > 2048 ||
+    create.publicKey !== identity.publicKey
+  ) {
+    throw registrationError(
+      "desktop_device_registration_recovery_required",
+      "设备登记待定 body 字段无效"
+    );
+  }
+  validateDeviceLabel(create.deviceLabel);
+  validateAppVersion(create.appVersion);
+  const canonical = encodeJson({
+    challengeId: create.challengeId,
+    challenge: create.challenge,
+    publicKey: create.publicKey,
+    deviceLabel: create.deviceLabel,
+    appVersion: create.appVersion
+  });
+  if (!Buffer.from(canonical).equals(Buffer.from(body))) {
+    throw registrationError(
+      "desktop_device_registration_recovery_required",
+      "设备登记待定 body 不是规范编码"
+    );
+  }
+  return create;
+}
+
+function challengeIdempotencyKey(body: Uint8Array): string {
+  return `desktop-device-challenge:${sha256Hex(body)}`;
 }
 
 function validateDeviceLabel(value: string): string {
