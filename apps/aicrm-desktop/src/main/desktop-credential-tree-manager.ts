@@ -21,7 +21,8 @@ import {
 import {
   DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM,
   DesktopCredentialTreeError,
-  digestDesktopCredentialTree
+  digestDesktopCredentialTree,
+  type DesktopCredentialTreeDigest
 } from "./desktop-credential-tree-digest.ts";
 import {
   createDesktopWindowsCredentialProtection,
@@ -198,6 +199,35 @@ export class DesktopCredentialTreeManager {
     });
   }
 
+  /**
+   * Flushes a mutable candidate before measuring it. Revision measurements
+   * additionally prove the permanent reservation fence and read-only seal.
+   * The returned projection never exposes the host path.
+   */
+  async measure(ref: DesktopCredentialTreeRef): Promise<DesktopCredentialTreeDigest> {
+    validateRef(ref);
+    return this.withExecutorLock(ref.executorId, async () => {
+      const target = this.pathFor(ref);
+      await this.assertSafeDirectory(target);
+      if (ref.kind === "revision") {
+        const container = this.revisionContainerPath(ref.executorId, ref.revision);
+        const fence = await this.readReservationFence(ref.executorId, ref.revision);
+        await this.validateReadOnlyTree(container);
+        const measured = await digestDesktopCredentialTree(target);
+        if (measured.digest !== fence.expectedDigest) {
+          throw managerError(
+            "desktop_credential_digest_mismatch",
+            "凭据版本与预留栅栏摘要不一致"
+          );
+        }
+        return measured;
+      }
+      await this.durableBarrier(target);
+      await this.syncParent(path.dirname(target));
+      return digestDesktopCredentialTree(target);
+    });
+  }
+
   async cloneRevision(
     executorId: string,
     revision: number,
@@ -312,6 +342,40 @@ export class DesktopCredentialTreeManager {
       }
       return values;
     });
+  }
+
+  /** Enumerates only executors that own a non-terminal encrypted promotion journal. */
+  async listPendingExecutorIds(): Promise<string[]> {
+    await this.ensureRoot();
+    const children = await readdir(this.root, { withFileTypes: true });
+    const pending: string[] = [];
+    for (const child of children) {
+      if (
+        !child.isDirectory() ||
+        child.isSymbolicLink() ||
+        !SAFE_ID.test(child.name)
+      ) {
+        throw managerError(
+          "desktop_credential_tree_unsafe",
+          "凭据 Vault 根目录包含非法条目"
+        );
+      }
+      const executorId = child.name;
+      await this.ensurePrivatePath(executorId);
+      const journalRoot = this.containedPath(executorId, "journals");
+      if (!(await pathExists(journalRoot))) continue;
+      await this.assertSafeDirectory(journalRoot);
+      const journal = new DesktopCredentialOperationJournalStore({
+        root: journalRoot,
+        safeStorage: this.safeStorage,
+        platform: this.platform,
+        directorySync: (directory) => this.syncJournalDirectory(directory)
+      });
+      if ((await journal.listOperationIds()).length > 0) pending.push(executorId);
+    }
+    return pending.sort((left, right) =>
+      Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"))
+    );
   }
 
   async completeAfterAcknowledgement(

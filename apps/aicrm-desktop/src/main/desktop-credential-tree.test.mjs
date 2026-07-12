@@ -523,6 +523,63 @@ test("staging promotion is digest-bound, durable, immutable and no-replace", asy
   assert.equal((await lstat(second.target)).isDirectory(), true);
 });
 
+test("Vault-owned measurement flushes mutable candidates and verifies sealed revisions", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_measure", "session_measure", "measured");
+  const candidate = await current.manager.measure({
+    kind: "staging",
+    executorId: "executor_measure",
+    sessionId: "session_measure"
+  });
+  assert.equal(candidate.digest, staging.digest.digest);
+  assert.equal("path" in candidate, false);
+
+  const projection = await current.manager.promoteStaging({
+    executorId: "executor_measure",
+    sessionId: "session_measure",
+    operationId: "promotion_measure",
+    revision: 1,
+    expectedDigest: candidate.digest
+  });
+  const revision = await current.manager.measure({
+    kind: "revision",
+    executorId: "executor_measure",
+    revision: 1
+  });
+  assert.equal(revision.digest, candidate.digest);
+  await acknowledge(current.manager, projection);
+});
+
+test("pending executor enumeration is strict, sorted, and excludes acknowledged journals", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const pendingStaging = await seedStaging(current.manager, "executor_z", "session_z", "pending");
+  await current.manager.promoteStaging({
+    executorId: "executor_z",
+    sessionId: "session_z",
+    operationId: "promotion_z",
+    revision: 1,
+    expectedDigest: pendingStaging.digest.digest
+  });
+  const acknowledgedStaging = await seedStaging(current.manager, "executor_a", "session_a", "done");
+  const acknowledged = await current.manager.promoteStaging({
+    executorId: "executor_a",
+    sessionId: "session_a",
+    operationId: "promotion_a",
+    revision: 1,
+    expectedDigest: acknowledgedStaging.digest.digest
+  });
+  await acknowledge(current.manager, acknowledged);
+  await current.manager.createStaging("executor_empty", "session_empty");
+
+  assert.deepEqual(await current.manager.listPendingExecutorIds(), ["executor_z"]);
+  await writeFile(path.join(current.root, "unexpected.txt"), "unsafe", { mode: 0o600 });
+  await assert.rejects(current.manager.listPendingExecutorIds(), {
+    code: "desktop_credential_tree_unsafe"
+  });
+});
+
 test("digest mismatch never creates a revision or success journal", async (t) => {
   const current = await managerFixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
