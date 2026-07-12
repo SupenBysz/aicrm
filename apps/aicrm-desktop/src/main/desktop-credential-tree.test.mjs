@@ -138,6 +138,16 @@ class FakeWindowsCredentialProtection {
     ) {
       throw new Error("ACL drift detected");
     }
+    if (
+      path.basename(resolved) === "payload" &&
+      ![...this.protectedRoots].some((sealed) => isSameOrDescendant(resolved, sealed))
+    ) {
+      const moved = this.preparedMoves.find((source) => this.protectedRoots.has(source));
+      if (moved) {
+        this.protectedRoots.delete(moved);
+        this.protectedRoots.add(resolved);
+      }
+    }
     if (![...this.protectedRoots].some((sealed) => isSameOrDescendant(resolved, sealed))) {
       throw new Error("tree is not protected");
     }
@@ -712,6 +722,164 @@ test("COW operations never mount an active revision writable and quarantine is n
   });
   assert.equal((await lstat(revision3)).isDirectory(), true);
 });
+
+test("rejected activation quarantines the exact verified promotion idempotently", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_reject", "session_reject", "candidate");
+  const promoted = await current.manager.promoteStaging({
+    executorId: "executor_reject",
+    sessionId: "session_reject",
+    operationId: "promotion_reject",
+    revision: 2,
+    expectedDigest: staging.digest.digest
+  });
+  const input = {
+    executorId: promoted.executorId,
+    operationId: promoted.operationId,
+    revision: promoted.revision,
+    expectedDigest: promoted.digest
+  };
+  const first = await current.manager.quarantinePromotion(input);
+  assert.deepEqual(first, {
+    executorId: "executor_reject",
+    operationId: "promotion_reject",
+    revision: 2,
+    digestAlgorithm: DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM,
+    quarantineDigest: staging.digest.digest,
+    fileCount: staging.digest.fileCount,
+    totalBytes: staging.digest.totalBytes
+  });
+  assert.deepEqual(await current.manager.quarantinePromotion(input), first);
+  assert.equal((await current.manager.listPendingOperations("executor_reject"))[0].phase, "quarantined");
+  await assert.rejects(current.manager.completeAfterAcknowledgement(input), {
+    code: "desktop_credential_recovery_required"
+  });
+  const quarantined = current.manager.mainOnlyResolvePath({
+    kind: "quarantine",
+    executorId: "executor_reject",
+    sourceKind: "revision",
+    sourceId: "2"
+  });
+  assert.equal((await digestDesktopCredentialTree(quarantined)).digest, staging.digest.digest);
+  await assert.rejects(
+    current.manager.quarantinePromotion({ ...input, expectedDigest: "0".repeat(64) }),
+    { code: "desktop_credential_recovery_required" }
+  );
+  const straySourceContainer = path.join(
+    current.root,
+    "executor_reject",
+    "revisions",
+    "2"
+  );
+  await mkdir(straySourceContainer, { mode: 0o700 });
+  await assert.rejects(current.manager.quarantinePromotion(input), {
+    code: "desktop_credential_recovery_required"
+  });
+});
+
+test("promotion quarantine rejects unknown revision-container entries before terminalizing", async (t) => {
+  if (process.platform === "win32") return;
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_shape", "session_shape", "candidate");
+  const promoted = await current.manager.promoteStaging({
+    executorId: "executor_shape",
+    sessionId: "session_shape",
+    operationId: "promotion_shape",
+    revision: 4,
+    expectedDigest: staging.digest.digest
+  });
+  const revision = current.manager.mainOnlyResolvePath({
+    kind: "revision",
+    executorId: "executor_shape",
+    revision: 4
+  });
+  const container = path.dirname(revision);
+  await chmod(container, 0o700);
+  await writeFile(path.join(container, "unexpected"), "not-owned", { mode: 0o400 });
+  await chmod(container, 0o500);
+  await assert.rejects(
+    current.manager.quarantinePromotion({
+      executorId: promoted.executorId,
+      operationId: promoted.operationId,
+      revision: promoted.revision,
+      expectedDigest: promoted.digest
+    }),
+    { code: "desktop_credential_tree_unsafe" }
+  );
+  assert.equal((await current.manager.listPendingOperations("executor_shape"))[0].phase, "verified");
+  assert.equal((await lstat(revision)).isDirectory(), true);
+});
+
+for (const faultPoint of [
+  "after_quarantine_journal",
+  "after_quarantine_reservation",
+  "after_quarantine_rename"
+]) {
+  test(`promotion quarantine recovers crash point ${faultPoint}`, async (t) => {
+    let armed = false;
+    const current = await managerFixture({
+      faultInjector(point) {
+        if (armed && point === faultPoint) {
+          armed = false;
+          throw new Error("simulated quarantine crash");
+        }
+      }
+    });
+    t.after(() => rm(current.base, { recursive: true, force: true }));
+    const staging = await seedStaging(current.manager, "executor_recover", "session_recover", faultPoint);
+    const promoted = await current.manager.promoteStaging({
+      executorId: "executor_recover",
+      sessionId: "session_recover",
+      operationId: "promotion_recover",
+      revision: 3,
+      expectedDigest: staging.digest.digest
+    });
+    const input = {
+      executorId: promoted.executorId,
+      operationId: promoted.operationId,
+      revision: promoted.revision,
+      expectedDigest: promoted.digest
+    };
+    armed = true;
+    await assert.rejects(current.manager.quarantinePromotion(input), (error) => {
+      assert.equal(error.code, "desktop_credential_recovery_required");
+      assert.equal(String(error.message).includes(current.root), false);
+      return true;
+    });
+    assert.equal((await current.manager.listPendingOperations("executor_recover"))[0].phase, "quarantined");
+    if (process.platform !== "win32" && faultPoint === "after_quarantine_reservation") {
+      await chmod(
+        path.join(current.root, "executor_recover", "revisions", "3"),
+        0o700
+      );
+    }
+    if (process.platform !== "win32" && faultPoint === "after_quarantine_rename") {
+      await chmod(
+        path.join(
+          current.root,
+          "executor_recover",
+          "quarantine",
+          "revisions",
+          "3",
+          "payload"
+        ),
+        0o700
+      );
+    }
+
+    const restarted = new DesktopCredentialTreeManager({
+      root: current.root,
+      safeStorage: current.storage,
+      now: () => new Date("2026-07-13T00:00:01.000Z")
+    });
+    await restarted.initialize();
+    const recovered = await restarted.quarantinePromotion(input);
+    assert.equal(recovered.quarantineDigest, staging.digest.digest);
+    assert.deepEqual(await restarted.quarantinePromotion(input), recovered);
+  });
+}
 
 test("per-executor process mutex serializes conflicting staging creation", async (t) => {
   const current = await managerFixture();
@@ -1336,6 +1504,73 @@ test("simulated Windows revision quarantine verifies the sealed payload and seal
     payload: path.dirname(quarantined)
   }]);
   assert.equal((await digestDesktopCredentialTree(quarantined)).digest, staging.digest.digest);
+});
+
+test("simulated Windows promotion quarantine recovers rename crash and never reseals an outer reservation", async (t) => {
+  let armed = false;
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection,
+    faultInjector(point) {
+      if (armed && point === "after_quarantine_rename") {
+        armed = false;
+        throw new Error(`${current.root}/sensitive-vault-path`);
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(current.manager, "executor_win_recover", "session_win_recover", "windows");
+  const promoted = await current.manager.promoteStaging({
+    executorId: "executor_win_recover",
+    sessionId: "session_win_recover",
+    operationId: "promotion_win_recover",
+    revision: 5,
+    expectedDigest: staging.digest.digest
+  });
+  const input = {
+    executorId: promoted.executorId,
+    operationId: promoted.operationId,
+    revision: promoted.revision,
+    expectedDigest: promoted.digest
+  };
+  const source = path.dirname(current.manager.mainOnlyResolvePath({
+    kind: "revision",
+    executorId: "executor_win_recover",
+    revision: 5
+  }));
+  armed = true;
+  await assert.rejects(current.manager.quarantinePromotion(input), (error) => {
+    assert.equal(error.code, "desktop_credential_recovery_required");
+    assert.equal(String(error.message).includes(current.root), false);
+    return true;
+  });
+  const quarantined = current.manager.mainOnlyResolvePath({
+    kind: "quarantine",
+    executorId: "executor_win_recover",
+    sourceKind: "revision",
+    sourceId: "5"
+  });
+  const payload = path.dirname(quarantined);
+  const reservation = path.dirname(payload);
+  await assert.rejects(lstat(source), { code: "ENOENT" });
+  assert.equal((await lstat(quarantined)).isDirectory(), true);
+  assert.equal(protection.protectedRoots.has(source), true);
+  assert.equal(protection.protectedRoots.has(reservation), false);
+
+  const restarted = new DesktopCredentialTreeManager({
+    root: current.root,
+    safeStorage: current.storage,
+    now: () => new Date("2026-07-13T00:00:01.000Z"),
+    platform: "win32",
+    windowsProtection: protection
+  });
+  await restarted.initialize();
+  const recovered = await restarted.quarantinePromotion(input);
+  assert.equal(recovered.quarantineDigest, staging.digest.digest);
+  assert.equal(protection.sealedQuarantines.length, 1);
+  assert.deepEqual(await restarted.quarantinePromotion(input), recovered);
+  assert.equal(protection.sealedQuarantines.length, 1);
 });
 
 test("simulated Windows fails closed when no native credential protection is injected", async (t) => {

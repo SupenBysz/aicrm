@@ -68,6 +68,9 @@ export type DesktopCredentialTreeFaultPoint =
   | "after_readonly"
   | "after_target_durable"
   | "after_verified"
+  | "after_quarantine_journal"
+  | "after_quarantine_reservation"
+  | "after_quarantine_rename"
   | "before_journal_remove";
 
 export type DesktopCredentialTreeFaultInjector = (
@@ -135,6 +138,16 @@ export interface CompleteDesktopCredentialAcknowledgementInput {
   operationId: string;
   revision: number;
   expectedDigest: string;
+}
+
+export interface DesktopCredentialQuarantinedPromotionProjection {
+  executorId: string;
+  operationId: string;
+  revision: number;
+  digestAlgorithm: typeof DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM;
+  quarantineDigest: string;
+  fileCount: number;
+  totalBytes: number;
 }
 
 interface DesktopCredentialReservationFence {
@@ -417,6 +430,54 @@ export class DesktopCredentialTreeManager {
     });
   }
 
+  /**
+   * Moves a verified activation candidate into durable quarantine while
+   * retaining its encrypted terminal promotion journal. The exact tuple makes
+   * retries idempotent after any rename or sealing crash window.
+   */
+  async quarantinePromotion(
+    input: CompleteDesktopCredentialAcknowledgementInput
+  ): Promise<DesktopCredentialQuarantinedPromotionProjection> {
+    validatePromotionInput(input);
+    return this.withExecutorLock(input.executorId, async () => {
+      try {
+        const journal = await this.journal(input.executorId);
+        const record = await journal.load(input.operationId);
+        if (
+          record === null ||
+          record.executorId !== input.executorId ||
+          record.operationId !== input.operationId ||
+          record.targetRevision !== input.revision ||
+          record.expectedDigest !== input.expectedDigest ||
+          (record.phase !== "verified" && record.phase !== "quarantined")
+        ) {
+          throw managerError(
+            "desktop_credential_recovery_required",
+            "凭据隔离操作栅栏不匹配"
+          );
+        }
+        if (record.phase === "verified") {
+          await this.verifyPromotionRevision(record);
+          record.phase = "quarantined";
+          await journal.save(record);
+          await this.fault("after_quarantine_journal");
+        }
+        const measured = await this.finishQuarantinedPromotion(record);
+        return {
+          executorId: record.executorId,
+          operationId: record.operationId,
+          revision: record.targetRevision,
+          digestAlgorithm: measured.algorithm,
+          quarantineDigest: measured.digest,
+          fileCount: measured.fileCount,
+          totalBytes: measured.totalBytes
+        };
+      } catch (error) {
+        throw normalizeQuarantinePromotionError(error);
+      }
+    });
+  }
+
   quarantine(ref: DesktopCredentialTreeRef): Promise<DesktopCredentialQuarantineRef> {
     validateRef(ref);
     return this.withExecutorLock(ref.executorId, () => this.quarantineUnlocked(ref));
@@ -669,7 +730,9 @@ export class DesktopCredentialTreeManager {
       if (!windowsRevision) await this.durableBarrier(sourceRoot);
       await this.createPrivateDirectoryNoReplace(targetReservation);
       await this.syncParent(targetParent);
+      await this.fault("after_quarantine_reservation");
       await renameIntoPrivateReservation(sourceRoot, targetPayload, targetReservation);
+      await this.fault("after_quarantine_rename");
       await this.syncParent(path.dirname(sourceRoot));
       if (this.platform === "win32") {
         if (windowsRevision) {
@@ -693,6 +756,223 @@ export class DesktopCredentialTreeManager {
         await chmod(restore, originalMode).catch(() => undefined);
       }
       throw normalizeTreeError(error);
+    }
+  }
+
+  private async verifyPromotionRevision(
+    record: DesktopCredentialOperationRecord
+  ): Promise<Awaited<ReturnType<typeof digestDesktopCredentialTree>>> {
+    const revision = this.pathFor({
+      kind: "revision",
+      executorId: record.executorId,
+      revision: record.targetRevision
+    });
+    const container = this.revisionContainerPath(record.executorId, record.targetRevision);
+    await this.assertSafeDirectory(revision);
+    await this.ensurePromotionRevisionSeal(
+      container,
+      revision,
+      record,
+      record.phase === "quarantined"
+    );
+    const measured = await digestDesktopCredentialTree(revision);
+    if (measured.digest !== record.expectedDigest) {
+      throw managerError(
+        "desktop_credential_digest_mismatch",
+        "凭据隔离候选摘要不匹配"
+      );
+    }
+    return measured;
+  }
+
+  private async finishQuarantinedPromotion(
+    record: DesktopCredentialOperationRecord
+  ): Promise<Awaited<ReturnType<typeof digestDesktopCredentialTree>>> {
+    const sourceRef: DesktopCredentialRevisionRef = {
+      kind: "revision",
+      executorId: record.executorId,
+      revision: record.targetRevision
+    };
+    const sourceTree = this.pathFor(sourceRef);
+    const sourceContainer = this.revisionContainerPath(record.executorId, record.targetRevision);
+    const quarantineParent = await this.ensurePrivatePath(
+      record.executorId,
+      "quarantine",
+      quarantineCategory("revision")
+    );
+    const quarantineReservation = this.containedPath(
+      record.executorId,
+      "quarantine",
+      quarantineCategory("revision"),
+      String(record.targetRevision)
+    );
+    const quarantinePayload = path.join(quarantineReservation, "payload");
+    const quarantineTree = path.join(quarantinePayload, RESERVATION_HOME);
+    const [sourceContainerExists, sourceTreeExists, reservationExists, quarantinePayloadExists] = await Promise.all([
+      pathExists(sourceContainer),
+      pathExists(sourceTree),
+      pathExists(quarantineReservation),
+      pathExists(quarantinePayload)
+    ]);
+    if (sourceContainerExists && quarantinePayloadExists) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据隔离来源与目标同时存在"
+      );
+    }
+    if (sourceContainerExists !== sourceTreeExists) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据隔离来源目录结构不一致"
+      );
+    }
+    if (sourceContainerExists) {
+      await this.verifyPromotionRevision(record);
+      if (!reservationExists) {
+        await this.quarantineUnlocked(sourceRef);
+      } else {
+        await this.assertSafeDirectory(quarantineReservation);
+        const children = await readdir(quarantineReservation, { withFileTypes: true });
+        if (children.length !== 0) {
+          throw managerError(
+            "desktop_credential_recovery_required",
+            "凭据隔离预留包含未知条目"
+          );
+        }
+        await renameIntoPrivateReservation(
+          sourceContainer,
+          quarantinePayload,
+          quarantineReservation
+        );
+        await this.fault("after_quarantine_rename");
+        await this.syncParent(path.dirname(sourceContainer));
+      }
+    } else if (!quarantinePayloadExists) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据隔离来源与目标均不存在"
+      );
+    }
+    await this.finishQuarantineReservation(
+      quarantineParent,
+      quarantineReservation,
+      quarantinePayload,
+      record
+    );
+    await this.assertSafeDirectory(quarantineTree);
+    const measured = await digestDesktopCredentialTree(quarantineTree);
+    if (measured.digest !== record.expectedDigest) {
+      throw managerError(
+        "desktop_credential_digest_mismatch",
+        "凭据隔离结果摘要不匹配"
+      );
+    }
+    return measured;
+  }
+
+  private async finishQuarantineReservation(
+    quarantineParent: string,
+    reservation: string,
+    payload: string,
+    record: DesktopCredentialOperationRecord
+  ): Promise<void> {
+    await this.assertSafeDirectory(reservation);
+    await this.assertSafeDirectory(payload);
+    const children = await readdir(reservation, { withFileTypes: true });
+    if (
+      children.length !== 1 ||
+      children[0]?.name !== "payload" ||
+      !children[0].isDirectory() ||
+      children[0].isSymbolicLink()
+    ) {
+      throw managerError(
+        "desktop_credential_tree_unsafe",
+        "凭据隔离目录结构不安全"
+      );
+    }
+    await this.ensurePromotionRevisionSeal(
+      payload,
+      path.join(payload, RESERVATION_HOME),
+      record,
+      true
+    );
+    if (this.platform === "win32") {
+      try {
+        await this.validateReadOnlyTree(reservation);
+      } catch {
+        await this.sealWindowsQuarantineReservation(reservation, payload);
+      }
+    } else {
+      await this.durableBarrier(payload);
+      await chmod(reservation, 0o500);
+      await this.syncParent(reservation);
+    }
+    await this.validateReadOnlyTree(reservation);
+    await this.syncParent(quarantineParent);
+  }
+
+  private async ensurePromotionRevisionSeal(
+    container: string,
+    credentialTree: string,
+    record: DesktopCredentialOperationRecord,
+    allowInterruptedQuarantineRepair: boolean
+  ): Promise<void> {
+    await this.assertSafeDirectory(container);
+    await this.assertSafeDirectory(credentialTree);
+    await this.assertRevisionContainerShape(container);
+    const fence = await this.readReservationFenceAt(container);
+    if (!reservationMatches(fence, record)) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据隔离预留所有权栅栏不匹配"
+      );
+    }
+    if (this.platform !== "win32") {
+      const info = await lstat(container);
+      const mode = info.mode & 0o777;
+      if (mode !== 0o500) {
+        if (!allowInterruptedQuarantineRepair || mode !== 0o700) {
+          throw managerError(
+            "desktop_credential_tree_unsafe",
+            "凭据隔离候选只读模式无效"
+          );
+        }
+        const fenceInfo = await lstat(path.join(container, RESERVATION_FENCE));
+        if (
+          !fenceInfo.isFile() ||
+          fenceInfo.isSymbolicLink() ||
+          fenceInfo.nlink !== 1 ||
+          (fenceInfo.mode & 0o777) !== 0o400
+        ) {
+          throw managerError(
+            "desktop_credential_tree_unsafe",
+            "凭据隔离恢复栅栏模式无效"
+          );
+        }
+        await this.validateReadOnlyTree(credentialTree);
+        await chmod(container, 0o500);
+        await this.syncParent(container);
+        await this.syncParent(path.dirname(container));
+      }
+    }
+    await this.validateReadOnlyTree(container);
+  }
+
+  private async assertRevisionContainerShape(container: string): Promise<void> {
+    const children = await readdir(container, { withFileTypes: true });
+    const home = children.find((child) => child.name === RESERVATION_HOME);
+    const fence = children.find((child) => child.name === RESERVATION_FENCE);
+    if (
+      children.length !== 2 ||
+      !home?.isDirectory() ||
+      home.isSymbolicLink() ||
+      !fence?.isFile() ||
+      fence.isSymbolicLink()
+    ) {
+      throw managerError(
+        "desktop_credential_tree_unsafe",
+        "凭据版本预留目录结构不安全"
+      );
     }
   }
 
@@ -777,6 +1057,12 @@ export class DesktopCredentialTreeManager {
     revision: number
   ): Promise<DesktopCredentialReservationFence> {
     const container = this.revisionContainerPath(executorId, revision);
+    return this.readReservationFenceAt(container);
+  }
+
+  private async readReservationFenceAt(
+    container: string
+  ): Promise<DesktopCredentialReservationFence> {
     await this.assertSafeDirectory(container);
     const target = path.join(container, RESERVATION_FENCE);
     let info;
@@ -1452,6 +1738,16 @@ function normalizeTreeError(error: unknown): unknown {
     );
   }
   return error;
+}
+
+function normalizeQuarantinePromotionError(error: unknown): DesktopCredentialTreeManagerError {
+  if (error instanceof DesktopCredentialTreeManagerError) return error;
+  const normalized = normalizeTreeError(error);
+  if (normalized instanceof DesktopCredentialTreeManagerError) return normalized;
+  return managerError(
+    "desktop_credential_recovery_required",
+    "凭据隔离恢复失败"
+  );
 }
 
 function isErrorCode(error: unknown, code: string): boolean {
