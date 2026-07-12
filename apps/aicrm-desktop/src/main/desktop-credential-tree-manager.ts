@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   chmod,
@@ -35,7 +36,9 @@ const MAX_FILES = 4096;
 const MAX_TOTAL_BYTES = 128 << 20;
 const RESERVATION_HOME = "home";
 const RESERVATION_FENCE = "owner.fence";
+const OWNER_FENCE_MAGIC = Buffer.from("AICRM-CREDENTIAL-OWNER-FENCE-V1\n", "ascii");
 const MAX_RESERVATION_FENCE_BYTES = 4096;
+const OWNER_NONCE = /^[0-9a-f]{64}$/;
 const executorMutexes = new Map<string, Promise<void>>();
 
 export type DesktopCredentialTreeManagerErrorCode =
@@ -56,6 +59,7 @@ export class DesktopCredentialTreeManagerError extends Error {
 }
 
 export type DesktopCredentialTreeFaultPoint =
+  | "after_staging_mkdir"
   | "after_journal_prepared"
   | "before_file_fsync"
   | "before_directory_fsync"
@@ -81,6 +85,11 @@ export interface DesktopCredentialStagingRef {
   kind: "staging";
   executorId: string;
   sessionId: string;
+}
+
+export interface DesktopCredentialStagingCreationResult {
+  ref: DesktopCredentialStagingRef;
+  recovered: boolean;
 }
 
 export interface DesktopCredentialRevisionRef {
@@ -150,11 +159,36 @@ export interface DesktopCredentialQuarantinedPromotionProjection {
   totalBytes: number;
 }
 
+export interface DesktopCredentialStagingQuarantineProjection {
+  ref: DesktopCredentialQuarantineRef;
+  digestAlgorithm: typeof DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM;
+  digest: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
 interface DesktopCredentialReservationFence {
   version: 1;
   executorId: string;
   operationId: string;
   revision: number;
+  expectedDigest: string;
+}
+
+interface DesktopCredentialStagingOwnerFence {
+  version: 1;
+  kind: "staging";
+  executorId: string;
+  sessionId: string;
+  nonce: string;
+}
+
+interface DesktopCredentialStagingQuarantineFence {
+  version: 1;
+  kind: "staging_quarantine";
+  executorId: string;
+  sessionId: string;
+  sourceNonce: string;
   expectedDigest: string;
 }
 
@@ -205,10 +239,75 @@ export class DesktopCredentialTreeManager {
     assertSafeId(sessionId);
     return this.withExecutorLock(executorId, async () => {
       const parent = await this.ensurePrivatePath(executorId, "staging");
-      const target = this.pathFor({ kind: "staging", executorId, sessionId });
-      await this.createPrivateDirectoryNoReplace(target);
-      await this.syncParent(parent);
+      await this.createStagingReservation(executorId, sessionId, parent, false);
       return { kind: "staging", executorId, sessionId };
+    });
+  }
+
+  /**
+   * Creates the exact authorization staging directory, or adopts only the
+   * same executor/session directory left behind by a crash after mkdir. A
+   * staging quarantine reservation for the same tuple is an ownership
+   * ambiguity and is never guessed away.
+   */
+  async createOrRecoverStaging(
+    executorId: string,
+    sessionId: string
+  ): Promise<DesktopCredentialStagingCreationResult> {
+    assertSafeId(executorId);
+    assertSafeId(sessionId);
+    return this.withExecutorLock(executorId, async () => {
+      try {
+        const ref: DesktopCredentialStagingRef = {
+          kind: "staging",
+          executorId,
+          sessionId
+        };
+        const parent = await this.ensurePrivatePath(executorId, "staging");
+        const quarantineParent = await this.ensurePrivatePath(
+          executorId,
+          "quarantine",
+          quarantineCategory("staging")
+        );
+        const quarantineReservation = path.join(quarantineParent, sessionId);
+        if (await pathExists(quarantineReservation)) {
+          throw managerError(
+            "desktop_credential_recovery_required",
+            "凭据 staging 已存在隔离恢复状态"
+          );
+        }
+        const reservation = this.stagingReservationPath(executorId, sessionId);
+        let recovered = await pathExists(reservation);
+        if (!recovered) {
+          try {
+            await this.createStagingReservation(executorId, sessionId, parent, true);
+          } catch (error) {
+            if (
+              !(error instanceof DesktopCredentialTreeManagerError) ||
+              error.code !== "desktop_credential_target_exists"
+            ) {
+              throw error;
+            }
+            recovered = true;
+          }
+        }
+        await this.assertMutableStagingReservation(reservation, executorId, sessionId);
+        await this.durableBarrier(this.pathFor(ref));
+        await this.syncParent(reservation);
+        if (await pathExists(quarantineReservation)) {
+          throw managerError(
+            "desktop_credential_recovery_required",
+            "凭据 staging 与隔离恢复状态同时存在"
+          );
+        }
+        await this.syncParent(parent);
+        return {
+          ref,
+          recovered
+        };
+      } catch (error) {
+        throw normalizeStagingRecoveryError(error);
+      }
     });
   }
 
@@ -480,7 +579,169 @@ export class DesktopCredentialTreeManager {
 
   quarantine(ref: DesktopCredentialTreeRef): Promise<DesktopCredentialQuarantineRef> {
     validateRef(ref);
+    if (ref.kind === "staging") {
+      return this.withExecutorLock(ref.executorId, async () =>
+        (await this.quarantineStagingUnlocked(ref.executorId, ref.sessionId)).ref
+      );
+    }
     return this.withExecutorLock(ref.executorId, () => this.quarantineUnlocked(ref));
+  }
+
+  /**
+   * Durably moves one exact authorization staging tree into its deterministic
+   * quarantine reservation. The same safe projection is returned after a
+   * reservation/rename/seal crash; ambiguous filesystem shapes fail closed.
+   */
+  async quarantineStaging(
+    executorId: string,
+    sessionId: string
+  ): Promise<DesktopCredentialStagingQuarantineProjection> {
+    assertSafeId(executorId);
+    assertSafeId(sessionId);
+    return this.withExecutorLock(executorId, () =>
+      this.quarantineStagingUnlocked(executorId, sessionId)
+    );
+  }
+
+  private async quarantineStagingUnlocked(
+    executorId: string,
+    sessionId: string
+  ): Promise<DesktopCredentialStagingQuarantineProjection> {
+    try {
+      const sourceRef: DesktopCredentialStagingRef = {
+        kind: "staging",
+        executorId,
+        sessionId
+      };
+      const targetRef: DesktopCredentialQuarantineRef = {
+        kind: "quarantine",
+        executorId,
+        sourceKind: "staging",
+        sourceId: sessionId
+      };
+      const sourceReservation = this.stagingReservationPath(executorId, sessionId);
+      const sourceHome = this.pathFor(sourceRef);
+      const sourceParent = await this.ensurePrivatePath(executorId, "staging");
+      const targetParent = await this.ensurePrivatePath(
+        executorId,
+        "quarantine",
+        quarantineCategory("staging")
+      );
+      const reservation = path.join(targetParent, sessionId);
+      const payload = path.join(reservation, "payload");
+      let [sourceReservationExists, sourceHomeExists, reservationExists, payloadExists] =
+        await Promise.all([
+          pathExists(sourceReservation),
+          pathExists(sourceHome),
+          pathExists(reservation),
+          pathExists(payload)
+        ]);
+      if (sourceReservationExists && payloadExists) {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 staging 隔离来源与目标同时存在"
+        );
+      }
+      if (sourceReservationExists !== sourceHomeExists) {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 staging 隔离来源结构不完整"
+        );
+      }
+
+      let quarantineFence: DesktopCredentialStagingQuarantineFence;
+      if (sourceReservationExists) {
+        const stagingFence = await this.assertMutableStagingReservation(
+          sourceReservation,
+          executorId,
+          sessionId
+        );
+        await this.durableBarrier(sourceHome);
+        const measured = await digestDesktopCredentialTree(sourceHome);
+        quarantineFence = {
+          version: 1,
+          kind: "staging_quarantine",
+          executorId,
+          sessionId,
+          sourceNonce: stagingFence.nonce,
+          expectedDigest: measured.digest
+        };
+        if (reservationExists) {
+          await this.assertMutableStagingQuarantineReservation(
+            reservation,
+            quarantineFence
+          );
+          await this.syncParent(reservation);
+          await this.syncParent(targetParent);
+        } else {
+          try {
+            await this.createPrivateDirectoryNoReplace(reservation);
+            await this.writeOwnerFence(reservation, quarantineFence);
+            await this.syncParent(reservation);
+            await this.syncParent(targetParent);
+            await this.fault("after_quarantine_reservation");
+          } catch (error) {
+            if (
+              !(error instanceof DesktopCredentialTreeManagerError) ||
+              error.code !== "desktop_credential_target_exists"
+            ) {
+              throw error;
+            }
+            await this.assertMutableStagingQuarantineReservation(
+              reservation,
+              quarantineFence
+            );
+          }
+        }
+        if (await pathExists(payload)) {
+          throw managerError(
+            "desktop_credential_recovery_required",
+            "凭据 staging 隔离来源与目标同时存在"
+          );
+        }
+        await renameIntoPrivateReservation(sourceReservation, payload, reservation);
+        await this.fault("after_quarantine_rename");
+        await this.syncParent(sourceParent);
+        reservationExists = true;
+        payloadExists = true;
+        sourceReservationExists = false;
+      } else {
+        if (!reservationExists || !payloadExists) {
+          throw managerError(
+            "desktop_credential_recovery_required",
+            "凭据 staging 隔离来源与目标均不存在"
+          );
+        }
+        quarantineFence = await this.readStagingQuarantineFence(
+          reservation,
+          executorId,
+          sessionId,
+          true
+        );
+      }
+      if (sourceReservationExists || !reservationExists || !payloadExists) {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 staging 隔离状态不完整"
+        );
+      }
+      const measured = await this.finishStagingQuarantine(
+        sourceParent,
+        targetParent,
+        reservation,
+        payload,
+        quarantineFence
+      );
+      return {
+        ref: targetRef,
+        digestAlgorithm: measured.algorithm,
+        digest: measured.digest,
+        fileCount: measured.fileCount,
+        totalBytes: measured.totalBytes
+      };
+    } catch (error) {
+      throw normalizeStagingRecoveryError(error);
+    }
   }
 
   /** Main-only path; never expose this value through IPC, Bridge, logs or API projections. */
@@ -498,7 +759,9 @@ export class DesktopCredentialTreeManager {
         ref.sourceId
       );
       const payload = path.join(quarantined, "payload");
-      return ref.sourceKind === "revision" ? path.join(payload, RESERVATION_HOME) : payload;
+      return ref.sourceKind === "revision" || ref.sourceKind === "staging"
+        ? path.join(payload, RESERVATION_HOME)
+        : payload;
     }
     validateRef(ref);
     return this.pathFor(ref);
@@ -581,7 +844,11 @@ export class DesktopCredentialTreeManager {
       await journal.save(record);
       let quarantineFailed = false;
       try {
-        await this.quarantineUnlocked(sourceRef);
+        if (sourceRef.kind === "staging") {
+          await this.quarantineStagingUnlocked(sourceRef.executorId, sourceRef.sessionId);
+        } else {
+          await this.quarantineUnlocked(sourceRef);
+        }
       } catch {
         quarantineFailed = true;
       }
@@ -677,7 +944,9 @@ export class DesktopCredentialTreeManager {
     return revisionProjection(record, verified);
   }
 
-  private async quarantineUnlocked(ref: DesktopCredentialTreeRef): Promise<DesktopCredentialQuarantineRef> {
+  private async quarantineUnlocked(
+    ref: DesktopCredentialRevisionRef | DesktopCredentialOperationRef
+  ): Promise<DesktopCredentialQuarantineRef> {
     const sourceTree = this.pathFor(ref);
     const sourceRoot =
       ref.kind === "revision" ? this.revisionContainerPath(ref.executorId, ref.revision) : sourceTree;
@@ -757,6 +1026,386 @@ export class DesktopCredentialTreeManager {
       }
       throw normalizeTreeError(error);
     }
+  }
+
+  private async createStagingReservation(
+    executorId: string,
+    sessionId: string,
+    parent: string,
+    injectFault: boolean
+  ): Promise<void> {
+    const reservation = this.stagingReservationPath(executorId, sessionId);
+    await this.createPrivateDirectoryNoReplace(reservation);
+    const home = path.join(reservation, RESERVATION_HOME);
+    await this.createPrivateDirectoryNoReplace(home);
+    const fence: DesktopCredentialStagingOwnerFence = {
+      version: 1,
+      kind: "staging",
+      executorId,
+      sessionId,
+      nonce: randomBytes(32).toString("hex")
+    };
+    await this.writeOwnerFence(reservation, fence);
+    await this.syncParent(reservation);
+    await this.syncParent(parent);
+    if (injectFault) await this.fault("after_staging_mkdir");
+  }
+
+  private async writeOwnerFence(
+    reservation: string,
+    fence: DesktopCredentialStagingOwnerFence | DesktopCredentialStagingQuarantineFence
+  ): Promise<void> {
+    const target = path.join(reservation, RESERVATION_FENCE);
+    let encrypted: Buffer;
+    try {
+      encrypted = this.safeStorage.encryptString(JSON.stringify(fence));
+    } catch {
+      throw managerError(
+        "desktop_credential_tree_unsafe",
+        "凭据 owner fence 安全存储不可用"
+      );
+    }
+    if (!Buffer.isBuffer(encrypted) || encrypted.byteLength < 1) {
+      throw managerError("desktop_credential_tree_unsafe", "凭据 owner fence 密文无效");
+    }
+    const raw = Buffer.concat([OWNER_FENCE_MAGIC, encrypted]);
+    if (raw.byteLength < 1 || raw.byteLength > MAX_RESERVATION_FENCE_BYTES) {
+      throw managerError("desktop_credential_tree_unsafe", "凭据 owner fence 超过安全上限");
+    }
+    let handle;
+    try {
+      handle = await open(target, "wx", 0o600);
+      await handle.writeFile(raw);
+      if (this.platform !== "win32") await handle.chmod(0o600);
+      await handle.sync();
+      const info = await handle.stat();
+      const pathInfo = await lstat(target);
+      if (
+        !info.isFile() ||
+        info.nlink !== 1 ||
+        info.size !== raw.byteLength ||
+        !pathInfo.isFile() ||
+        pathInfo.isSymbolicLink() ||
+        pathInfo.nlink !== 1 ||
+        pathInfo.dev !== info.dev ||
+        pathInfo.ino !== info.ino ||
+        pathInfo.mode !== info.mode ||
+        pathInfo.size !== info.size
+      ) {
+        throw managerError("desktop_credential_tree_unsafe", "凭据 owner fence 写入不稳定");
+      }
+    } catch (error) {
+      if (isErrorCode(error, "EEXIST")) {
+        throw managerError("desktop_credential_target_exists", "凭据 owner fence 已存在");
+      }
+      throw error;
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+  }
+
+  private async assertMutableStagingReservation(
+    reservation: string,
+    executorId: string,
+    sessionId: string
+  ): Promise<DesktopCredentialStagingOwnerFence> {
+    await this.assertStagingReservationShape(reservation);
+    const home = path.join(reservation, RESERVATION_HOME);
+    if (this.platform !== "win32") {
+      const [reservationInfo, homeInfo] = await Promise.all([
+        lstat(reservation),
+        lstat(home)
+      ]);
+      if (
+        (reservationInfo.mode & 0o777) !== 0o700 ||
+        (homeInfo.mode & 0o777) !== 0o700
+      ) {
+        throw managerError(
+          "desktop_credential_tree_unsafe",
+          "凭据 staging reservation 不是私有可写目录"
+        );
+      }
+    } else {
+      await this.ensureWindowsPrivateDirectory(reservation);
+      await this.ensureWindowsPrivateDirectory(home);
+    }
+    return this.readStagingOwnerFence(reservation, executorId, sessionId, false);
+  }
+
+  private async assertStagingReservationShape(reservation: string): Promise<void> {
+    await this.assertSafeDirectory(reservation);
+    const children = await readdir(reservation, { withFileTypes: true });
+    const home = children.find((child) => child.name === RESERVATION_HOME);
+    const fence = children.find((child) => child.name === RESERVATION_FENCE);
+    if (
+      children.length !== 2 ||
+      !home?.isDirectory() ||
+      home.isSymbolicLink() ||
+      !fence?.isFile() ||
+      fence.isSymbolicLink()
+    ) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 staging reservation 缺少精确所有权结构"
+      );
+    }
+    await this.assertSafeDirectory(path.join(reservation, RESERVATION_HOME));
+  }
+
+  private async assertMutableStagingQuarantineReservation(
+    reservation: string,
+    expected: DesktopCredentialStagingQuarantineFence
+  ): Promise<void> {
+    await this.assertSafeDirectory(reservation);
+    const children = await readdir(reservation, { withFileTypes: true });
+    if (
+      children.length !== 1 ||
+      children[0]?.name !== RESERVATION_FENCE ||
+      !children[0].isFile() ||
+      children[0].isSymbolicLink()
+    ) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 staging 隔离预留缺少精确所有权结构"
+      );
+    }
+    if (
+      this.platform !== "win32" &&
+      ((await lstat(reservation)).mode & 0o777) !== 0o700
+    ) {
+      throw managerError(
+        "desktop_credential_tree_unsafe",
+        "凭据 staging 隔离预留模式无效"
+      );
+    }
+    if (this.platform === "win32") await this.ensureWindowsPrivateDirectory(reservation);
+    const actual = await this.readStagingQuarantineFence(
+      reservation,
+      expected.executorId,
+      expected.sessionId,
+      false
+    );
+    if (!sameStagingQuarantineFence(actual, expected)) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 staging 隔离所有权栅栏不匹配"
+      );
+    }
+  }
+
+  private async readStagingOwnerFence(
+    reservation: string,
+    executorId: string,
+    sessionId: string,
+    allowReadOnly: boolean
+  ): Promise<DesktopCredentialStagingOwnerFence> {
+    const value = await this.readOwnerFenceValue(reservation, allowReadOnly);
+    return validateStagingOwnerFence(value, executorId, sessionId);
+  }
+
+  private async readStagingQuarantineFence(
+    reservation: string,
+    executorId: string,
+    sessionId: string,
+    allowReadOnly: boolean
+  ): Promise<DesktopCredentialStagingQuarantineFence> {
+    const value = await this.readOwnerFenceValue(reservation, allowReadOnly);
+    return validateStagingQuarantineFence(value, executorId, sessionId);
+  }
+
+  private async readOwnerFenceValue(
+    reservation: string,
+    allowReadOnly: boolean
+  ): Promise<unknown> {
+    await this.assertSafeDirectory(reservation);
+    const target = path.join(reservation, RESERVATION_FENCE);
+    const info = await lstat(target).catch((error: unknown) => {
+      if (isErrorCode(error, "ENOENT")) {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 owner fence 不存在"
+        );
+      }
+      throw error;
+    });
+    const allowedModes = allowReadOnly ? [0o600, 0o400] : [0o600];
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.nlink !== 1 ||
+      info.size < 1 ||
+      info.size > MAX_RESERVATION_FENCE_BYTES ||
+      (this.platform !== "win32" && !allowedModes.includes(info.mode & 0o777))
+    ) {
+      throw managerError("desktop_credential_tree_unsafe", "凭据 owner fence 不安全");
+    }
+    const flags =
+      fsConstants.O_RDONLY | (this.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+    let handle;
+    try {
+      handle = await open(target, flags);
+      const before = await handle.stat();
+      const raw = await handle.readFile();
+      const after = await handle.stat();
+      if (
+        !before.isFile() ||
+        before.nlink !== 1 ||
+        before.dev !== info.dev ||
+        before.ino !== info.ino ||
+        before.mode !== info.mode ||
+        raw.byteLength !== before.size ||
+        before.dev !== after.dev ||
+        before.ino !== after.ino ||
+        before.mode !== after.mode ||
+        before.nlink !== after.nlink ||
+        before.size !== after.size ||
+        before.mtimeMs !== after.mtimeMs ||
+        before.ctimeMs !== after.ctimeMs
+      ) {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 owner fence 读取期间发生变化"
+        );
+      }
+      if (!raw.subarray(0, OWNER_FENCE_MAGIC.byteLength).equals(OWNER_FENCE_MAGIC)) {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 owner fence 封套无效"
+        );
+      }
+      let plaintext: string;
+      try {
+        plaintext = this.safeStorage.decryptString(raw.subarray(OWNER_FENCE_MAGIC.byteLength));
+      } catch {
+        throw managerError(
+          "desktop_credential_recovery_required",
+          "凭据 owner fence 无法解密"
+        );
+      }
+      return JSON.parse(plaintext);
+    } catch (error) {
+      if (error instanceof DesktopCredentialTreeManagerError) throw error;
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 owner fence 无法读取"
+      );
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+  }
+
+  private async finishStagingQuarantine(
+    sourceParent: string,
+    targetParent: string,
+    reservation: string,
+    payload: string,
+    expectedFence: DesktopCredentialStagingQuarantineFence
+  ): Promise<Awaited<ReturnType<typeof digestDesktopCredentialTree>>> {
+    await this.assertSafeDirectory(reservation);
+    await this.assertStagingReservationShape(payload);
+    const children = await readdir(reservation, { withFileTypes: true });
+    const payloadEntry = children.find((child) => child.name === "payload");
+    const fenceEntry = children.find((child) => child.name === RESERVATION_FENCE);
+    if (
+      children.length !== 2 ||
+      !payloadEntry?.isDirectory() ||
+      payloadEntry.isSymbolicLink() ||
+      !fenceEntry?.isFile() ||
+      fenceEntry.isSymbolicLink()
+    ) {
+      throw managerError(
+        "desktop_credential_tree_unsafe",
+        "凭据 staging 隔离目录结构不安全"
+      );
+    }
+    const actualFence = await this.readStagingQuarantineFence(
+      reservation,
+      expectedFence.executorId,
+      expectedFence.sessionId,
+      true
+    );
+    if (!sameStagingQuarantineFence(actualFence, expectedFence)) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 staging 隔离栅栏与恢复目标不匹配"
+      );
+    }
+    const stagingFence = await this.readStagingOwnerFence(
+      payload,
+      expectedFence.executorId,
+      expectedFence.sessionId,
+      true
+    );
+    if (stagingFence.nonce !== expectedFence.sourceNonce) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 staging 隔离来源 nonce 不匹配"
+      );
+    }
+    const home = path.join(payload, RESERVATION_HOME);
+    const beforeSeal = await digestDesktopCredentialTree(home);
+    if (beforeSeal.digest !== expectedFence.expectedDigest) {
+      throw managerError(
+        "desktop_credential_digest_mismatch",
+        "凭据 staging 隔离来源摘要不匹配"
+      );
+    }
+    if (this.platform === "win32") {
+      try {
+        await this.validateReadOnlyTree(reservation);
+      } catch {
+        await this.sealWindowsReadOnlyTree(reservation);
+      }
+      await this.validateReadOnlyTree(reservation);
+    } else {
+      const reservationMode = (await lstat(reservation)).mode & 0o777;
+      if (reservationMode !== 0o700 && reservationMode !== 0o500) {
+        throw managerError(
+          "desktop_credential_tree_unsafe",
+          "凭据 staging 隔离目录模式无效"
+        );
+      }
+      if (reservationMode === 0o500) {
+        await this.validateReadOnlyTree(reservation);
+        const fenceMode = (await lstat(path.join(reservation, RESERVATION_FENCE))).mode & 0o777;
+        if (fenceMode !== 0o400) {
+          throw managerError(
+            "desktop_credential_tree_unsafe",
+            "凭据 staging 隔离完成栅栏模式无效"
+          );
+        }
+      } else {
+        await makeReadOnly(payload, this.platform);
+        await chmod(path.join(reservation, RESERVATION_FENCE), 0o400);
+        await this.durableBarrier(reservation);
+        await this.syncParent(reservation);
+        await chmod(reservation, 0o500);
+        await this.syncParent(reservation);
+        await this.validateReadOnlyTree(reservation);
+      }
+    }
+    await this.syncParent(sourceParent);
+    await this.syncParent(targetParent);
+    const verifiedFence = await this.readStagingQuarantineFence(
+      reservation,
+      expectedFence.executorId,
+      expectedFence.sessionId,
+      true
+    );
+    if (!sameStagingQuarantineFence(verifiedFence, expectedFence)) {
+      throw managerError(
+        "desktop_credential_recovery_required",
+        "凭据 staging 隔离完成栅栏发生变化"
+      );
+    }
+    const verified = await digestDesktopCredentialTree(home);
+    if (verified.digest !== expectedFence.expectedDigest) {
+      throw managerError(
+        "desktop_credential_digest_mismatch",
+        "凭据 staging 隔离完成摘要不匹配"
+      );
+    }
+    return verified;
   }
 
   private async verifyPromotionRevision(
@@ -839,11 +1488,20 @@ export class DesktopCredentialTreeManager {
             "凭据隔离预留包含未知条目"
           );
         }
-        await renameIntoPrivateReservation(
-          sourceContainer,
-          quarantinePayload,
-          quarantineReservation
-        );
+        const reopenForRename =
+          this.platform !== "win32" &&
+          ((await lstat(sourceContainer)).mode & 0o777) === 0o500;
+        if (reopenForRename) await chmod(sourceContainer, 0o700);
+        try {
+          await renameIntoPrivateReservation(
+            sourceContainer,
+            quarantinePayload,
+            quarantineReservation
+          );
+        } catch (error) {
+          if (reopenForRename) await chmod(sourceContainer, 0o500).catch(() => undefined);
+          throw error;
+        }
         await this.fault("after_quarantine_rename");
         await this.syncParent(path.dirname(sourceContainer));
       }
@@ -979,12 +1637,19 @@ export class DesktopCredentialTreeManager {
   private pathFor(ref: DesktopCredentialTreeRef): string {
     switch (ref.kind) {
       case "staging":
-        return this.containedPath(ref.executorId, "staging", ref.sessionId);
+        return path.join(
+          this.stagingReservationPath(ref.executorId, ref.sessionId),
+          RESERVATION_HOME
+        );
       case "revision":
         return path.join(this.revisionContainerPath(ref.executorId, ref.revision), RESERVATION_HOME);
       case "operation":
         return this.containedPath(ref.executorId, "operations", ref.operationId);
     }
+  }
+
+  private stagingReservationPath(executorId: string, sessionId: string): string {
+    return this.containedPath(executorId, "staging", sessionId);
   }
 
   private revisionContainerPath(executorId: string, revision: number): string {
@@ -1709,6 +2374,90 @@ function quarantineCategory(kind: DesktopCredentialTreeRef["kind"]): string {
   }
 }
 
+function validateStagingOwnerFence(
+  value: unknown,
+  executorId: string,
+  sessionId: string
+): DesktopCredentialStagingOwnerFence {
+  if (
+    !isExactRecord(value, ["version", "kind", "executorId", "sessionId", "nonce"])
+  ) {
+    throw managerError(
+      "desktop_credential_recovery_required",
+      "凭据 staging owner fence 结构无效"
+    );
+  }
+  const fence = value as unknown as DesktopCredentialStagingOwnerFence;
+  if (
+    fence.version !== 1 ||
+    fence.kind !== "staging" ||
+    fence.executorId !== executorId ||
+    fence.sessionId !== sessionId ||
+    !SAFE_ID.test(fence.executorId) ||
+    !SAFE_ID.test(fence.sessionId) ||
+    !OWNER_NONCE.test(fence.nonce)
+  ) {
+    throw managerError(
+      "desktop_credential_recovery_required",
+      "凭据 staging owner fence 与目标不匹配"
+    );
+  }
+  return { ...fence };
+}
+
+function validateStagingQuarantineFence(
+  value: unknown,
+  executorId: string,
+  sessionId: string
+): DesktopCredentialStagingQuarantineFence {
+  if (
+    !isExactRecord(value, [
+      "version",
+      "kind",
+      "executorId",
+      "sessionId",
+      "sourceNonce",
+      "expectedDigest"
+    ])
+  ) {
+    throw managerError(
+      "desktop_credential_recovery_required",
+      "凭据 staging quarantine fence 结构无效"
+    );
+  }
+  const fence = value as unknown as DesktopCredentialStagingQuarantineFence;
+  if (
+    fence.version !== 1 ||
+    fence.kind !== "staging_quarantine" ||
+    fence.executorId !== executorId ||
+    fence.sessionId !== sessionId ||
+    !SAFE_ID.test(fence.executorId) ||
+    !SAFE_ID.test(fence.sessionId) ||
+    !OWNER_NONCE.test(fence.sourceNonce) ||
+    !DIGEST.test(fence.expectedDigest)
+  ) {
+    throw managerError(
+      "desktop_credential_recovery_required",
+      "凭据 staging quarantine fence 与目标不匹配"
+    );
+  }
+  return { ...fence };
+}
+
+function sameStagingQuarantineFence(
+  left: DesktopCredentialStagingQuarantineFence,
+  right: DesktopCredentialStagingQuarantineFence
+): boolean {
+  return (
+    left.version === right.version &&
+    left.kind === right.kind &&
+    left.executorId === right.executorId &&
+    left.sessionId === right.sessionId &&
+    left.sourceNonce === right.sourceNonce &&
+    left.expectedDigest === right.expectedDigest
+  );
+}
+
 function assertSafeId(value: unknown): asserts value is string {
   if (typeof value !== "string" || !SAFE_ID.test(value)) {
     throw managerError("desktop_credential_path_invalid", "凭据标识无效");
@@ -1747,6 +2496,16 @@ function normalizeQuarantinePromotionError(error: unknown): DesktopCredentialTre
   return managerError(
     "desktop_credential_recovery_required",
     "凭据隔离恢复失败"
+  );
+}
+
+function normalizeStagingRecoveryError(error: unknown): DesktopCredentialTreeManagerError {
+  if (error instanceof DesktopCredentialTreeManagerError) return error;
+  const normalized = normalizeTreeError(error);
+  if (normalized instanceof DesktopCredentialTreeManagerError) return normalized;
+  return managerError(
+    "desktop_credential_recovery_required",
+    "凭据 staging 恢复失败"
   );
 }
 

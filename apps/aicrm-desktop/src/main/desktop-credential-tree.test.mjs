@@ -590,6 +590,481 @@ test("pending executor enumeration is strict, sorted, and excludes acknowledged 
   });
 });
 
+test("exact staging creation is idempotent and recovers a crash after mkdir", async (t) => {
+  let armed = true;
+  const current = await managerFixture({
+    faultInjector(point) {
+      if (armed && point === "after_staging_mkdir") {
+        armed = false;
+        throw new Error(`${current.root}/private-staging-path`);
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+
+  await assert.rejects(
+    current.manager.createOrRecoverStaging("executor_exact", "session_exact"),
+    (error) => {
+      assert.equal(error.code, "desktop_credential_recovery_required");
+      assert.equal(String(error.message).includes(current.root), false);
+      return true;
+    }
+  );
+
+  const restarted = new DesktopCredentialTreeManager({
+    root: current.root,
+    safeStorage: current.storage,
+    now: () => new Date("2026-07-13T00:00:01.000Z")
+  });
+  await restarted.initialize();
+  const recovered = await restarted.createOrRecoverStaging(
+    "executor_exact",
+    "session_exact"
+  );
+  assert.deepEqual(recovered, {
+    ref: {
+      kind: "staging",
+      executorId: "executor_exact",
+      sessionId: "session_exact"
+    },
+    recovered: true
+  });
+  assert.deepEqual(
+    await restarted.createOrRecoverStaging("executor_exact", "session_exact"),
+    recovered
+  );
+  assert.equal(JSON.stringify(recovered).includes(current.root), false);
+});
+
+test("exact staging recovery rejects quarantine ambiguity and unsafe existing trees", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+
+  const created = await current.manager.createOrRecoverStaging(
+    "executor_private",
+    "session_private"
+  );
+  assert.equal(created.recovered, false);
+  const staging = current.manager.mainOnlyResolvePath(created.ref);
+  if (process.platform !== "win32") {
+    await chmod(staging, 0o755);
+    await assert.rejects(
+      current.manager.createOrRecoverStaging("executor_private", "session_private"),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+    await chmod(staging, 0o700);
+    const ownerFence = path.join(path.dirname(staging), "owner.fence");
+    await chmod(ownerFence, 0o644);
+    await assert.rejects(
+      current.manager.createOrRecoverStaging("executor_private", "session_private"),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+    await chmod(ownerFence, 0o600);
+    const ownerFenceAlias = path.join(current.base, "owner-fence-alias");
+    await link(ownerFence, ownerFenceAlias);
+    await assert.rejects(
+      current.manager.createOrRecoverStaging("executor_private", "session_private"),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+    await removePath(ownerFenceAlias);
+  }
+
+  await writeTreeFile(staging, "auth.json", "secret");
+  if (process.platform !== "win32") {
+    await link(path.join(staging, "auth.json"), path.join(staging, "alias.json"));
+    await assert.rejects(
+      current.manager.createOrRecoverStaging("executor_private", "session_private"),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+    await removePath(path.join(staging, "alias.json"));
+  }
+
+  const quarantineReservation = path.join(
+    current.root,
+    "executor_private",
+    "quarantine",
+    "staging",
+    "session_private"
+  );
+  await mkdir(quarantineReservation, { recursive: true, mode: 0o700 });
+  await assert.rejects(
+    current.manager.createOrRecoverStaging("executor_private", "session_private"),
+    { code: "desktop_credential_recovery_required" }
+  );
+
+  if (process.platform !== "win32") {
+    const linked = await managerFixture();
+    t.after(() => rm(linked.base, { recursive: true, force: true }));
+    const stagingParent = path.join(linked.root, "executor_link", "staging");
+    const outside = path.join(linked.base, "outside-staging");
+    await mkdir(stagingParent, { recursive: true, mode: 0o700 });
+    await mkdir(outside, { mode: 0o700 });
+    await symlink(outside, path.join(stagingParent, "session_link"));
+    await assert.rejects(
+      linked.manager.createOrRecoverStaging("executor_link", "session_link"),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+  }
+});
+
+test("exact staging quarantine is durable and returns one stable safe projection", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(
+    current.manager,
+    "executor_cleanup",
+    "session_cleanup",
+    "candidate"
+  );
+  const expected = await digestDesktopCredentialTree(staging.target);
+  const first = await current.manager.quarantineStaging(
+    "executor_cleanup",
+    "session_cleanup"
+  );
+  assert.deepEqual(first, {
+    ref: {
+      kind: "quarantine",
+      executorId: "executor_cleanup",
+      sourceKind: "staging",
+      sourceId: "session_cleanup"
+    },
+    digestAlgorithm: DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM,
+    digest: expected.digest,
+    fileCount: expected.fileCount,
+    totalBytes: expected.totalBytes
+  });
+  await assert.rejects(lstat(staging.target), { code: "ENOENT" });
+  const quarantined = current.manager.mainOnlyResolvePath(first.ref);
+  assert.equal(await readFile(path.join(quarantined, "auth.json"), "utf8"), "candidate");
+  if (process.platform !== "win32") {
+    const payload = path.dirname(quarantined);
+    const reservation = path.dirname(payload);
+    assert.equal((await stat(reservation)).mode & 0o777, 0o500);
+    assert.equal((await stat(path.join(reservation, "owner.fence"))).mode & 0o777, 0o400);
+    assert.equal((await stat(payload)).mode & 0o777, 0o500);
+    assert.equal((await stat(path.join(payload, "owner.fence"))).mode & 0o777, 0o400);
+    assert.equal((await stat(quarantined)).mode & 0o777, 0o500);
+    assert.equal((await stat(path.join(quarantined, "auth.json"))).mode & 0o777, 0o400);
+  }
+  assert.deepEqual(
+    await current.manager.quarantineStaging("executor_cleanup", "session_cleanup"),
+    first
+  );
+  assert.equal(JSON.stringify(first).includes(current.root), false);
+});
+
+for (const faultPoint of ["after_quarantine_reservation", "after_quarantine_rename"]) {
+  test(`exact staging quarantine recovers crash point ${faultPoint}`, async (t) => {
+    let armed = false;
+    const current = await managerFixture({
+      faultInjector(point) {
+        if (armed && point === faultPoint) {
+          armed = false;
+          throw new Error(`${current.root}/private-quarantine-path`);
+        }
+      }
+    });
+    t.after(() => rm(current.base, { recursive: true, force: true }));
+    const staging = await seedStaging(
+      current.manager,
+      "executor_crash_cleanup",
+      "session_crash_cleanup",
+      faultPoint
+    );
+    armed = true;
+    await assert.rejects(
+      current.manager.quarantineStaging(
+        "executor_crash_cleanup",
+        "session_crash_cleanup"
+      ),
+      (error) => {
+        assert.equal(error.code, "desktop_credential_recovery_required");
+        assert.equal(String(error.message).includes(current.root), false);
+        return true;
+      }
+    );
+
+    const restarted = new DesktopCredentialTreeManager({
+      root: current.root,
+      safeStorage: current.storage,
+      now: () => new Date("2026-07-13T00:00:01.000Z")
+    });
+    await restarted.initialize();
+    const recovered = await restarted.quarantineStaging(
+      "executor_crash_cleanup",
+      "session_crash_cleanup"
+    );
+    assert.equal(recovered.digest, staging.digest.digest);
+    assert.deepEqual(
+      await restarted.quarantineStaging(
+        "executor_crash_cleanup",
+        "session_crash_cleanup"
+      ),
+      recovered
+    );
+  });
+}
+
+test("exact staging quarantine rejects missing, dual and unknown filesystem shapes", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+
+  await assert.rejects(
+    current.manager.quarantineStaging("executor_missing", "session_missing"),
+    { code: "desktop_credential_recovery_required" }
+  );
+
+  const dual = await seedStaging(
+    current.manager,
+    "executor_dual",
+    "session_dual",
+    "source"
+  );
+  const dualReservation = path.join(
+    current.root,
+    "executor_dual",
+    "quarantine",
+    "staging",
+    "session_dual"
+  );
+  await mkdir(path.join(dualReservation, "payload"), {
+    recursive: true,
+    mode: 0o700
+  });
+  await writeTreeFile(path.join(dualReservation, "payload"), "auth.json", "target");
+  await assert.rejects(
+    current.manager.quarantineStaging("executor_dual", "session_dual"),
+    { code: "desktop_credential_recovery_required" }
+  );
+  assert.equal((await lstat(dual.target)).isDirectory(), true);
+
+  const unknown = await seedStaging(
+    current.manager,
+    "executor_unknown",
+    "session_unknown",
+    "source"
+  );
+  const unknownReservation = path.join(
+    current.root,
+    "executor_unknown",
+    "quarantine",
+    "staging",
+    "session_unknown"
+  );
+  await mkdir(unknownReservation, { recursive: true, mode: 0o700 });
+  await writeFile(path.join(unknownReservation, "unexpected"), "foreign", {
+    mode: 0o600
+  });
+  await assert.rejects(
+    current.manager.quarantineStaging("executor_unknown", "session_unknown"),
+    { code: "desktop_credential_recovery_required" }
+  );
+  assert.equal((await lstat(unknown.target)).isDirectory(), true);
+
+  if (process.platform !== "win32") {
+    const unsafe = await seedStaging(
+      current.manager,
+      "executor_unsafe_cleanup",
+      "session_unsafe_cleanup",
+      "unsafe"
+    );
+    await chmod(unsafe.target, 0o755);
+    await assert.rejects(
+      current.manager.quarantineStaging(
+        "executor_unsafe_cleanup",
+        "session_unsafe_cleanup"
+      ),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+
+    const badTarget = await seedStaging(
+      current.manager,
+      "executor_bad_target_mode",
+      "session_bad_target_mode",
+      "bad-target"
+    );
+    const quarantined = await current.manager.quarantineStaging(
+      "executor_bad_target_mode",
+      "session_bad_target_mode"
+    );
+    const payload = current.manager.mainOnlyResolvePath(quarantined.ref);
+    await chmod(path.dirname(payload), 0o755);
+    await assert.rejects(
+      current.manager.quarantineStaging(
+        "executor_bad_target_mode",
+        "session_bad_target_mode"
+      ),
+      { code: "desktop_credential_tree_unsafe" }
+    );
+    assert.equal(badTarget.digest.digest, quarantined.digest);
+  }
+});
+
+test("exact staging quarantine rejects symlink and hardlink payloads", async (t) => {
+  if (process.platform === "win32") return;
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+
+  const linked = await seedStaging(
+    current.manager,
+    "executor_link_cleanup",
+    "session_link_cleanup",
+    "secret"
+  );
+  await link(path.join(linked.target, "auth.json"), path.join(linked.target, "alias.json"));
+  await assert.rejects(
+    current.manager.quarantineStaging(
+      "executor_link_cleanup",
+      "session_link_cleanup"
+    ),
+    { code: "desktop_credential_tree_unsafe" }
+  );
+
+  const symbolic = await seedStaging(
+    current.manager,
+    "executor_symlink_cleanup",
+    "session_symlink_cleanup",
+    "secret"
+  );
+  await symlink(
+    path.join(symbolic.target, "auth.json"),
+    path.join(symbolic.target, "alias.json")
+  );
+  await assert.rejects(
+    current.manager.quarantineStaging(
+      "executor_symlink_cleanup",
+      "session_symlink_cleanup"
+    ),
+    { code: "desktop_credential_tree_unsafe" }
+  );
+});
+
+test("exact staging recovery never adopts a pre-existing reservation without an authenticated owner", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const foreign = path.join(
+    current.root,
+    "executor_foreign_staging",
+    "staging",
+    "session_foreign_staging"
+  );
+  const home = path.join(foreign, "home");
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  await writeTreeFile(home, "auth.json", "foreign-staging");
+  await writeFile(
+    path.join(foreign, "owner.fence"),
+    JSON.stringify({
+      version: 1,
+      kind: "staging",
+      executorId: "executor_foreign_staging",
+      sessionId: "session_foreign_staging",
+      nonce: "a".repeat(64)
+    }),
+    { mode: 0o600 }
+  );
+  await assert.rejects(
+    current.manager.createOrRecoverStaging(
+      "executor_foreign_staging",
+      "session_foreign_staging"
+    ),
+    { code: "desktop_credential_recovery_required" }
+  );
+  assert.equal(await readFile(path.join(home, "auth.json"), "utf8"), "foreign-staging");
+});
+
+test("exact staging quarantine never adopts a foreign valid-looking payload with unauthenticated fences", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const reservation = path.join(
+    current.root,
+    "executor_foreign_quarantine",
+    "quarantine",
+    "staging",
+    "session_foreign_quarantine"
+  );
+  const home = path.join(reservation, "payload", "home");
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  await writeTreeFile(home, "auth.json", "foreign-quarantine");
+  const digest = await digestDesktopCredentialTree(home);
+  await writeFile(
+    path.join(reservation, "payload", "owner.fence"),
+    JSON.stringify({
+      version: 1,
+      kind: "staging",
+      executorId: "executor_foreign_quarantine",
+      sessionId: "session_foreign_quarantine",
+      nonce: "a".repeat(64)
+    }),
+    { mode: 0o600 }
+  );
+  await writeFile(
+    path.join(reservation, "owner.fence"),
+    JSON.stringify({
+      version: 1,
+      kind: "staging_quarantine",
+      executorId: "executor_foreign_quarantine",
+      sessionId: "session_foreign_quarantine",
+      sourceNonce: "a".repeat(64),
+      expectedDigest: digest.digest
+    }),
+    { mode: 0o600 }
+  );
+  await assert.rejects(
+    current.manager.quarantineStaging(
+      "executor_foreign_quarantine",
+      "session_foreign_quarantine"
+    ),
+    { code: "desktop_credential_recovery_required" }
+  );
+  assert.equal(
+    await readFile(path.join(home, "auth.json"), "utf8"),
+    "foreign-quarantine"
+  );
+});
+
+test("completed staging quarantine is immutable and rejects post-success digest drift", async (t) => {
+  if (process.platform === "win32") return;
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  await seedStaging(
+    current.manager,
+    "executor_immutable_cleanup",
+    "session_immutable_cleanup",
+    "immutable"
+  );
+  const first = await current.manager.quarantineStaging(
+    "executor_immutable_cleanup",
+    "session_immutable_cleanup"
+  );
+  const home = current.manager.mainOnlyResolvePath(first.ref);
+  const credential = path.join(home, "auth.json");
+  let privilegedWriteSucceeded = false;
+  try {
+    await writeFile(credential, "changed");
+    privilegedWriteSucceeded = true;
+  } catch (error) {
+    assert.equal(["EACCES", "EPERM"].includes(error?.code), true);
+  }
+  if (typeof process.getuid === "function" && process.getuid() !== 0) {
+    assert.equal(
+      privilegedWriteSucceeded,
+      false,
+      "a non-root POSIX process must not write the sealed credential directly"
+    );
+  }
+  if (!privilegedWriteSucceeded) {
+    await chmod(credential, 0o600);
+    await writeFile(credential, "changed");
+  }
+  await assert.rejects(
+    current.manager.quarantineStaging(
+      "executor_immutable_cleanup",
+      "session_immutable_cleanup"
+    ),
+    { code: "desktop_credential_digest_mismatch" }
+  );
+});
+
 test("digest mismatch never creates a revision or success journal", async (t) => {
   const current = await managerFixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
@@ -1571,6 +2046,70 @@ test("simulated Windows promotion quarantine recovers rename crash and never res
   assert.equal(protection.sealedQuarantines.length, 1);
   assert.deepEqual(await restarted.quarantinePromotion(input), recovered);
   assert.equal(protection.sealedQuarantines.length, 1);
+});
+
+test("simulated Windows exact staging recovery and quarantine are idempotently protected", async (t) => {
+  let armed = false;
+  const protection = new FakeWindowsCredentialProtection();
+  const current = await managerFixture({
+    platform: "win32",
+    windowsProtection: protection,
+    faultInjector(point) {
+      if (armed && point === "after_quarantine_rename") {
+        armed = false;
+        throw new Error(`${current.root}/private-windows-staging`);
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+
+  const created = await current.manager.createOrRecoverStaging(
+    "executor_win_staging",
+    "session_win_staging"
+  );
+  assert.equal(created.recovered, false);
+  const recoveredCreation = await current.manager.createOrRecoverStaging(
+    "executor_win_staging",
+    "session_win_staging"
+  );
+  assert.equal(recoveredCreation.recovered, true);
+  const source = current.manager.mainOnlyResolvePath(created.ref);
+  await writeTreeFile(source, "auth.json", "windows-staging");
+  armed = true;
+  await assert.rejects(
+    current.manager.quarantineStaging(
+      "executor_win_staging",
+      "session_win_staging"
+    ),
+    (error) => {
+      assert.equal(error.code, "desktop_credential_recovery_required");
+      assert.equal(String(error.message).includes(current.root), false);
+      return true;
+    }
+  );
+
+  const restarted = new DesktopCredentialTreeManager({
+    root: current.root,
+    safeStorage: current.storage,
+    now: () => new Date("2026-07-13T00:00:01.000Z"),
+    platform: "win32",
+    windowsProtection: protection
+  });
+  await restarted.initialize();
+  const quarantined = await restarted.quarantineStaging(
+    "executor_win_staging",
+    "session_win_staging"
+  );
+  assert.equal(quarantined.digestAlgorithm, DESKTOP_CREDENTIAL_TREE_DIGEST_ALGORITHM);
+  assert.equal(protection.sealedTrees.length, 1);
+  assert.deepEqual(
+    await restarted.quarantineStaging(
+      "executor_win_staging",
+      "session_win_staging"
+    ),
+    quarantined
+  );
+  assert.equal(protection.sealedTrees.length, 1);
 });
 
 test("simulated Windows fails closed when no native credential protection is injected", async (t) => {
