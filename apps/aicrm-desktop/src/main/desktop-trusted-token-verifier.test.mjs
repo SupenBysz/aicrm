@@ -8,6 +8,7 @@ import test from "node:test";
 
 import {
   DesktopTrustedTokenVerificationError,
+  verifyDesktopAuthorizationHandoffToken,
   verifyDesktopTrustedToken
 } from "./desktop-trusted-token-verifier.ts";
 
@@ -310,6 +311,20 @@ function expectCode(code, callback) {
   });
 }
 
+function handoffInput(overrides = {}) {
+  const current = purposeCases()[0];
+  return {
+    token: issue(current.claims),
+    keyring: keyring(),
+    now: NOW,
+    registeredDeviceId: DEVICE_ID,
+    sessionId: current.claims.sessionId,
+    executorId: current.claims.executorId,
+    handoffId: current.claims.handoffId,
+    ...overrides
+  };
+}
+
 test("fixed-seed Ed25519 vectors verify all locked Desktop purposes and six command purposes", () => {
   assert.equal(PUBLIC_KEY_X, "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg");
   const cases = purposeCases();
@@ -462,5 +477,102 @@ test("operation-confirmation audience and purposes are never accepted by the Des
         executorId: "executor_1"
       }
     })
+  );
+});
+
+test("dedicated handoff verifier returns only server-signed actor and revision facts", () => {
+  const facts = verifyDesktopAuthorizationHandoffToken(handoffInput());
+  assert.deepEqual(facts, {
+    actorId: "user_1",
+    expectedSessionRevision: 2
+  });
+  assert.deepEqual(Object.keys(facts).sort(), ["actorId", "expectedSessionRevision"]);
+  assert.equal(Object.isFrozen(facts), true);
+  const serialized = JSON.stringify(facts);
+  for (const forbidden of [VECTOR_HANDOFF_TOKEN, "server_key_1", PUBLIC_KEY_X, "signature"]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test("renderer actor and revision inputs are forbidden and unsigned claim forgery fails signature verification", () => {
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationHandoffToken({
+      ...handoffInput(),
+      actorId: "renderer_actor"
+    })
+  );
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationHandoffToken({
+      ...handoffInput(),
+      expectedSessionRevision: 999
+    })
+  );
+
+  const current = purposeCases()[0];
+  const token = issue(current.claims);
+  const parts = token.split(".");
+  const forgedClaims = {
+    ...JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")),
+    actorId: "forged_actor",
+    expectedSessionRevision: 999
+  };
+  const forgedPayload = Buffer.from(JSON.stringify(forgedClaims), "utf8").toString("base64url");
+  expectCode("desktop_trusted_token_signature_invalid", () =>
+    verifyDesktopAuthorizationHandoffToken(
+      handoffInput({ token: `${parts[0]}.${forgedPayload}.${parts[2]}` })
+    )
+  );
+});
+
+test("dedicated handoff verifier binds session, executor, handoff, audience, and purpose", () => {
+  for (const override of [
+    { sessionId: "session_other" },
+    { executorId: "executor_other" },
+    { handoffId: "handoff_other" }
+  ]) {
+    expectCode("desktop_trusted_token_target_mismatch", () =>
+      verifyDesktopAuthorizationHandoffToken(handoffInput(override))
+    );
+  }
+  const claim = purposeCases()[1];
+  expectCode("desktop_trusted_token_target_mismatch", () =>
+    verifyDesktopAuthorizationHandoffToken(handoffInput({ token: issue(claim.claims) }))
+  );
+});
+
+test("dedicated handoff verifier preserves unknown-kid as the recognizable refresh error", () => {
+  const current = purposeCases()[0];
+  const unknownKidToken = issue(current.claims, {
+    alg: "EdDSA",
+    kid: "server_key_missing",
+    typ: "JWT"
+  });
+  expectCode("desktop_trusted_token_unknown_key", () =>
+    verifyDesktopAuthorizationHandoffToken(handoffInput({ token: unknownKidToken }))
+  );
+});
+
+test("dedicated handoff verifier rejects non-canonical compact JWS representations", () => {
+  const current = purposeCases()[0];
+  const token = issue(current.claims);
+  const parts = token.split(".");
+  expectCode("desktop_trusted_token_malformed", () =>
+    verifyDesktopAuthorizationHandoffToken(
+      handoffInput({ token: `${parts[0]}.${parts[1]}=.${parts[2]}` })
+    )
+  );
+  const reorderedHeader = issueRaw(
+    '{"kid":"server_key_1","alg":"EdDSA","typ":"JWT"}',
+    JSON.stringify(current.claims)
+  );
+  expectCode("desktop_trusted_token_malformed", () =>
+    verifyDesktopAuthorizationHandoffToken(handoffInput({ token: reorderedHeader }))
+  );
+  const reorderedPayload = issueRaw(
+    JSON.stringify({ alg: "EdDSA", kid: "server_key_1", typ: "JWT" }),
+    JSON.stringify({ iss: current.claims.iss, v: current.claims.v, ...current.claims })
+  );
+  expectCode("desktop_trusted_token_claims_invalid", () =>
+    verifyDesktopAuthorizationHandoffToken(handoffInput({ token: reorderedPayload }))
   );
 });

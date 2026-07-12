@@ -207,6 +207,28 @@ export interface VerifyDesktopTrustedTokenInput {
   expectedTarget: DesktopTrustedTokenExpectedTarget;
 }
 
+export interface VerifyDesktopAuthorizationHandoffTokenInput {
+  token: string;
+  keyring: DesktopTrustedTokenKeyring;
+  now: Date;
+  registeredDeviceId: string;
+  sessionId: string;
+  executorId: string;
+  handoffId: string;
+}
+
+export interface DesktopAuthorizationHandoffTrustedFacts {
+  actorId: string;
+  expectedSessionRevision: number;
+}
+
+interface VerifyDesktopTrustedTokenEnvelopeInput {
+  token: string;
+  keyring: DesktopTrustedTokenKeyring;
+  now: Date;
+  registeredDeviceId: string;
+}
+
 /**
  * Main-only verifier for server-issued compact JWS trust-plane tokens. The
  * returned projection contains no signature, raw token, or keyring material.
@@ -215,6 +237,57 @@ export function verifyDesktopTrustedToken(
   input: VerifyDesktopTrustedTokenInput
 ): Readonly<DesktopTrustedTokenClaims> {
   const target = validateExpectedTarget(input?.expectedTarget);
+  const claims = verifyDesktopTrustedTokenEnvelope(input);
+  if (claims.aud !== target.audience || claims.purpose !== target.purpose) {
+    throw tokenError("desktop_trusted_token_target_mismatch", "受信票据用途与目标不匹配");
+  }
+  if (!matchesExpectedTarget(claims, target)) {
+    throw tokenError("desktop_trusted_token_target_mismatch", "受信票据目标状态已变化");
+  }
+  return Object.freeze({ ...claims });
+}
+
+/**
+ * Verifies a Desktop authorization handoff without accepting renderer-supplied
+ * actor or revision facts. Only the signed actor and session revision are
+ * projected after the complete trust-token verification pipeline succeeds.
+ */
+export function verifyDesktopAuthorizationHandoffToken(
+  input: VerifyDesktopAuthorizationHandoffTokenInput
+): Readonly<DesktopAuthorizationHandoffTrustedFacts> {
+  const expected = validateAuthorizationHandoffInput(input);
+  const claims = verifyDesktopTrustedTokenEnvelope(expected);
+  if (
+    claims.aud !== AUDIENCE_DESKTOP ||
+    claims.purpose !== "authorization_handoff" ||
+    claims.sessionId !== expected.sessionId ||
+    claims.executorId !== expected.executorId ||
+    claims.handoffId !== expected.handoffId
+  ) {
+    throw tokenError(
+      "desktop_trusted_token_target_mismatch",
+      "Desktop 授权 handoff 目标状态已变化"
+    );
+  }
+  if (
+    typeof claims.actorId !== "string" ||
+    !OPAQUE_ID.test(claims.actorId) ||
+    !positiveSafeInteger(claims.expectedSessionRevision)
+  ) {
+    throw tokenError(
+      "desktop_trusted_token_claims_invalid",
+      "Desktop 授权 handoff 受信事实无效"
+    );
+  }
+  return Object.freeze({
+    actorId: claims.actorId,
+    expectedSessionRevision: claims.expectedSessionRevision
+  });
+}
+
+function verifyDesktopTrustedTokenEnvelope(
+  input: VerifyDesktopTrustedTokenEnvelopeInput
+): DesktopTrustedTokenClaims {
   if (!LOWER_HEX_256.test(input?.registeredDeviceId ?? "")) {
     throw tokenError("desktop_trusted_token_input_invalid", "当前注册设备标识无效");
   }
@@ -245,9 +318,6 @@ export function verifyDesktopTrustedToken(
   if (!isSupportedPair(claims.aud, claims.purpose)) {
     throw tokenError("desktop_trusted_token_unsupported", "受信票据用途不受客户端支持");
   }
-  if (claims.aud !== target.audience || claims.purpose !== target.purpose) {
-    throw tokenError("desktop_trusted_token_target_mismatch", "受信票据用途与目标不匹配");
-  }
 
   enforceKeyWindow(key, claims.iat, now);
   if (now < claims.iat) {
@@ -259,10 +329,7 @@ export function verifyDesktopTrustedToken(
   if (claims.deviceId !== input.registeredDeviceId) {
     throw tokenError("desktop_trusted_token_device_mismatch", "受信票据未绑定当前注册设备");
   }
-  if (!matchesExpectedTarget(claims, target)) {
-    throw tokenError("desktop_trusted_token_target_mismatch", "受信票据目标状态已变化");
-  }
-  return Object.freeze({ ...claims });
+  return claims;
 }
 
 function splitCompactToken(value: unknown): [string, string, string] {
@@ -670,6 +737,51 @@ function enforceKeyWindow(
   if (current >= verifyUntil) {
     throw tokenError("desktop_trusted_token_key_retired", "受信票据签名密钥已退役");
   }
+}
+
+function validateAuthorizationHandoffInput(
+  value: unknown
+): VerifyDesktopAuthorizationHandoffTokenInput {
+  const fields = [
+    "token",
+    "keyring",
+    "now",
+    "registeredDeviceId",
+    "sessionId",
+    "executorId",
+    "handoffId"
+  ] as const;
+  if (!isRecord(value) || !exactKeys(value, fields)) {
+    throw tokenError(
+      "desktop_trusted_token_input_invalid",
+      "Desktop 授权 handoff 验签输入结构无效"
+    );
+  }
+  const input = value as unknown as VerifyDesktopAuthorizationHandoffTokenInput;
+  if (
+    typeof input.token !== "string" ||
+    !isRecord(input.keyring) ||
+    !(input.now instanceof Date) ||
+    !Number.isFinite(input.now.getTime()) ||
+    !LOWER_HEX_256.test(input.registeredDeviceId) ||
+    !OPAQUE_ID.test(input.sessionId) ||
+    !OPAQUE_ID.test(input.executorId) ||
+    !OPAQUE_ID.test(input.handoffId)
+  ) {
+    throw tokenError(
+      "desktop_trusted_token_input_invalid",
+      "Desktop 授权 handoff 验签输入字段无效"
+    );
+  }
+  return {
+    token: input.token,
+    keyring: input.keyring,
+    now: new Date(input.now.getTime()),
+    registeredDeviceId: input.registeredDeviceId,
+    sessionId: input.sessionId,
+    executorId: input.executorId,
+    handoffId: input.handoffId
+  };
 }
 
 function validateExpectedTarget(value: unknown): DesktopTrustedTokenExpectedTarget {
