@@ -38,7 +38,9 @@ func (s *Server) Run(ctx context.Context) error {
 		if opened, err := store.Open(ctx, s.cfg.DatabaseURL); err == nil {
 			s.store = opened
 			defer opened.Close()
-			go s.runExecutorWorker(ctx)
+			// The legacy TUI/PTY/WebSocket executor worker is permanently retired.
+			// Trusted executor tasks will be started by the canonical internal
+			// generation-run transport in a later phase, never from this hook.
 		}
 	}
 

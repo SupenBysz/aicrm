@@ -9,6 +9,11 @@ Environment=KY_RUNTIME_ENV_FILE=/data/kyai_crm/config/external-dependencies.env
 ExecStart=/data/kyai_crm/bin/ky-ai-model-service
 Restart=always
 RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
 
 [Install]
 WantedBy=multi-user.target

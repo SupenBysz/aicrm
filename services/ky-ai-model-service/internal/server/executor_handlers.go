@@ -153,57 +153,22 @@ func (s *Server) listExecutorRuns(w http.ResponseWriter, r *http.Request, wc wsC
 }
 
 func (s *Server) createExecutorTask(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	var in store.ExecutorTaskInput
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	normalizeExecutorTaskInput(&in)
-	if !validExecutorTaskInput(in) {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "执行器任务参数无效")
-		return
-	}
-	item, err := s.store.CreateExecutorTask(r.Context(), wc.WorkspaceType, wc.WorkspaceID, wc.UserID, in)
-	if err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			writeError(w, r, http.StatusConflict, "executor_disabled", "执行器未启用或自动修复未开启")
-			return
-		}
-		writeStoreError(w, r, err)
-		return
-	}
-	s.audit(r.Context(), r, wc, "ai_executor_task.created", "ai_executor_task", item.ID, map[string]any{
-		"executorType":  item.ExecutorType,
-		"purpose":       item.Purpose,
-		"triggerReason": item.TriggerReason,
-	})
-	writeData(w, r, item)
+	rejectLegacyExecutorRuntimeMutation(w, r)
 }
 
 func (s *Server) createExecutorRun(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	var in store.ExecutorTaskInput
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	normalizeExecutorTaskInput(&in)
-	if !validExecutorTaskInput(in) {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "执行器运行参数无效")
-		return
-	}
-	item, err := s.store.CreateExecutorTask(r.Context(), wc.WorkspaceType, wc.WorkspaceID, wc.UserID, in)
-	if err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			writeError(w, r, http.StatusConflict, "executor_disabled", "执行器未启用或自动修复未开启")
-			return
-		}
-		writeStoreError(w, r, err)
-		return
-	}
-	s.audit(r.Context(), r, wc, "ai_executor_run.created", "ai_executor_run", item.ID, map[string]any{
-		"executorType":  item.ExecutorType,
-		"purpose":       item.Purpose,
-		"triggerReason": item.TriggerReason,
-	})
-	writeData(w, r, toExecutorRun(item))
+	rejectLegacyExecutorRuntimeMutation(w, r)
+}
+
+func rejectLegacyExecutorRuntimeMutation(w http.ResponseWriter, r *http.Request) {
+	setLegacyExecutorAuthorizationHeaders(w)
+	writeError(
+		w,
+		r,
+		http.StatusGone,
+		"legacy_endpoint_gone",
+		"旧版执行器任务创建入口已停用，请使用可信 generation-run 调度接口",
+	)
 }
 
 func (s *Server) getExecutorTask(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -245,14 +210,7 @@ func (s *Server) cancelExecutorRun(w http.ResponseWriter, r *http.Request, wc ws
 }
 
 func (s *Server) interruptExecutorRun(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	item, err := s.store.CancelExecutorTask(r.Context(), wc.WorkspaceType, wc.WorkspaceID, r.PathValue("id"), wc.UserID)
-	if err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	_ = s.store.AppendExecutorEvent(r.Context(), item.ID, "run.interrupted", "warning", "执行器运行已中断", map[string]any{"actorUserId": wc.UserID})
-	s.audit(r.Context(), r, wc, "ai_executor_run.interrupted", "ai_executor_run", item.ID, nil)
-	writeData(w, r, toExecutorRun(item))
+	rejectLegacyExecutorRuntimeMutation(w, r)
 }
 
 func (s *Server) listExecutorTaskEvents(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -403,32 +361,7 @@ type terminalResizeInput struct {
 }
 
 func (s *Server) resizeExecutorTerminal(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	runID := r.PathValue("id")
-	if _, err := s.store.GetExecutorTask(r.Context(), wc.WorkspaceType, wc.WorkspaceID, runID); err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	var in terminalResizeInput
-	if !decodeJSON(w, r, &in) {
-		return
-	}
-	if in.Cols < 20 || in.Cols > 300 || in.Rows < 5 || in.Rows > 120 {
-		writeError(w, r, http.StatusBadRequest, "validation_error", "终端尺寸参数无效")
-		return
-	}
-	liveResized := s.resizeExecutorPTY(runID, in.Cols, in.Rows)
-	payload := map[string]any{"cols": in.Cols, "rows": in.Rows}
-	if liveResized {
-		payload["liveResized"] = true
-	}
-	_ = s.store.AppendExecutorEvent(r.Context(), runID, "terminal.resized", "info", "终端尺寸已更新", payload)
-	writeData(w, r, map[string]any{
-		"runId":       runID,
-		"cols":        in.Cols,
-		"rows":        in.Rows,
-		"accepted":    true,
-		"liveResized": liveResized,
-	})
+	rejectLegacyExecutorRuntimeMutation(w, r)
 }
 
 type sseItem struct {
