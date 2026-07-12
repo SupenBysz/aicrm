@@ -10,6 +10,7 @@
 export class DesktopDeviceRequestLane {
   private tail: Promise<void> = Promise.resolve();
   private pinnedReference: string | null = null;
+  private readonly unpinnedWaiters = new Set<() => void>();
 
   run<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.tail.then(() => {
@@ -42,14 +43,14 @@ export class DesktopDeviceRequestLane {
       }
       try {
         const value = await operation();
-        if (this.pinnedReference === reference) this.pinnedReference = null;
+        if (this.pinnedReference === reference) this.clearPin();
         return value;
       } catch (error) {
         try {
           if (await shouldRemainPinned()) {
             this.pinnedReference = reference;
           } else if (this.pinnedReference === reference) {
-            this.pinnedReference = null;
+            this.clearPin();
           }
         } catch {
           this.pinnedReference = reference;
@@ -62,6 +63,20 @@ export class DesktopDeviceRequestLane {
       () => undefined
     );
     return result;
+  }
+
+  /**
+   * Resolves only after the restored ambiguous request has been recovered.
+   * This observer deliberately does not join `tail`: doing so would prevent
+   * the exact `runPinned` recovery operation from reaching the head.
+   */
+  waitUntilUnpinned(): Promise<void> {
+    return this.tail.then(() => {
+      if (this.pinnedReference === null) return;
+      return new Promise<void>((resolve) => {
+        this.unpinnedWaiters.add(resolve);
+      });
+    });
   }
 
   /** Restores the single unresolved request fence before heartbeat startup. */
@@ -78,6 +93,13 @@ export class DesktopDeviceRequestLane {
       () => undefined
     );
     return result;
+  }
+
+  private clearPin(): void {
+    this.pinnedReference = null;
+    const waiters = [...this.unpinnedWaiters];
+    this.unpinnedWaiters.clear();
+    for (const resolve of waiters) resolve();
   }
 }
 

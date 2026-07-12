@@ -11,6 +11,7 @@ import {
   sha256Hex,
   verifyDesktopDeviceSigningInput
 } from "./desktop-device-proof.ts";
+import type { DesktopDeviceRequestLane } from "./desktop-device-request-lane.ts";
 
 const ENVELOPE_MAGIC = Buffer.from("AICRM-DEVICE-REQUEST-ENC-V1\n", "ascii");
 const MAX_JOURNAL_BYTES = 256 << 10;
@@ -18,6 +19,7 @@ const MAX_REQUEST_BODY_BYTES = 64 << 10;
 const MAX_RESPONSE_BODY_BYTES = 64 << 10;
 const MAX_AUTHORIZATION_BYTES = 8 << 10;
 const REFERENCE_PATTERN = /^[0-9a-f]{64}$/;
+const FAIL_CLOSED_REFERENCE = "0".repeat(64);
 const DEVICE_ID_PATTERN = /^[0-9a-f]{64}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const DECIMAL_SEQUENCE_PATTERN = /^[1-9][0-9]{0,19}$/;
@@ -35,6 +37,7 @@ const PROOF_HEADER_NAMES = [
 const rootOperationTails = new Map<string, Promise<void>>();
 
 export type DesktopTrustedRequestKind =
+  | "device_binding"
   | "handoff_claim"
   | "authorization_proof"
   | "credential_activation_lease_renewal"
@@ -43,7 +46,7 @@ export type DesktopTrustedRequestKind =
   | "credential_revocation_ack";
 
 export interface DesktopDeviceRequestJournalResponse {
-  status: 200;
+  status: 200 | 201;
   bodyBase64: string;
   receivedAt: string;
 }
@@ -153,7 +156,7 @@ export class DesktopDeviceRequestJournalStore {
       if (!current || current.signed.requestHash !== expectedRequestHash) {
         throw journalError("desktop_device_request_journal_conflict", "设备请求响应栅栏不匹配");
       }
-      const validated = validateResponse(response);
+      const validated = validateResponse(response, current.kind);
       if (current.response) {
         if (!sameResponse(current.response, validated)) {
           throw journalError("desktop_device_request_journal_conflict", "设备请求响应发生冲突");
@@ -372,6 +375,35 @@ export function desktopTrustedRequestReference(
   return sha256Hex(Buffer.from(`AICRM-TRUSTED-REQUEST-V1\n${kind}\n${canonicalDevicePath(pathValue)}`, "utf8"));
 }
 
+/**
+ * Restores the one process-wide signed-sequence fence before any heartbeat can
+ * start. Every encrypted record is unresolved until its owning Main workflow
+ * validates the durable response and calls `complete`; two records therefore
+ * indicate an impossible split head and fail closed.
+ */
+export async function restoreDesktopDeviceRequestJournalPin(
+  journal: Pick<DesktopDeviceRequestJournalStore, "list">,
+  lane: Pick<DesktopDeviceRequestLane, "restorePin">
+): Promise<string | null> {
+  let records: DesktopDeviceRequestJournalRecord[];
+  try {
+    records = await journal.list();
+  } catch (error) {
+    await lane.restorePin(FAIL_CLOSED_REFERENCE);
+    throw error;
+  }
+  if (records.length > 1) {
+    await lane.restorePin(FAIL_CLOSED_REFERENCE);
+    throw journalError(
+      "desktop_device_request_journal_conflict",
+      "设备请求日志存在多个待恢复栅栏"
+    );
+  }
+  const reference = records[0]?.reference ?? null;
+  if (reference) await lane.restorePin(reference);
+  return reference;
+}
+
 function validateRecord(value: unknown): DesktopDeviceRequestJournalRecord {
   if (
     !exactObject(value, [
@@ -394,7 +426,7 @@ function validateRecord(value: unknown): DesktopDeviceRequestJournalRecord {
   const body = decodeCanonicalBase64(record.bodyBase64, MAX_REQUEST_BODY_BYTES);
   const kindValid = trustedRequestKind(record.kind);
   const scheme = kindValid ? authorizationScheme(record.kind) : "";
-  if (record.response !== null) validateResponse(record.response);
+  if (record.response !== null) validateResponse(record.response, record.kind);
   if (
     record.version !== 1 ||
     !REFERENCE_PATTERN.test(record.reference) ||
@@ -479,13 +511,15 @@ function validateSignedRequest(
 }
 
 function validateResponse(
-  value: DesktopDeviceRequestJournalResponse
+  value: DesktopDeviceRequestJournalResponse,
+  kind: DesktopTrustedRequestKind
 ): DesktopDeviceRequestJournalResponse {
   if (!exactObject(value, ["status", "bodyBase64", "receivedAt"])) {
     throw journalError("desktop_device_request_journal_corrupt", "设备请求响应日志结构无效");
   }
   decodeCanonicalBase64(value.bodyBase64, MAX_RESPONSE_BODY_BYTES);
-  if (value.status !== 200 || !canonicalTime(value.receivedAt)) {
+  const expectedStatus = kind === "device_binding" ? 201 : 200;
+  if (value.status !== expectedStatus || !canonicalTime(value.receivedAt)) {
     throw journalError("desktop_device_request_journal_corrupt", "设备请求响应日志字段无效");
   }
   return { ...value };
@@ -547,6 +581,7 @@ function cloneRecord(record: DesktopDeviceRequestJournalRecord): DesktopDeviceRe
 
 function trustedRequestKind(value: string): value is DesktopTrustedRequestKind {
   return [
+    "device_binding",
     "handoff_claim",
     "authorization_proof",
     "credential_activation_lease_renewal",
@@ -558,6 +593,8 @@ function trustedRequestKind(value: string): value is DesktopTrustedRequestKind {
 
 function authorizationScheme(kind: DesktopTrustedRequestKind): string {
   switch (kind) {
+    case "device_binding":
+      return "Bearer";
     case "handoff_claim":
       return "AiCRM-Handoff";
     case "authorization_proof":
@@ -576,6 +613,20 @@ function validAuthorization(value: string, scheme: string): boolean {
   const prefix = `${scheme} `;
   if (!value.startsWith(prefix)) return false;
   const token = value.slice(prefix.length);
+  if (scheme === "Bearer") {
+    if (
+      token.length < 1 ||
+      Buffer.byteLength(value, "utf8") > MAX_AUTHORIZATION_BYTES ||
+      token.trim() !== token
+    ) {
+      return false;
+    }
+    for (let index = 0; index < token.length; index += 1) {
+      const code = token.charCodeAt(index);
+      if (code < 0x21 || code > 0x7e) return false;
+    }
+    return true;
+  }
   return (
     token.length > 0 &&
     Buffer.byteLength(value, "utf8") <= MAX_AUTHORIZATION_BYTES &&

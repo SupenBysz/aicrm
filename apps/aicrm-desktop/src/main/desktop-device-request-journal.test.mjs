@@ -105,6 +105,45 @@ function response(body = { data: { handoffId: "handoff_1" } }) {
   };
 }
 
+function bindingRequestRecord() {
+  const bindingPath = "/api/v1/ai-executors/executor_1/device-bindings";
+  const bindingAuthorization = "Bearer binding-session-token";
+  const body = Buffer.from(
+    JSON.stringify({ deviceId: key.deviceId, expectedRevision: 0 }),
+    "utf8"
+  );
+  const proof = buildDesktopDeviceProof({
+    key,
+    method: "POST",
+    path: bindingPath,
+    body,
+    authorization: bindingAuthorization,
+    allowedAuthorizationSchemes: ["Bearer"],
+    timestamp: now.getTime(),
+    nonce: Buffer.alloc(16, 8).toString("base64url"),
+    sequence: 8n
+  });
+  return {
+    version: 1,
+    reference: desktopTrustedRequestReference("device_binding", bindingPath),
+    kind: "device_binding",
+    method: "POST",
+    origin: "https://aicrm.example.test",
+    path: bindingPath,
+    authorization: bindingAuthorization,
+    bodyBase64: body.toString("base64"),
+    signed: {
+      ...proof,
+      deviceId: key.deviceId,
+      publicKey: key.publicKey,
+      keyGeneration: 1,
+      sequence: "8"
+    },
+    createdAt: now.toISOString(),
+    response: null
+  };
+}
+
 test("exact signed request and ticket are encrypted, mode 0600, and restart-readable", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
@@ -179,6 +218,35 @@ test("response is durable before return and only exact completed records may be 
   });
   await current.journal.complete(record.reference, record.signed.requestHash);
   assert.equal(await current.journal.load(record.reference), null);
+});
+
+test("device binding alone accepts Bearer and 201 while ticket kinds remain fixed to 200", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const ticket = await current.journal.createOrLoad(requestRecord());
+  await assert.rejects(
+    current.journal.recordResponse(ticket.reference, ticket.signed.requestHash, {
+      ...response(),
+      status: 201
+    })
+  );
+
+  const binding = await current.journal.createOrLoad(bindingRequestRecord());
+  await assert.rejects(
+    current.journal.recordResponse(binding.reference, binding.signed.requestHash, response())
+  );
+  const created = {
+    ...response({ data: { binding: { revision: 1 }, replayed: false } }),
+    status: 201
+  };
+  assert.deepEqual(
+    (await current.journal.recordResponse(
+      binding.reference,
+      binding.signed.requestHash,
+      created
+    )).response,
+    created
+  );
 });
 
 test("a fsynced temporary record recovers after a crash before rename", async (t) => {

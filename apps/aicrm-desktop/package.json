@@ -22,6 +22,7 @@
     "test:desktop-device-registration": "node --test src/main/desktop-device-registration-client.test.mjs",
     "test:desktop-device-heartbeat": "node --test src/main/desktop-device-heartbeat-client.test.mjs",
     "test:desktop-device-request-journal": "node --test src/main/desktop-device-request-journal.test.mjs",
+    "test:desktop-executor-device-binding": "node --test src/main/desktop-executor-device-binding-client.test.mjs",
     "test:desktop-authorization-transport": "node --test src/main/desktop-authorization-transport-client.test.mjs",
     "test:desktop-activation-lease": "node --test src/main/desktop-activation-lease-controller.test.mjs",
     "test:desktop-executor-binding-state": "node --test src/main/desktop-executor-binding-state.test.mjs",

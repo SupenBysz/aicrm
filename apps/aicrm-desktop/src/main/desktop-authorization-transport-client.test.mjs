@@ -444,6 +444,12 @@ test("startup restoration blocks heartbeat work until the exact journal head is 
   const lane = new DesktopDeviceRequestLane();
   const reference = "a".repeat(64);
   await lane.restorePin(reference);
+  let heartbeatReleased = false;
+  const heartbeatFence = lane.waitUntilUnpinned().then(() => {
+    heartbeatReleased = true;
+  });
+  await Promise.resolve();
+  assert.equal(heartbeatReleased, false);
   let laterRequestStarted = false;
   await assert.rejects(
     lane.run(async () => {
@@ -459,6 +465,8 @@ test("startup restoration blocks heartbeat work until the exact journal head is 
     async () => false
   );
   assert.equal(recovered, "recovered");
+  await heartbeatFence;
+  assert.equal(heartbeatReleased, true);
   await lane.run(async () => {
     laterRequestStarted = true;
   });

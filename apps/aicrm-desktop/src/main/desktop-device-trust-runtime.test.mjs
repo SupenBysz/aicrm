@@ -202,6 +202,15 @@ test("Main wiring owns one signer and session save triggers registration without
   assert.equal((trustMain.match(/new DesktopDeviceRegistrationClient/g) ?? []).length, 1);
   assert.equal((trustMain.match(/new DesktopDeviceHeartbeatClient/g) ?? []).length, 1);
   assert.equal((trustMain.match(/new DesktopDeviceRequestLane/g) ?? []).length, 1);
+  assert.equal((trustMain.match(/new DesktopDeviceRequestJournalStore/g) ?? []).length, 1);
+  assert.equal((trustMain.match(/new DesktopExecutorDeviceBindingClient/g) ?? []).length, 1);
+  assert.match(trustMain, /app\.whenReady\(\)\.then\(\(\) =>[\s\S]*restoreDesktopDeviceRequestJournalPin/);
+  assert.match(trustMain, /requestFenceReady\.then\(\(\) => this\.requestLane\.waitUntilUnpinned\(\)\)/);
+  assert.match(trustMain, /restoreDesktopDeviceRequestJournalPin\([\s\S]*requestJournal,[\s\S]*requestLane/);
+  assert.ok(
+    trustMain.indexOf("restoreDesktopDeviceRequestJournalPin") <
+      trustMain.indexOf("new DesktopDeviceHeartbeatClient")
+  );
   assert.equal(deviceIpc.includes("new DesktopDeviceIdentityStore"), false);
   assert.match(main, /const desktopDeviceTrustRuntime = getDesktopDeviceTrustRuntime\(\)/);
   assert.match(main, /registerAuthIpc\(desktopDeviceTrustRuntime\)/);
