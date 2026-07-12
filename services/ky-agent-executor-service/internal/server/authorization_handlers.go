@@ -9,8 +9,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/accessclient"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/authorization"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
+)
+
+var (
+	authorizationStreamPollInterval      = time.Second
+	authorizationStreamHeartbeatInterval = 15 * time.Second
 )
 
 type createAuthorizationBody struct {
@@ -246,7 +252,7 @@ func (s *Server) listAuthorizationSessionEvents(w http.ResponseWriter, r *http.R
 	})
 }
 
-func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http.Request, _ actorContext) {
+func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http.Request, actor actorContext) {
 	sessionID := r.PathValue("sessionId")
 	if !validOpaqueID(sessionID) {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "sessionId is invalid")
@@ -289,9 +295,9 @@ func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	poll := time.NewTicker(time.Second)
+	poll := time.NewTicker(authorizationStreamPollInterval)
 	defer poll.Stop()
-	heartbeat := time.NewTicker(15 * time.Second)
+	heartbeat := time.NewTicker(authorizationStreamHeartbeatInterval)
 	defer heartbeat.Stop()
 	cursor := after
 	for {
@@ -329,12 +335,29 @@ func (s *Server) streamAuthorizationSessionEvents(w http.ResponseWriter, r *http
 			return
 		case <-poll.C:
 		case <-heartbeat.C:
+			if !s.authorizationStreamPermissionValid(r, actor) {
+				writeConnectionClosed(w, store.AuthorizationEventClosed, "sessionId", sessionID, "permission_revoked")
+				flusher.Flush()
+				return
+			}
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) authorizationStreamPermissionValid(r *http.Request, actor actorContext) bool {
+	if s.authorizer == nil {
+		return false
+	}
+	_, err := s.authorizer.Evaluate(r.Context(), requestID(r), accessclient.Request{
+		ActorID: actor.ActorID, SessionID: actor.SessionID,
+		WorkspaceType: actor.WorkspaceType, WorkspaceID: actor.WorkspaceID,
+		RequiredAllPermissions: []string{"platform.ai_executors.view"},
+	})
+	return err == nil
 }
 
 func authorizationEventData(sessionID string, item store.AuthorizationEventProjection, session store.AuthorizationSessionProjection) map[string]any {

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/authorization"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
@@ -181,6 +182,74 @@ func TestAuthorizationStreamRejectsMultipleLastEventIDs(t *testing.T) {
 	controlTestServer(control, &fakeAuthorizer{}).buildMux().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_event_cursor") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestAuthorizationStreamClosesWithoutSequenceWhenPermissionIsRevoked(t *testing.T) {
+	previousPoll := authorizationStreamPollInterval
+	previousHeartbeat := authorizationStreamHeartbeatInterval
+	authorizationStreamPollInterval = time.Hour
+	authorizationStreamHeartbeatInterval = 5 * time.Millisecond
+	defer func() {
+		authorizationStreamPollInterval = previousPoll
+		authorizationStreamHeartbeatInterval = previousHeartbeat
+	}()
+
+	control := &fakeControl{session: store.AuthorizationSessionProjection{
+		ID: "session_1", ExecutorID: "aiexec_1", Status: "waiting_user",
+		Revision: 2, Sequence: 1, AccountSummary: []byte(`{}`),
+	}}
+	authorizer := &denyAfterInitialAuthorizer{}
+	server := controlTestServer(control, authorizer)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	request := publicRequest(t, http.MethodGet, "/api/v1/ai-executor-authorization-sessions/session_1/events-stream?after=1", "").WithContext(ctx)
+	writer := newSSETestWriter()
+	server.buildMux().ServeHTTP(writer, request)
+
+	body := writer.String()
+	if !strings.Contains(body, "event: "+store.AuthorizationEventClosed+"\n") ||
+		!strings.Contains(body, `"sessionId":"session_1"`) ||
+		!strings.Contains(body, `"reason":"permission_revoked"`) {
+		t.Fatalf("permission close envelope is invalid: %s", body)
+	}
+	if strings.Contains(body, "id:") {
+		t.Fatalf("connection close advanced the resource cursor: %s", body)
+	}
+	if authorizer.Calls() < 2 {
+		t.Fatalf("authorization was not re-evaluated: calls=%d", authorizer.Calls())
+	}
+}
+
+func TestAuthorizationStreamHeartbeatHasNoBusinessSequence(t *testing.T) {
+	if authorizationStreamHeartbeatInterval != 15*time.Second {
+		t.Fatalf("heartbeat contract drifted: %s", authorizationStreamHeartbeatInterval)
+	}
+	previousPoll := authorizationStreamPollInterval
+	previousHeartbeat := authorizationStreamHeartbeatInterval
+	authorizationStreamPollInterval = time.Hour
+	authorizationStreamHeartbeatInterval = 5 * time.Millisecond
+	defer func() {
+		authorizationStreamPollInterval = previousPoll
+		authorizationStreamHeartbeatInterval = previousHeartbeat
+	}()
+
+	control := &fakeControl{session: store.AuthorizationSessionProjection{
+		ID: "session_1", ExecutorID: "aiexec_1", Status: "waiting_user",
+		Revision: 2, Sequence: 1, AccountSummary: []byte(`{}`),
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	request := publicRequest(t, http.MethodGet, "/api/v1/ai-executor-authorization-sessions/session_1/events-stream?after=1", "").WithContext(ctx)
+	writer := newSSETestWriter()
+	controlTestServer(control, &fakeAuthorizer{}).buildMux().ServeHTTP(writer, request)
+
+	body := writer.String()
+	if !strings.Contains(body, ": heartbeat\n\n") {
+		t.Fatalf("heartbeat was not emitted: %s", body)
+	}
+	if strings.Contains(body, "id:") {
+		t.Fatalf("heartbeat advanced the resource cursor: %s", body)
 	}
 }
 
