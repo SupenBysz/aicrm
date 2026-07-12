@@ -290,12 +290,6 @@ func DigestTree(root string) (string, error) {
 		if metadata.Mode()&os.ModeSymlink != 0 || (!metadata.IsDir() && !metadata.Mode().IsRegular()) {
 			return ErrInvalidPath
 		}
-		if metadata.IsDir() {
-			return nil
-		}
-		if regularFileHasMultipleLinks(metadata) {
-			return ErrInvalidPath
-		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return ErrInvalidPath
@@ -317,6 +311,12 @@ func DigestTree(root string) (string, error) {
 			return ErrInvalidPath
 		}
 		normalizedPaths[relative] = struct{}{}
+		if metadata.IsDir() {
+			return nil
+		}
+		if regularFileHasMultipleLinks(metadata) {
+			return ErrInvalidPath
+		}
 		size, fileDigest, err := reader.DigestFile(rawRelative)
 		if err != nil {
 			return err

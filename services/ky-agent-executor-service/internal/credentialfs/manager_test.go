@@ -283,6 +283,33 @@ func TestDigestTreeRejectsHardlinksAndSpecialFiles(t *testing.T) {
 	}
 }
 
+func TestDigestTreeRejectsNormalizedDirectoryAndFileDirectoryCollisions(t *testing.T) {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		t.Skip("test requires a filesystem that preserves both NFC spellings")
+	}
+	directoryRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directoryRoot, "é"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(directoryRoot, "e\u0301"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DigestTree(directoryRoot); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("normalized directory collision err=%v", err)
+	}
+
+	fileDirectoryRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fileDirectoryRoot, "é"), []byte("credential"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(fileDirectoryRoot, "e\u0301"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DigestTree(fileDirectoryRoot); !errors.Is(err, ErrInvalidPath) {
+		t.Fatalf("normalized file/directory collision err=%v", err)
+	}
+}
+
 func TestDigestTreeEmptyDirectoriesDoNotChangeCanonicalFileList(t *testing.T) {
 	root := t.TempDir()
 	digest, err := DigestTree(root)
