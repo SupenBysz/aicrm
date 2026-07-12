@@ -19,13 +19,20 @@ var (
 	ErrUnavailable = errors.New("access decision unavailable")
 )
 
+type AssuranceRequirements struct {
+	RequireWorkspaceOwner       bool `json:"requireWorkspaceOwner"`
+	MaxAuthenticationAgeSeconds int  `json:"maxAuthenticationAgeSeconds"`
+	RequireMFAIfEnabled         bool `json:"requireMfaIfEnabled"`
+}
+
 type Request struct {
-	ActorID                string   `json:"actorId"`
-	SessionID              string   `json:"sessionId"`
-	WorkspaceType          string   `json:"workspaceType"`
-	WorkspaceID            string   `json:"workspaceId"`
-	RequiredAllPermissions []string `json:"requiredAllPermissions"`
-	RequiredAnyPermissions []string `json:"requiredAnyPermissions"`
+	ActorID                string                 `json:"actorId"`
+	SessionID              string                 `json:"sessionId"`
+	WorkspaceType          string                 `json:"workspaceType"`
+	WorkspaceID            string                 `json:"workspaceId"`
+	RequiredAllPermissions []string               `json:"requiredAllPermissions"`
+	RequiredAnyPermissions []string               `json:"requiredAnyPermissions"`
+	Assurance              *AssuranceRequirements `json:"assurance,omitempty"`
 }
 
 type DataScope struct {
@@ -36,15 +43,24 @@ type DataScope struct {
 	EnterpriseIDs []string `json:"enterpriseIds"`
 }
 
+type AssuranceFacts struct {
+	Verified        bool   `json:"verified"`
+	WorkspaceOwner  bool   `json:"workspaceOwner"`
+	AuthenticatedAt string `json:"authenticatedAt"`
+	MFARequired     bool   `json:"mfaRequired"`
+	MFAVerified     bool   `json:"mfaVerified"`
+}
+
 type Decision struct {
-	Allowed                    bool        `json:"allowed"`
-	ReasonCode                 string      `json:"reasonCode"`
-	ActorID                    string      `json:"actorId"`
-	MembershipID               string      `json:"membershipId"`
-	WorkspaceType              string      `json:"workspaceType"`
-	WorkspaceID                string      `json:"workspaceId"`
-	GrantedRequiredPermissions []string    `json:"grantedRequiredPermissions"`
-	DataScopes                 []DataScope `json:"dataScopes"`
+	Allowed                    bool            `json:"allowed"`
+	ReasonCode                 string          `json:"reasonCode"`
+	ActorID                    string          `json:"actorId"`
+	MembershipID               string          `json:"membershipId"`
+	WorkspaceType              string          `json:"workspaceType"`
+	WorkspaceID                string          `json:"workspaceId"`
+	GrantedRequiredPermissions []string        `json:"grantedRequiredPermissions"`
+	DataScopes                 []DataScope     `json:"dataScopes"`
+	Assurance                  *AssuranceFacts `json:"assurance,omitempty"`
 }
 
 type Authorizer interface {
@@ -112,19 +128,55 @@ func (c *Client) Evaluate(ctx context.Context, requestID string, input Request) 
 		return Decision{}, ErrUnavailable
 	}
 	var envelope struct {
-		Data Decision `json:"data"`
+		Data      Decision `json:"data"`
+		RequestID string   `json:"requestId"`
 	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
+		return Decision{}, fmt.Errorf("%w: invalid decision envelope", ErrUnavailable)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Decision{}, fmt.Errorf("%w: invalid decision envelope", ErrUnavailable)
 	}
 	decision := envelope.Data
 	if decision.ActorID != input.ActorID || decision.WorkspaceType != input.WorkspaceType || decision.WorkspaceID != input.WorkspaceID {
 		return Decision{}, ErrUnavailable
 	}
+	if !validAssuranceDecision(input.Assurance, decision) {
+		return Decision{}, ErrUnavailable
+	}
 	if !decision.Allowed {
 		return decision, ErrDenied
 	}
 	return decision, nil
+}
+
+func validAssuranceDecision(requirements *AssuranceRequirements, decision Decision) bool {
+	if requirements == nil {
+		return decision.Assurance == nil
+	}
+	if decision.Assurance == nil {
+		return !decision.Allowed
+	}
+	facts := decision.Assurance
+	if facts.AuthenticatedAt == "" {
+		if decision.Allowed {
+			return false
+		}
+	} else if parsed, err := time.Parse(time.RFC3339Nano, facts.AuthenticatedAt); err != nil || parsed.IsZero() {
+		return false
+	}
+	if decision.Allowed && !facts.Verified {
+		return false
+	}
+	if facts.Verified && requirements.RequireWorkspaceOwner && !facts.WorkspaceOwner {
+		return false
+	}
+	if facts.Verified && requirements.RequireMFAIfEnabled && facts.MFARequired && !facts.MFAVerified {
+		return false
+	}
+	return true
 }
 
 func isLoopbackHost(host string) bool {

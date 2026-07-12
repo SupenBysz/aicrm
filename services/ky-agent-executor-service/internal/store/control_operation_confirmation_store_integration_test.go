@@ -85,6 +85,29 @@ func TestOperationConfirmationAgainstPostgres(t *testing.T) {
 	if err != nil || !created.Created || created.ChallengeText == "" {
 		t.Fatalf("created=%#v err=%v", created, err)
 	}
+	action, err := control.ResolveOperationConfirmationAction(
+		ctx, created.ConfirmationID, base.ActorID, base.ActorSessionID,
+	)
+	if err != nil || action != store.OperationConfirmationRebindDevice {
+		t.Fatalf("resolved action=%q err=%v", action, err)
+	}
+	for _, lookup := range []struct {
+		name, confirmationID, actorID, actorSessionID string
+	}{
+		{"missing", "missing_confirmation", base.ActorID, base.ActorSessionID},
+		{"wrong actor", created.ConfirmationID, "another_owner", base.ActorSessionID},
+		{"wrong session", created.ConfirmationID, base.ActorID, "another_login"},
+		{"malformed", "contains spaces", base.ActorID, base.ActorSessionID},
+	} {
+		t.Run("resolve "+lookup.name, func(t *testing.T) {
+			resolved, resolveErr := control.ResolveOperationConfirmationAction(
+				ctx, lookup.confirmationID, lookup.actorID, lookup.actorSessionID,
+			)
+			if resolved != "" || !errors.Is(resolveErr, store.ErrNotFound) {
+				t.Fatalf("resolved=%q err=%v", resolved, resolveErr)
+			}
+		})
+	}
 	replayed, err := manager.Create(ctx, base)
 	if err != nil || replayed.Created || replayed.ConfirmationID != created.ConfirmationID ||
 		replayed.ChallengeText != created.ChallengeText || replayed.ExpiresAt != created.ExpiresAt {
@@ -268,6 +291,12 @@ func TestOperationConfirmationAgainstPostgres(t *testing.T) {
 	}
 	if status != "consumed" || executorName != "consumed atomically" || auditCount != 3 || outboxCount != 3 {
 		t.Fatalf("status=%s name=%s audits=%d outbox=%d", status, executorName, auditCount, outboxCount)
+	}
+	action, err = control.ResolveOperationConfirmationAction(
+		ctx, created.ConfirmationID, base.ActorID, base.ActorSessionID,
+	)
+	if err != nil || action != store.OperationConfirmationRebindDevice {
+		t.Fatalf("consumed confirmation action=%q err=%v", action, err)
 	}
 
 	expiredCreate := base

@@ -143,6 +143,39 @@ type ConsumeOperationConfirmationInput struct {
 // rejected so callers cannot consume confirmation independently of its action.
 type OperationConfirmationMutation func(context.Context, *sql.Tx, OperationConfirmationProjection) error
 
+// ResolveOperationConfirmationAction returns only the action frozen into a
+// confirmation.  Actor and browser-session mismatches deliberately collapse to
+// ErrNotFound so callers cannot use this read path to enumerate confirmations.
+// Lifecycle state is intentionally not considered here: Confirm and Consume
+// remain responsible for locking and revalidating the mutable state.
+func (s *ControlStore) ResolveOperationConfirmationAction(
+	ctx context.Context,
+	confirmationID string,
+	actorID string,
+	actorSessionID string,
+) (string, error) {
+	if !validOpaqueValue(confirmationID) || !validOpaqueValue(actorID) || !validOpaqueValue(actorSessionID) {
+		return "", ErrNotFound
+	}
+	var action string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT action
+		FROM ky_ai_executor_operation_confirmation
+		WHERE id=$1 AND actor_id=$2 AND actor_session_id=$3
+		  AND security_facts_verified
+	`, confirmationID, actorID, actorSessionID).Scan(&action)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if !validOperationConfirmationAction(action) {
+		return "", ErrNotFound
+	}
+	return action, nil
+}
+
 func (s *ControlStore) CreateOperationConfirmation(
 	ctx context.Context,
 	input CreateOperationConfirmationInput,
@@ -458,6 +491,15 @@ func validCreateOperationConfirmation(input CreateOperationConfirmationInput) bo
 		return input.TargetDeviceID == ""
 	case OperationConfirmationRebindDevice:
 		return confirmationDigestPattern.MatchString(input.TargetDeviceID)
+	default:
+		return false
+	}
+}
+
+func validOperationConfirmationAction(action string) bool {
+	switch action {
+	case OperationConfirmationForceRevoke, OperationConfirmationRebindDevice, OperationConfirmationUnbindDevice:
+		return true
 	default:
 		return false
 	}

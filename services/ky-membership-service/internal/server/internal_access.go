@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-membership-service/internal/store"
 )
@@ -18,13 +17,20 @@ var (
 	permissionCodePattern    = regexp.MustCompile(`^[a-z][a-z0-9_.]{2,159}$`)
 )
 
+type accessDecisionAssuranceInput struct {
+	RequireWorkspaceOwner       bool `json:"requireWorkspaceOwner"`
+	MaxAuthenticationAgeSeconds int  `json:"maxAuthenticationAgeSeconds"`
+	RequireMFAIfEnabled         bool `json:"requireMfaIfEnabled"`
+}
+
 type accessDecisionInput struct {
-	ActorID                string   `json:"actorId"`
-	SessionID              string   `json:"sessionId"`
-	WorkspaceType          string   `json:"workspaceType"`
-	WorkspaceID            string   `json:"workspaceId"`
-	RequiredAllPermissions []string `json:"requiredAllPermissions"`
-	RequiredAnyPermissions []string `json:"requiredAnyPermissions"`
+	ActorID                string                        `json:"actorId"`
+	SessionID              string                        `json:"sessionId"`
+	WorkspaceType          string                        `json:"workspaceType"`
+	WorkspaceID            string                        `json:"workspaceId"`
+	RequiredAllPermissions []string                      `json:"requiredAllPermissions"`
+	RequiredAnyPermissions []string                      `json:"requiredAnyPermissions"`
+	Assurance              *accessDecisionAssuranceInput `json:"assurance,omitempty"`
 }
 
 func (s *Server) internalAccessDecision(w http.ResponseWriter, r *http.Request) {
@@ -69,13 +75,20 @@ func (s *Server) internalAccessDecision(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	decision, err := s.store.EvaluateAccessDecision(r.Context(), store.AccessDecisionRequest{
+	request := store.AccessDecisionRequest{
 		ActorID: input.ActorID, SessionID: input.SessionID,
 		WorkspaceType: input.WorkspaceType, WorkspaceID: input.WorkspaceID,
 		RequiredAllPermissions: input.RequiredAllPermissions,
 		RequiredAnyPermissions: input.RequiredAnyPermissions,
-		Now:                    time.Now(),
-	})
+	}
+	if input.Assurance != nil {
+		request.Assurance = &store.AccessAssuranceRequirements{
+			RequireWorkspaceOwner:       input.Assurance.RequireWorkspaceOwner,
+			MaxAuthenticationAgeSeconds: input.Assurance.MaxAuthenticationAgeSeconds,
+			RequireMFAIfEnabled:         input.Assurance.RequireMFAIfEnabled,
+		}
+	}
+	decision, err := s.store.EvaluateAccessDecision(r.Context(), request)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "access_decision_failed", "权限决策失败")
 		return
@@ -90,6 +103,12 @@ func validAccessDecisionInput(input accessDecisionInput) bool {
 		(input.WorkspaceType != "platform" && input.WorkspaceType != "agency" && input.WorkspaceType != "enterprise") ||
 		len(input.RequiredAllPermissions) > 64 || len(input.RequiredAnyPermissions) > 64 {
 		return false
+	}
+	if input.Assurance != nil {
+		if input.Assurance.MaxAuthenticationAgeSeconds < 0 || input.Assurance.MaxAuthenticationAgeSeconds > 86400 ||
+			(!input.Assurance.RequireWorkspaceOwner && input.Assurance.MaxAuthenticationAgeSeconds == 0 && !input.Assurance.RequireMFAIfEnabled) {
+			return false
+		}
 	}
 	seen := make(map[string]struct{}, len(input.RequiredAllPermissions)+len(input.RequiredAnyPermissions))
 	for _, permissions := range [][]string{input.RequiredAllPermissions, input.RequiredAnyPermissions} {
