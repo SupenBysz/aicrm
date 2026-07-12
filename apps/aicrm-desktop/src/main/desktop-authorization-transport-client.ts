@@ -68,6 +68,7 @@ export class DesktopAuthorizationTransportError extends Error {
 export interface DesktopTrustedTransportResult<T> {
   requestReference: string;
   requestHash: string;
+  recovered: boolean;
   data: T;
 }
 
@@ -489,7 +490,7 @@ export class DesktopAuthorizationTransportClient {
         Buffer.from(record.response.bodyBase64, "base64").toString("utf8"),
         definition.validateResponse
       );
-      return trustedResult(record, data);
+      return trustedResult(record, data, true);
     }
 
     const body = Buffer.from(record.bodyBase64, "base64");
@@ -512,7 +513,7 @@ export class DesktopAuthorizationTransportClient {
         "设备授权响应未持久化"
       );
     }
-    return trustedResult(persisted, data);
+    return trustedResult(persisted, data, false);
   }
 
   private async postExact(
@@ -933,11 +934,13 @@ function readServerCode(text: string): string | undefined {
 
 function trustedResult<T>(
   record: DesktopDeviceRequestJournalRecord,
-  data: T
+  data: T,
+  recovered: boolean
 ): DesktopTrustedTransportResult<T> {
   return {
     requestReference: record.reference,
     requestHash: record.signed.requestHash,
+    recovered,
     data
   };
 }

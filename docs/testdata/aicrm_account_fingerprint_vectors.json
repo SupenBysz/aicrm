@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256(trim(type)+LF+lowercase(trim(email)))",
+  "vectors": [
+    {
+      "name": "chatgpt_mixed_case",
+      "type": "chatgpt",
+      "email": "User+Tag@Example.COM",
+      "normalized": "chatgpt\nuser+tag@example.com",
+      "digest": "fb5ffac450ec63be1a0152d12df201164a2bcc470a31159550b9f603af9761a7"
+    },
+    {
+      "name": "trimmed_identity",
+      "type": " chatgpt ",
+      "email": " Alice@Example.com ",
+      "normalized": "chatgpt\nalice@example.com",
+      "digest": "803341b8ef9d0d776a28702fe4fe62a1e0579c2d4c87d07fe1c75cd7052eb1c7"
+    },
+    {
+      "name": "plan_excluded",
+      "type": "chatgpt",
+      "email": "UPPER@EXAMPLE.COM",
+      "normalized": "chatgpt\nupper@example.com",
+      "digest": "9fd548681f96558fa71de0a573958b58c9bb2d48e977ca8f1b21f3ef250343f7"
+    }
+  ]
+}
