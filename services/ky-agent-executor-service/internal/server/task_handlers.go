@@ -459,6 +459,12 @@ func (s *Server) writeTaskStoreError(w http.ResponseWriter, r *http.Request, err
 		writeError(w, r, http.StatusConflict, "revision_conflict", "task revision changed")
 	case errors.Is(err, store.ErrIdempotencyReuse):
 		writeError(w, r, http.StatusConflict, "idempotency_key_reused", "Idempotency-Key was reused with another request")
+	case errors.Is(err, store.ErrExecutorRuntimeUnsupported):
+		writeError(w, r, http.StatusUnprocessableEntity, "executor_runtime_unsupported", "executor runtime is unsupported")
+	case errors.Is(err, store.ErrExecutorDisabled):
+		writeError(w, r, http.StatusConflict, "executor_disabled", "executor is disabled")
+	case errors.Is(err, store.ErrCredentialUnavailable):
+		writeError(w, r, http.StatusConflict, "executor_operation_fenced", "executor credential binding is unavailable")
 	case errors.Is(err, store.ErrUnsafeProjection):
 		writeError(w, r, http.StatusInternalServerError, "task_projection_unavailable", "task projection is unavailable")
 	case errors.Is(err, store.ErrConflict):

@@ -35,6 +35,7 @@ type authorizationRuntime interface {
 
 type taskRuntime interface {
 	Cancel(string)
+	Wake()
 }
 
 type controlStore interface {
@@ -61,6 +62,7 @@ type controlStore interface {
 	ListPublicTaskTerminal(context.Context, string, string, string, int64, int) ([]store.PublicTaskTerminalProjection, error)
 	PublicTaskTerminalClosedSequence(context.Context, string, string, string) (int64, error)
 	CancelPublicTask(context.Context, store.CancelPublicTaskInput) (store.PublicTaskProjection, bool, error)
+	CreateControlTask(context.Context, store.CreateControlTaskInput) (store.CreateControlTaskResult, error)
 }
 
 func New(cfg config.Config) *Server {
@@ -272,6 +274,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/terminal-frames", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.listPublicTaskTerminal))
 	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/terminal-stream", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.streamPublicTaskTerminal))
 	mux.HandleFunc("POST /api/v1/ai-executor-tasks/{taskId}/cancel", s.public([]string{"platform.ai_executor_tasks.cancel"}, nil, s.cancelPublicTask))
+	s.registerControlTaskRoutes(mux)
 
 	return mux
 }

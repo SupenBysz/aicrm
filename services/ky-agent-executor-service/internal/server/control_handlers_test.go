@@ -15,20 +15,22 @@ import (
 )
 
 type fakeControl struct {
-	created       store.CreateExecutorInput
-	patched       store.ExecutorPatch
-	authCreated   store.CreateAuthorizationSessionInput
-	session       store.AuthorizationSessionProjection
-	events        []store.AuthorizationEventProjection
-	eventAfter    int64
-	eventLimit    int
-	cancelInput   store.CancelAuthorizationInput
-	cancelErr     error
-	task          store.PublicTaskProjection
-	taskEvents    []store.PublicTaskEventProjection
-	terminal      []store.PublicTaskTerminalProjection
-	taskCancel    store.CancelPublicTaskInput
-	taskCancelErr error
+	created        store.CreateExecutorInput
+	patched        store.ExecutorPatch
+	authCreated    store.CreateAuthorizationSessionInput
+	session        store.AuthorizationSessionProjection
+	events         []store.AuthorizationEventProjection
+	eventAfter     int64
+	eventLimit     int
+	cancelInput    store.CancelAuthorizationInput
+	cancelErr      error
+	task           store.PublicTaskProjection
+	taskEvents     []store.PublicTaskEventProjection
+	terminal       []store.PublicTaskTerminalProjection
+	taskCancel     store.CancelPublicTaskInput
+	taskCancelErr  error
+	controlTask    store.CreateControlTaskInput
+	controlTaskErr error
 }
 
 func (f *fakeControl) Ping(context.Context) error { return nil }
@@ -165,6 +167,18 @@ func (f *fakeControl) CancelPublicTask(_ context.Context, input store.CancelPubl
 		f.task.CurrentSequence += 3
 	}
 	return f.task, transitioned, nil
+}
+func (f *fakeControl) CreateControlTask(_ context.Context, input store.CreateControlTaskInput) (store.CreateControlTaskResult, error) {
+	f.controlTask = input
+	if f.controlTaskErr != nil {
+		return store.CreateControlTaskResult{}, f.controlTaskErr
+	}
+	f.task = store.PublicTaskProjection{
+		ID: input.ID, WorkspaceType: input.WorkspaceType, WorkspaceID: input.WorkspaceID,
+		ExecutorID: input.ExecutorID, ExecutorType: "codex", TaskType: input.TaskType,
+		Status: "pending", Revision: 1, CurrentSequence: 1,
+	}
+	return store.CreateControlTaskResult{Task: f.task, Created: true}, nil
 }
 
 type fakeAuthorizer struct {
