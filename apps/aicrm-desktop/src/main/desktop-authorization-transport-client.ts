@@ -72,6 +72,18 @@ export interface DesktopTrustedTransportResult<T> {
   data: T;
 }
 
+/** Main-only safe projection emitted after the exact signed request is durable. */
+export interface DesktopTrustedRequestPrepared {
+  requestReference: string;
+  requestHash: string;
+  recovered: boolean;
+  responseAvailable: boolean;
+}
+
+export interface DesktopTrustedRequestHooks {
+  onPrepared(prepared: Readonly<DesktopTrustedRequestPrepared>): Promise<void>;
+}
+
 export interface ClaimDesktopHandoffInput {
   sessionId: string;
   handoffId: string;
@@ -246,7 +258,8 @@ export class DesktopAuthorizationTransportClient {
   }
 
   claimDesktopHandoff(
-    input: ClaimDesktopHandoffInput
+    input: ClaimDesktopHandoffInput,
+    hooks?: DesktopTrustedRequestHooks
   ): Promise<DesktopTrustedTransportResult<ClaimDesktopHandoffResponse>> {
     const sessionId = validOpaque(input.sessionId, "sessionId");
     const handoffId = validOpaque(input.handoffId, "handoffId");
@@ -278,12 +291,14 @@ export class DesktopAuthorizationTransportClient {
         },
         validateResponse: (value) => validateClaimResponse(value, handoffId)
       },
-      epoch
+      epoch,
+      hooks
     );
   }
 
   submitAuthorizationProof(
-    input: SubmitDesktopAuthorizationProofInput
+    input: SubmitDesktopAuthorizationProofInput,
+    hooks?: DesktopTrustedRequestHooks
   ): Promise<DesktopTrustedTransportResult<SubmitDesktopAuthorizationProofResponse>> {
     const sessionId = validOpaque(input.sessionId, "sessionId");
     const claimToken = validTicket(input.claimToken, "claimToken");
@@ -325,12 +340,14 @@ export class DesktopAuthorizationTransportClient {
         validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "登录证明恢复冲突"),
         validateResponse: (value) => validateProofResponse(value, result)
       },
-      epoch
+      epoch,
+      hooks
     );
   }
 
   renewCredentialActivationLease(
-    input: RenewDesktopCredentialActivationLeaseInput
+    input: RenewDesktopCredentialActivationLeaseInput,
+    hooks?: DesktopTrustedRequestHooks
   ): Promise<DesktopTrustedTransportResult<RenewDesktopCredentialActivationLeaseResponse>> {
     const tuple = validateActivationTuple(input);
     const expectedBody = encodeJson({
@@ -354,12 +371,14 @@ export class DesktopAuthorizationTransportClient {
         validateRecoveredBody: (body) => requireExactBody(body, expectedBody, "激活续租恢复冲突"),
         validateResponse: (value) => validateLeaseRenewalResponse(value, tuple)
       },
-      epoch
+      epoch,
+      hooks
     );
   }
 
   acknowledgeCredentialActivation(
-    input: AcknowledgeDesktopCredentialActivationInput
+    input: AcknowledgeDesktopCredentialActivationInput,
+    hooks?: DesktopTrustedRequestHooks
   ): Promise<DesktopTrustedTransportResult<AcknowledgeDesktopCredentialActivationResponse>> {
     const sessionId = validOpaque(input.sessionId, "sessionId");
     const activationToken = validTicket(input.activationToken, "activationToken");
@@ -406,7 +425,8 @@ export class DesktopAuthorizationTransportClient {
         validateResponse: (value) =>
           validateActivationResponse(value, activationId, credentialRevision)
       },
-      epoch
+      epoch,
+      hooks
     );
   }
 
@@ -421,13 +441,19 @@ export class DesktopAuthorizationTransportClient {
 
   private runTrusted<T>(
     definition: TrustedRequestDefinition<T>,
-    epoch: number
+    epoch: number,
+    hooks?: DesktopTrustedRequestHooks
   ): Promise<DesktopTrustedTransportResult<T>> {
     const reference = desktopTrustedRequestReference(definition.kind, definition.path);
+    let preparedHookFailed = false;
     return this.requestLane.runPinned(
       reference,
-      () => this.submit(definition, epoch),
+      () =>
+        this.submit(definition, epoch, hooks, () => {
+          preparedHookFailed = true;
+        }),
       async () => {
+        if (preparedHookFailed) return true;
         try {
           const pending = await this.requestJournal.load(reference);
           return pending !== null && pending.response === null;
@@ -442,13 +468,16 @@ export class DesktopAuthorizationTransportClient {
 
   private async submit<T>(
     definition: TrustedRequestDefinition<T>,
-    epoch: number
+    epoch: number,
+    hooks: DesktopTrustedRequestHooks | undefined,
+    markPreparedHookFailed: () => void
   ): Promise<DesktopTrustedTransportResult<T>> {
     this.assertActive(epoch);
     const reference = desktopTrustedRequestReference(definition.kind, definition.path);
     const origin = trustedApiOrigin(await this.loadTrustedApiBaseUrl());
     this.assertActive(epoch);
     let record = await this.requestJournal.load(reference);
+    const recovered = record !== null;
     this.assertActive(epoch);
     const identity = await this.identityStore.getIdentity();
     this.assertActive(epoch);
@@ -483,6 +512,22 @@ export class DesktopAuthorizationTransportClient {
       });
       this.assertActive(epoch);
       validateRecoveredRecord(record, definition, identity, origin);
+    }
+
+    if (hooks) {
+      const prepared = Object.freeze({
+        requestReference: record.reference,
+        requestHash: record.signed.requestHash,
+        recovered,
+        responseAvailable: record.response !== null
+      }) satisfies Readonly<DesktopTrustedRequestPrepared>;
+      try {
+        await hooks.onPrepared(prepared);
+      } catch (error) {
+        markPreparedHookFailed();
+        throw error;
+      }
+      this.assertActive(epoch);
     }
 
     if (record.response) {

@@ -136,6 +136,139 @@ function requestProjection(url, init) {
   };
 }
 
+test("prepared hook observes the durable exact request before the network", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const order = [];
+  let preparedProjection;
+  const client = current.client({
+    fetch: async () => {
+      order.push("fetch");
+      return response(claimData());
+    }
+  });
+
+  const result = await client.claimDesktopHandoff(claimInput(), {
+    onPrepared: async (prepared) => {
+      order.push("prepared");
+      preparedProjection = prepared;
+      const durable = await current.journal.load(prepared.requestReference);
+      assert.ok(durable);
+      assert.equal(durable.signed.requestHash, prepared.requestHash);
+      assert.equal(durable.response, null);
+      assert.equal(Object.isFrozen(prepared), true);
+    }
+  });
+
+  assert.deepEqual(order, ["prepared", "fetch"]);
+  assert.deepEqual(preparedProjection, {
+    requestReference: result.requestReference,
+    requestHash: result.requestHash,
+    recovered: false,
+    responseAvailable: false
+  });
+  assert.deepEqual(Object.keys(preparedProjection).sort(), [
+    "recovered",
+    "requestHash",
+    "requestReference",
+    "responseAvailable"
+  ]);
+  const safeProjection = JSON.stringify(preparedProjection);
+  for (const canary of [HANDOFF_TICKET, CLAIM_TOKEN, "session_1", "handoff_1", current.base]) {
+    assert.equal(safeProjection.includes(canary), false);
+  }
+});
+
+test("prepared hook failure sends nothing and pins the exact durable request for retry", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let networkCalls = 0;
+  let failedProjection;
+  const client = current.client({
+    fetch: async () => {
+      networkCalls += 1;
+      return response(claimData());
+    }
+  });
+
+  await assert.rejects(
+    client.claimDesktopHandoff(claimInput(), {
+      onPrepared: async (prepared) => {
+        failedProjection = prepared;
+        throw new Error("downstream state unavailable");
+      }
+    }),
+    /downstream state unavailable/
+  );
+  assert.equal(networkCalls, 0);
+  assert.equal(current.signCount(), 1);
+  const pending = await current.journal.load(failedProjection.requestReference);
+  assert.ok(pending);
+  assert.equal(pending.response, null);
+  assert.equal(pending.signed.requestHash, failedProjection.requestHash);
+  await assert.rejects(current.lane.run(async () => undefined), {
+    code: "desktop_device_request_lane_pinned"
+  });
+
+  let recoveredProjection;
+  const recovered = await client.claimDesktopHandoff(claimInput(), {
+    onPrepared: async (prepared) => {
+      recoveredProjection = prepared;
+    }
+  });
+  assert.equal(networkCalls, 1);
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(recoveredProjection, {
+    requestReference: failedProjection.requestReference,
+    requestHash: failedProjection.requestHash,
+    recovered: true,
+    responseAvailable: false
+  });
+  assert.equal(recovered.requestReference, failedProjection.requestReference);
+  assert.equal(recovered.requestHash, failedProjection.requestHash);
+
+  let laneReleased = false;
+  await current.lane.run(async () => {
+    laneReleased = true;
+  });
+  assert.equal(laneReleased, true);
+});
+
+test("prepared hook runs before returning a recovered durable response without network", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const first = await current.client({
+    fetch: async () => response(claimData())
+  }).claimDesktopHandoff(claimInput());
+  let networkCalls = 0;
+  let hookCompleted = false;
+  let preparedProjection;
+
+  const recovered = await current.client({
+    fetch: async () => {
+      networkCalls += 1;
+      throw new Error("must not send");
+    }
+  }).claimDesktopHandoff(claimInput(), {
+    onPrepared: async (prepared) => {
+      preparedProjection = prepared;
+      const durable = await current.journal.load(prepared.requestReference);
+      assert.ok(durable?.response);
+      hookCompleted = true;
+    }
+  });
+
+  assert.equal(hookCompleted, true);
+  assert.equal(networkCalls, 0);
+  assert.deepEqual(recovered.data, claimData());
+  assert.deepEqual(preparedProjection, {
+    requestReference: first.requestReference,
+    requestHash: first.requestHash,
+    recovered: true,
+    responseAvailable: true
+  });
+});
+
 test("response loss replays the exact encrypted claim and a durable response needs no network", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
