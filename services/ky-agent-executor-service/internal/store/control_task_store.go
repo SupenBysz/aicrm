@@ -373,12 +373,17 @@ func (s *ControlStore) CancelPublicTask(ctx context.Context, input CancelPublicT
 	transitioned := !terminalTaskStatus(status)
 	if transitioned {
 		status = "cancelled"
-		if _, err := tx.ExecContext(ctx, `
+		result, err := tx.ExecContext(ctx, `
 			UPDATE ky_ai_executor_task SET status='cancelled',revision=revision+1,
 			  current_sequence=current_sequence+3,failure_code='',completed_at=now(),updated_at=now()
-			WHERE id=$1 AND revision=$2 AND status IN ('pending','waiting_executor','running')
-		`, input.TaskID, revision); err != nil {
+			WHERE id=$1 AND revision=$2
+			  AND status IN ('pending','waiting_executor','running','waiting_user_scan')
+		`, input.TaskID, revision)
+		if err != nil {
 			return PublicTaskProjection{}, false, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return PublicTaskProjection{}, false, ErrRevisionConflict
 		}
 		if operationID != "" && leaseEpoch > 0 {
 			if _, err := tx.ExecContext(ctx, `

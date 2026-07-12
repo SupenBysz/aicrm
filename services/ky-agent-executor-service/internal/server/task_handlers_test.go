@@ -24,10 +24,16 @@ func TestPublicTaskHistoryUsesCanonicalEnvelope(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	body := recorder.Body.String()
-	for _, expected := range []string{`"nextSequence":2`, `"hasMore":true`, `"event":"executor.task.terminal"`} {
+	for _, expected := range []string{
+		`"nextSequence":2`, `"hasMore":true`, `"event":"executor.task.terminal"`,
+		`"state":{"status":"pending"}`,
+	} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("history missing %s: %s", expected, body)
 		}
+	}
+	if strings.Contains(body, `"task":`) {
+		t.Fatalf("history replay used the latest task snapshot as an event-time snapshot: %s", body)
 	}
 }
 
@@ -117,14 +123,40 @@ func TestPublicTaskSSEHeartbeatIsFifteenSecondsAndRechecksAccess(t *testing.T) {
 		t.Fatal("SSE did not close after access was revoked")
 	}
 	body := writer.String()
-	if !strings.Contains(body, "event: executor.task.stream-closed") || !strings.Contains(body, `"reason":"permission_revoked"`) {
+	if !strings.Contains(body, "event: executor.task.stream.closed") ||
+		!strings.Contains(body, `"taskId":"task_1"`) ||
+		!strings.Contains(body, `"reason":"permission_revoked"`) {
 		t.Fatalf("connection close missing: %s", body)
+	}
+	if strings.Contains(body, `"runId":`) {
+		t.Fatalf("event stream used the terminal-stream resource envelope: %s", body)
 	}
 	if strings.Contains(body, "id:") {
 		t.Fatalf("connection-level close must not have an id: %s", body)
 	}
 	if authorizer.Calls() < 2 {
 		t.Fatalf("membership/session/workspace access was not rechecked: calls=%d", authorizer.Calls())
+	}
+}
+
+func TestTaskConnectionClosedUsesStreamSpecificNamespace(t *testing.T) {
+	tests := []struct {
+		event       string
+		resourceKey string
+		want        string
+		forbidden   string
+	}{
+		{store.TaskEventClosed, "taskId", `"taskId":"task_1"`, `"runId":`},
+		{store.TaskTerminalClosed, "runId", `"runId":"task_1"`, `"taskId":`},
+	}
+	for _, test := range tests {
+		recorder := httptest.NewRecorder()
+		writeConnectionClosed(recorder, test.event, test.resourceKey, "task_1", "permission_revoked")
+		body := recorder.Body.String()
+		if !strings.Contains(body, "event: "+test.event) || !strings.Contains(body, test.want) ||
+			strings.Contains(body, test.forbidden) || strings.Contains(body, "id:") {
+			t.Fatalf("event=%s body=%s", test.event, body)
+		}
 	}
 }
 
@@ -186,9 +218,9 @@ func terminalTaskControl() *fakeControl {
 			Status: "completed", Revision: 3, CurrentSequence: 3,
 		},
 		taskEvents: []store.PublicTaskEventProjection{
-			{ID: "event_1", TaskID: "task_1", Sequence: 1, EventType: store.TaskEventChanged, Level: "info", OccurredAt: "2026-07-12T00:00:00Z"},
-			{ID: "event_2", TaskID: "task_1", Sequence: 2, EventType: store.TaskEventTerminal, Level: "success", OccurredAt: "2026-07-12T00:00:01Z"},
-			{ID: "event_3", TaskID: "task_1", Sequence: 3, EventType: store.TaskEventClosed, Level: "info", OccurredAt: "2026-07-12T00:00:02Z"},
+			{ID: "event_1", TaskID: "task_1", Sequence: 1, EventType: store.TaskEventChanged, Level: "info", Payload: []byte(`{"status":"pending"}`), OccurredAt: "2026-07-12T00:00:00Z"},
+			{ID: "event_2", TaskID: "task_1", Sequence: 2, EventType: store.TaskEventTerminal, Level: "success", Payload: []byte(`{"status":"completed"}`), OccurredAt: "2026-07-12T00:00:01Z"},
+			{ID: "event_3", TaskID: "task_1", Sequence: 3, EventType: store.TaskEventClosed, Level: "info", Payload: []byte(`{"reason":"terminal"}`), OccurredAt: "2026-07-12T00:00:02Z"},
 		},
 		terminal: []store.PublicTaskTerminalProjection{
 			{Sequence: 11, Kind: "frame", Encoding: "base64", Payload: payload, ByteLength: len("Task completed")},

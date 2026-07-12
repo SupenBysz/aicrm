@@ -89,6 +89,34 @@ func TestPublicTaskCancelPersistsTerminalStreamsAgainstPostgres(t *testing.T) {
 	if _, err := control.GetPublicTask(ctx, taskID, "agency", "agency_1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-workspace task read err=%v", err)
 	}
+
+	legacyTaskID := "task_legacy_" + suffix
+	legacyRequestHash := testTaskDigest("legacy-request:" + suffix)
+	if _, err := control.db.ExecContext(ctx, `
+		INSERT INTO ky_ai_executor_task (
+		  id,workspace_type,workspace_id,executor_id,executor_type,task_type,
+		  status,generation_engine,revision,current_sequence,request_hash
+		) VALUES ($1,'platform','platform_root',$2,'codex','script_repair',
+		  'waiting_user_scan','legacy_provider',2,0,$3)
+	`, legacyTaskID, executorID, legacyRequestHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.db.ExecContext(ctx, `
+		INSERT INTO ky_ai_executor_task_request_registry
+		(task_id,request_hash,materialized_status,materialized_at)
+		VALUES ($1,$2,'running',now())
+	`, legacyTaskID, legacyRequestHash); err != nil {
+		t.Fatal(err)
+	}
+	legacyCancelled, transitioned, err := control.CancelPublicTask(ctx, CancelPublicTaskInput{
+		TaskID: legacyTaskID, ActorID: "user_platform_owner",
+		WorkspaceType: "platform", WorkspaceID: "platform_root", ExpectedRevision: 2,
+		IdempotencyKeyHash: testTaskDigest("legacy-key:" + suffix),
+		RequestHash:        testTaskDigest("legacy-cancel:" + suffix),
+	})
+	if err != nil || !transitioned || legacyCancelled.Status != "cancelled" {
+		t.Fatalf("legacy cancelled=%#v transitioned=%v err=%v", legacyCancelled, transitioned, err)
+	}
 }
 
 func testTaskDigest(value string) string {

@@ -67,7 +67,7 @@ func (s *Server) listPublicTaskEvents(w http.ResponseWriter, r *http.Request, ac
 		writeError(w, r, http.StatusBadRequest, "invalid_event_cursor", "event cursor is invalid")
 		return
 	}
-	task, err := s.control.GetPublicTask(r.Context(), taskID, actor.WorkspaceType, actor.WorkspaceID)
+	_, err := s.control.GetPublicTask(r.Context(), taskID, actor.WorkspaceType, actor.WorkspaceID)
 	if err != nil {
 		s.writeTaskStoreError(w, r, err)
 		return
@@ -89,7 +89,7 @@ func (s *Server) listPublicTaskEvents(w http.ResponseWriter, r *http.Request, ac
 	for _, item := range items {
 		history = append(history, map[string]any{
 			"sequence": item.Sequence, "event": item.EventType,
-			"occurredAt": item.OccurredAt, "data": publicTaskEventData(taskID, item, task),
+			"occurredAt": item.OccurredAt, "data": publicTaskEventData(taskID, item),
 		})
 	}
 	writeData(w, r, http.StatusOK, map[string]any{
@@ -136,7 +136,7 @@ func (s *Server) streamPublicTaskEvents(w http.ResponseWriter, r *http.Request, 
 				return
 			}
 			for _, item := range items {
-				if !writeSSE(w, item.Sequence, item.EventType, publicTaskEventData(taskID, item, task)) {
+				if !writeSSE(w, item.Sequence, item.EventType, publicTaskEventData(taskID, item)) {
 					return
 				}
 				cursor = item.Sequence
@@ -157,7 +157,7 @@ func (s *Server) streamPublicTaskEvents(w http.ResponseWriter, r *http.Request, 
 		case <-poll.C:
 		case <-heartbeat.C:
 			if !s.taskStreamPermissionValid(r, actor) {
-				writeConnectionClosed(w, taskID, "permission_revoked")
+				writeConnectionClosed(w, store.TaskEventClosed, "taskId", taskID, "permission_revoked")
 				flusher.Flush()
 				return
 			}
@@ -262,7 +262,7 @@ func (s *Server) streamPublicTaskTerminal(w http.ResponseWriter, r *http.Request
 		case <-poll.C:
 		case <-heartbeat.C:
 			if !s.taskStreamPermissionValid(r, actor) {
-				writeConnectionClosed(w, taskID, "permission_revoked")
+				writeConnectionClosed(w, store.TaskTerminalClosed, "runId", taskID, "permission_revoked")
 				flusher.Flush()
 				return
 			}
@@ -328,14 +328,14 @@ func (s *Server) publicTaskFromPath(w http.ResponseWriter, r *http.Request, acto
 	return item, true
 }
 
-func publicTaskEventData(taskID string, item store.PublicTaskEventProjection, task store.PublicTaskProjection) map[string]any {
+func publicTaskEventData(taskID string, item store.PublicTaskEventProjection) map[string]any {
 	item.Payload = sanitizeSafeJSON(item.Payload)
 	if item.EventType == store.TaskEventClosed {
 		return map[string]any{"taskId": taskID, "sequence": item.Sequence, "reason": "terminal"}
 	}
 	return map[string]any{
 		"taskId": taskID, "sequence": item.Sequence, "occurredAt": item.OccurredAt,
-		"task": task, "event": item,
+		"event": item, "state": item.Payload,
 	}
 }
 
@@ -406,9 +406,9 @@ func writeSSE(w http.ResponseWriter, sequence int64, event string, data any) boo
 	return err == nil
 }
 
-func writeConnectionClosed(w http.ResponseWriter, taskID, reason string) {
-	encoded, _ := json.Marshal(map[string]any{"runId": taskID, "reason": reason})
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", store.TaskTerminalClosed, encoded)
+func writeConnectionClosed(w http.ResponseWriter, event, resourceKey, resourceID, reason string) {
+	encoded, _ := json.Marshal(map[string]any{resourceKey: resourceID, "reason": reason})
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded)
 }
 
 func (s *Server) taskStreamPermissionValid(r *http.Request, actor actorContext) bool {
