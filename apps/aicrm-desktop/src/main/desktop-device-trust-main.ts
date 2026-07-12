@@ -6,6 +6,7 @@ import { DesktopDeviceHeartbeatClient } from "./desktop-device-heartbeat-client"
 import { DesktopDeviceIdentityStore } from "./desktop-device-identity";
 import { DesktopDeviceRegistrationClient } from "./desktop-device-registration-client";
 import { DesktopDevicePendingRegistrationStore } from "./desktop-device-registration-pending";
+import { DesktopDeviceRequestLane } from "./desktop-device-request-lane";
 import { DesktopDeviceTrustRuntime } from "./desktop-device-trust-runtime";
 import { loadSession } from "./session-store";
 
@@ -28,8 +29,10 @@ export function getDesktopDeviceTrustRuntime(): DesktopDeviceTrustRuntime {
     loadHostSession: loadSession,
     loadTrustedApiBaseUrl: async () => (await loadDesktopConfig()).apiBaseUrl
   });
+  const requestLane = new DesktopDeviceRequestLane();
   const heartbeatClient = new DesktopDeviceHeartbeatClient({
     identityStore,
+    requestLane,
     appVersion: app.getVersion(),
     loadTrustedApiBaseUrl: async () => (await loadDesktopConfig()).apiBaseUrl
   });

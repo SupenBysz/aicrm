@@ -5,6 +5,7 @@ import type {
   SignedDesktopDeviceRequest
 } from "./desktop-device-identity.ts";
 import { sha256Hex, verifyDesktopDeviceSigningInput } from "./desktop-device-proof.ts";
+import type { DesktopDeviceRequestLane } from "./desktop-device-request-lane.ts";
 
 export const DESKTOP_DEVICE_HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_RESPONSE_BYTES = 64 << 10;
@@ -57,6 +58,8 @@ export interface DesktopDeviceHeartbeatResult {
 interface HeartbeatIdentityStore
   extends Pick<DesktopDeviceIdentityStore, "getIdentity" | "signRequest"> {}
 
+interface HeartbeatRequestLane extends Pick<DesktopDeviceRequestLane, "run"> {}
+
 interface HttpResponseLike {
   ok: boolean;
   status: number;
@@ -69,6 +72,7 @@ type ClearTimer = (timer: ReturnType<typeof setTimeout>) => void;
 
 export interface DesktopDeviceHeartbeatClientOptions {
   identityStore: HeartbeatIdentityStore;
+  requestLane: HeartbeatRequestLane;
   appVersion: string;
   loadTrustedApiBaseUrl: () => string | Promise<string>;
   fetch?: HostFetch;
@@ -83,6 +87,7 @@ export interface DesktopDeviceHeartbeatClientOptions {
 /** Main-only signed heartbeat loop. It never receives Bearer or workspace input. */
 export class DesktopDeviceHeartbeatClient {
   private readonly identityStore: HeartbeatIdentityStore;
+  private readonly requestLane: HeartbeatRequestLane;
   private readonly appVersion: string;
   private readonly loadTrustedApiBaseUrl: () => string | Promise<string>;
   private readonly hostFetch: HostFetch;
@@ -101,6 +106,7 @@ export class DesktopDeviceHeartbeatClient {
 
   constructor(options: DesktopDeviceHeartbeatClientOptions) {
     this.identityStore = options.identityStore;
+    this.requestLane = options.requestLane;
     this.appVersion = validateAppVersion(options.appVersion);
     this.loadTrustedApiBaseUrl = options.loadTrustedApiBaseUrl;
     this.hostFetch = options.fetch ?? ((url, init) => fetch(url, init));
@@ -138,7 +144,7 @@ export class DesktopDeviceHeartbeatClient {
   heartbeat(): Promise<DesktopDeviceHeartbeatResult> {
     if (this.inFlight) return this.inFlight;
     const epoch = this.cancellationEpoch;
-    const operation = this.sendHeartbeat(epoch);
+    const operation = this.requestLane.run(() => this.sendHeartbeat(epoch));
     this.inFlight = operation;
     this.inFlightEpoch = epoch;
     void operation

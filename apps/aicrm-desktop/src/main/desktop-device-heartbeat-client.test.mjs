@@ -8,6 +8,7 @@ import {
   buildDesktopDeviceProof,
   desktopDeviceKeyMaterialFromSeed
 } from "./desktop-device-proof.ts";
+import { DesktopDeviceRequestLane } from "./desktop-device-request-lane.ts";
 
 const now = new Date("2026-07-13T08:00:00.000Z");
 const key = desktopDeviceKeyMaterialFromSeed(
@@ -78,9 +79,11 @@ function success(sequence) {
 
 function clientFixture(overrides = {}) {
   const identityStore = overrides.identityStore ?? new FakeIdentityStore();
+  const requestLane = overrides.requestLane ?? new DesktopDeviceRequestLane();
   const requests = [];
   const client = new DesktopDeviceHeartbeatClient({
     identityStore,
+    requestLane,
     appVersion: "0.1.0",
     loadTrustedApiBaseUrl: () => "https://aicrm.example.test",
     now: () => now,
@@ -95,7 +98,7 @@ function clientFixture(overrides = {}) {
     setTimer: overrides.setTimer,
     clearTimer: overrides.clearTimer
   });
-  return { client, identityStore, requests };
+  return { client, identityStore, requestLane, requests };
 }
 
 test("heartbeat signs the exact device-only contract without Bearer, workspace, or Codex capability", async () => {
@@ -154,6 +157,62 @@ test("concurrent heartbeat calls share one signed sequence and one transport", a
   assert.equal(current.identityStore.sequence, 1n);
   resolveResponse(success(1));
   assert.deepEqual(await first, await second);
+});
+
+test("two clients sharing the Main request lane cannot sign or dispatch device sequences out of order", async () => {
+  const identityStore = new FakeIdentityStore();
+  const requestLane = new DesktopDeviceRequestLane();
+  let resolveFirst;
+  let firstStarted;
+  const started = new Promise((resolve) => {
+    firstStarted = resolve;
+  });
+  const first = clientFixture({
+    identityStore,
+    requestLane,
+    fetch: async () => {
+      firstStarted();
+      return new Promise((resolve) => {
+        resolveFirst = resolve;
+      });
+    }
+  });
+  const secondRequests = [];
+  const second = clientFixture({
+    identityStore,
+    requestLane,
+    fetch: async (url, init) => {
+      secondRequests.push({ url, init });
+      return success(2);
+    }
+  });
+  const firstOperation = first.client.heartbeat();
+  await started;
+  const secondOperation = second.client.heartbeat();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(identityStore.sequence, 1n);
+  assert.equal(secondRequests.length, 0);
+  resolveFirst(success(1));
+  await firstOperation;
+  assert.equal((await secondOperation).sequence, 2);
+  assert.equal(identityStore.sequence, 2n);
+  assert.equal(secondRequests[0].init.headers["X-AiCRM-Device-Sequence"], "2");
+});
+
+test("a failed or cancelled lane holder releases the next device request", async () => {
+  const lane = new DesktopDeviceRequestLane();
+  const order = [];
+  const failed = lane.run(async () => {
+    order.push("first-start");
+    throw new Error("transport failed");
+  });
+  const recovered = lane.run(async () => {
+    order.push("second-start");
+    return "ok";
+  });
+  await assert.rejects(failed, /transport failed/);
+  assert.equal(await recovered, "ok");
+  assert.deepEqual(order, ["first-start", "second-start"]);
 });
 
 test("response loss and Main restart recover with a fresh monotonically signed heartbeat", async () => {
