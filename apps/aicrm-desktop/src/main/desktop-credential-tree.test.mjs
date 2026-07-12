@@ -25,6 +25,7 @@ import {
   digestDesktopCredentialTree
 } from "./desktop-credential-tree-digest.ts";
 import { DesktopCredentialTreeManager } from "./desktop-credential-tree-manager.ts";
+import { DesktopCredentialOperationJournalStore } from "./desktop-credential-operation-journal.ts";
 import { PowerShellDesktopWindowsCredentialProtection } from "./desktop-credential-windows-protection.ts";
 
 const fixturePath = path.resolve(
@@ -32,6 +33,15 @@ const fixturePath = path.resolve(
   "../../docs/testdata/aicrm_credential_tree_vectors.json"
 );
 const tokenCanary = "plaintext-ack-token-must-never-be-persisted";
+const acknowledgementProvenance = Object.freeze({
+  authorizationSessionId: "authorization_session_credential_tree_1",
+  activationAckRequestReference: createHash("sha256")
+    .update("credential-tree-ack-reference")
+    .digest("hex"),
+  activationAckRequestHash: createHash("sha256")
+    .update("credential-tree-ack-request")
+    .digest("hex")
+});
 
 class FakeSafeStorage {
   constructor({ available = true, backend = "gnome_libsecret" } = {}) {
@@ -240,7 +250,8 @@ function acknowledge(manager, projection) {
     executorId: projection.executorId,
     operationId: projection.operationId,
     revision: projection.revision,
-    expectedDigest: projection.digest
+    expectedDigest: projection.digest,
+    ...acknowledgementProvenance
   });
 }
 
@@ -249,6 +260,45 @@ function ackReplay() {
     tokenHash: createHash("sha256").update(tokenCanary).digest("hex"),
     tokenReference: "ack_ref_1"
   };
+}
+
+function operationRecordDigest(record) {
+  return createHash("sha256")
+    .update("AICRM-CREDENTIAL-OPERATION-RECORD-V2\n", "utf8")
+    .update(JSON.stringify({
+      version: record.version,
+      generation: record.generation,
+      executorId: record.executorId,
+      operationId: record.operationId,
+      sourceKind: record.sourceKind,
+      sourceId: record.sourceId,
+      sourceOwnershipDigest: record.sourceOwnershipDigest,
+      targetRevision: record.targetRevision,
+      expectedDigest: record.expectedDigest,
+      phase: record.phase,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      ackReplay: record.ackReplay,
+      authorizationSessionId: record.authorizationSessionId,
+      activationAckRequestReference: record.activationAckRequestReference,
+      activationAckRequestHash: record.activationAckRequestHash,
+      acknowledgedAt: record.acknowledgedAt
+    }), "utf8")
+    .digest("hex");
+}
+
+function withOperationRecordDigest(record) {
+  const value = { ...record, recordDigest: "" };
+  value.recordDigest = operationRecordDigest(value);
+  return value;
+}
+
+function operationJournalEnvelope(storage, record) {
+  const value = withOperationRecordDigest(record);
+  return Buffer.concat([
+    Buffer.from("AICRM-CREDENTIAL-OP-ENC-V2\n"),
+    storage.encryptString(JSON.stringify(value))
+  ]);
 }
 
 function runPromotionProcess(root, sessionId, operationId, expectedDigest) {
@@ -305,6 +355,89 @@ function runPromotionProcess(root, sessionId, operationId, expectedDigest) {
       }
     });
   });
+}
+
+function runJournalContender(root, action, ready, go) {
+  const journalModule = new URL(
+    "./desktop-credential-operation-journal.ts",
+    import.meta.url
+  ).href;
+  const script = `
+    import { access, writeFile } from "node:fs/promises";
+    import { DesktopCredentialOperationJournalStore } from ${JSON.stringify(journalModule)};
+    class Storage {
+      isEncryptionAvailable() { return true; }
+      getSelectedStorageBackend() { return "gnome_libsecret"; }
+      encryptString(value) {
+        return Buffer.concat([
+          Buffer.from("CREDENTIAL-JOURNAL-TEST\\0"),
+          Buffer.from(Buffer.from(value, "utf8").map((byte) => byte ^ 0x9b))
+        ]);
+      }
+      decryptString(value) {
+        const prefix = Buffer.from("CREDENTIAL-JOURNAL-TEST\\0");
+        if (!value.subarray(0, prefix.length).equals(prefix)) throw new Error("ciphertext invalid");
+        return Buffer.from(value.subarray(prefix.length).map((byte) => byte ^ 0x9b)).toString("utf8");
+      }
+    }
+    const [root, action, ready, go] = process.argv.slice(1);
+    const store = new DesktopCredentialOperationJournalStore({ root, safeStorage: new Storage() });
+    const previous = await store.load("operation_process_cas");
+    await writeFile(ready, "ready");
+    while (true) {
+      try { await access(go); break; } catch { await new Promise((resolve) => setTimeout(resolve, 2)); }
+    }
+    try {
+      const next = action === "ack"
+        ? await store.transition(previous, "acknowledged", {
+            authorizationSessionId: "authorization_session_process_cas",
+            activationAckRequestReference: "1".repeat(64),
+            activationAckRequestHash: "2".repeat(64)
+          })
+        : await store.transition(previous, "quarantined");
+      process.stdout.write(JSON.stringify({ ok: true, phase: next.phase, digest: next.recordDigest }));
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ ok: false, code: error?.code, message: error?.message }));
+    }
+  `;
+  const child = spawn(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    script,
+    root,
+    action,
+    ready,
+    go
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (value) => { stdout += value; });
+  child.stderr.on("data", (value) => { stderr += value; });
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`journal contender exited ${code}: ${stderr}`));
+        return;
+      }
+      resolve(JSON.parse(stdout));
+    });
+  });
+}
+
+async function waitForPath(target) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    try {
+      await lstat(target);
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+  }
+  throw new Error("timed out waiting for child process barrier");
 }
 
 test("Desktop and Go consume the same locked RFC8785/NFC fixture", async (t) => {
@@ -590,6 +723,678 @@ test("pending executor enumeration is strict, sorted, and excludes acknowledged 
   });
 });
 
+test("ACK tombstones are exact, idempotent, inspectable, filtered, and explicitly removable", async (t) => {
+  const current = await managerFixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(
+    current.manager,
+    "executor_ack_tombstone",
+    "session_ack_tombstone",
+    tokenCanary
+  );
+  const promoted = await current.manager.promoteStaging({
+    executorId: "executor_ack_tombstone",
+    sessionId: "session_ack_tombstone",
+    operationId: "operation_ack_tombstone",
+    revision: 1,
+    expectedDigest: staging.digest.digest,
+    ackReplay: ackReplay()
+  });
+  const exact = {
+    executorId: promoted.executorId,
+    operationId: promoted.operationId,
+    revision: promoted.revision,
+    expectedDigest: promoted.digest,
+    ...acknowledgementProvenance
+  };
+  assert.equal(await current.manager.inspectAcknowledged(exact), null);
+  await assert.rejects(current.manager.removeAcknowledged(exact), {
+    code: "desktop_credential_recovery_required"
+  });
+
+  assert.deepEqual(await current.manager.completeAfterAcknowledgement(exact), promoted);
+  assert.deepEqual(await current.manager.completeAfterAcknowledgement(exact), promoted);
+  const tombstone = await current.manager.inspectAcknowledged(exact);
+  assert.equal(tombstone.phase, "acknowledged");
+  assert.equal(tombstone.generation, 7);
+  assert.equal(tombstone.authorizationSessionId, exact.authorizationSessionId);
+  assert.equal(tombstone.activationAckRequestReference, exact.activationAckRequestReference);
+  assert.equal(tombstone.activationAckRequestHash, exact.activationAckRequestHash);
+  assert.equal(tombstone.acknowledgedAt, tombstone.updatedAt);
+  assert.deepEqual(await current.manager.listPendingOperations(exact.executorId), []);
+  assert.deepEqual(await current.manager.recoverExecutor(exact.executorId), []);
+
+  const wrong = { ...exact, activationAckRequestHash: "f".repeat(64) };
+  await assert.rejects(current.manager.completeAfterAcknowledgement(wrong), {
+    code: "desktop_credential_recovery_required"
+  });
+  await assert.rejects(current.manager.inspectAcknowledged(wrong), {
+    code: "desktop_credential_recovery_required"
+  });
+  await assert.rejects(current.manager.removeAcknowledged(wrong), {
+    code: "desktop_credential_recovery_required"
+  });
+  const raw = await readFile(path.join(
+    current.root,
+    exact.executorId,
+    "journals",
+    `${exact.operationId}.sec`
+  ));
+  assert.equal(raw.includes(Buffer.from(tokenCanary)), false);
+  assert.equal(raw.includes(Buffer.from(current.root)), false);
+
+  await current.manager.removeAcknowledged(exact);
+  assert.equal(await current.manager.inspectAcknowledged(exact), null);
+  await current.manager.removeAcknowledged(exact);
+  assert.deepEqual(await current.manager.completeAfterAcknowledgement(exact), promoted);
+  assert.deepEqual(await current.manager.listPendingOperations(exact.executorId), []);
+});
+
+test("operation journal atomically recovers every write boundary and rejects the old envelope", async (t) => {
+  for (const point of [
+    "after_commit_fsync",
+    "after_temporary_fsync",
+    "after_rename",
+    "before_directory_fsync"
+  ]) {
+    const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-journal-"));
+    t.after(() => rm(base, { recursive: true, force: true }));
+    const root = path.join(base, "journal");
+    let armed = true;
+    const store = new DesktopCredentialOperationJournalStore({
+      root,
+      safeStorage: new FakeSafeStorage(),
+      now: () => new Date("2026-07-13T00:00:00.000Z"),
+      faultInjector(actual) {
+        if (armed && actual === point) {
+          armed = false;
+          throw new Error(`${base}/must-not-leak`);
+        }
+      }
+    });
+    await assert.rejects(store.create({
+      executorId: "executor_atomic",
+      operationId: `operation_${point}`,
+      sourceKind: "operation",
+      sourceId: "source_atomic",
+      sourceOwnershipDigest: null,
+      targetRevision: 1,
+      expectedDigest: "a".repeat(64),
+      createdAt: "2026-07-13T00:00:00.000Z",
+      ackReplay: null
+    }), (error) => {
+      assert.equal(String(error.message).includes(base), false);
+      return true;
+    });
+    const recovered = await new DesktopCredentialOperationJournalStore({
+      root,
+      safeStorage: new FakeSafeStorage(),
+      now: () => new Date("2026-07-13T00:00:01.000Z")
+    }).load(`operation_${point}`);
+    assert.equal(recovered.phase, "prepared");
+    assert.equal(recovered.generation, 1);
+    assert.match(recovered.recordDigest, /^[0-9a-f]{64}$/);
+  }
+
+  const renameBase = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-rename-error-"));
+  t.after(() => rm(renameBase, { recursive: true, force: true }));
+  const renameRoot = path.join(renameBase, "journal");
+  const renameStorage = new FakeSafeStorage();
+  const renameFailure = new DesktopCredentialOperationJournalStore({
+    root: renameRoot,
+    safeStorage: renameStorage,
+    renameFile() {
+      throw new Error(`${renameBase}/${tokenCanary}`);
+    }
+  });
+  await assert.rejects(renameFailure.create({
+    executorId: "executor_rename_error",
+    operationId: "operation_rename_error",
+    sourceKind: "operation",
+    sourceId: "source_rename_error",
+    sourceOwnershipDigest: null,
+    targetRevision: 1,
+    expectedDigest: "0".repeat(64),
+    createdAt: "2026-07-13T00:00:00.000Z",
+    ackReplay: null
+  }), (error) => {
+    assert.equal(error.code, "desktop_credential_journal_corrupt");
+    assert.equal(String(error.message).includes(renameBase), false);
+    assert.equal(String(error.message).includes(tokenCanary), false);
+    return true;
+  });
+  assert.equal((await new DesktopCredentialOperationJournalStore({
+    root: renameRoot,
+    safeStorage: renameStorage
+  }).load("operation_rename_error")).phase, "prepared");
+
+  const oldBase = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-journal-old-"));
+  t.after(() => rm(oldBase, { recursive: true, force: true }));
+  const oldRoot = path.join(oldBase, "journal");
+  await mkdir(oldRoot, { recursive: true, mode: 0o700 });
+  const storage = new FakeSafeStorage();
+  const oldCiphertext = storage.encryptString(JSON.stringify({ version: 1 }));
+  await writeFile(
+    path.join(oldRoot, "operation_old.sec"),
+    Buffer.concat([Buffer.from("AICRM-CREDENTIAL-OP-ENC-V1\n"), oldCiphertext]),
+    { mode: 0o600 }
+  );
+  const oldStore = new DesktopCredentialOperationJournalStore({ root: oldRoot, safeStorage: storage });
+  await assert.rejects(oldStore.load("operation_old"), (error) => {
+    assert.equal(error.code, "desktop_credential_journal_corrupt");
+    assert.equal(String(error.message).includes(oldBase), false);
+    return true;
+  });
+});
+
+test("journal rejects pre-existing non-private roots and fixes no permissions", async (t) => {
+  if (process.platform === "win32") return;
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-root-mode-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, "journal");
+  await mkdir(root, { mode: 0o755 });
+  const store = new DesktopCredentialOperationJournalStore({
+    root,
+    safeStorage: new FakeSafeStorage()
+  });
+  await assert.rejects(store.listOperationIds(), {
+    code: "desktop_credential_journal_unsafe"
+  });
+  assert.equal((await stat(root)).mode & 0o777, 0o755);
+});
+
+test("second directory-sync and ACK removal failures retain exact durable recovery evidence", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-second-sync-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, "journal");
+  const storage = new FakeSafeStorage();
+  const store = new DesktopCredentialOperationJournalStore({ root, safeStorage: storage });
+  const prepared = await store.create({
+    executorId: "executor_second_sync",
+    operationId: "operation_second_sync",
+    sourceKind: "operation",
+    sourceId: "source_second_sync",
+    sourceOwnershipDigest: null,
+    targetRevision: 1,
+    expectedDigest: "d".repeat(64),
+    createdAt: "2026-07-13T00:00:00.000Z",
+    ackReplay: null
+  });
+  const target = path.join(root, "operation_second_sync.sec");
+  await writeFile(path.join(root, "operation_second_sync.sec.tmp"), await readFile(target), {
+    mode: 0o600
+  });
+  let syncCount = 0;
+  const failingCleanup = new DesktopCredentialOperationJournalStore({
+    root,
+    safeStorage: storage,
+    directorySync() {
+      syncCount += 1;
+      if (syncCount === 2) throw new Error(`${base}/${tokenCanary}`);
+      return Promise.resolve();
+    }
+  });
+  await assert.rejects(failingCleanup.load("operation_second_sync"), (error) => {
+    assert.equal(error.code, "desktop_credential_journal_corrupt");
+    assert.equal(String(error.message).includes(base), false);
+    assert.equal(String(error.message).includes(tokenCanary), false);
+    return true;
+  });
+  assert.equal((await lstat(target)).isFile(), true);
+  assert.equal((await lstat(path.join(root, "operation_second_sync.sec.commit-1"))).isFile(), true);
+  assert.deepEqual(await store.load("operation_second_sync"), prepared);
+
+  const removeBase = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-remove-sync-"));
+  t.after(() => rm(removeBase, { recursive: true, force: true }));
+  const removeRoot = path.join(removeBase, "journal");
+  const removeStore = new DesktopCredentialOperationJournalStore({
+    root: removeRoot,
+    safeStorage: storage,
+    now: () => new Date("2026-07-13T00:00:00.000Z")
+  });
+  let acknowledged = await removeStore.create({
+    executorId: "executor_remove_sync",
+    operationId: "operation_remove_sync",
+    sourceKind: "operation",
+    sourceId: "source_remove_sync",
+    sourceOwnershipDigest: null,
+    targetRevision: 1,
+    expectedDigest: "e".repeat(64),
+    createdAt: "2026-07-13T00:00:00.000Z",
+    ackReplay: null
+  });
+  for (const phase of ["source_durable", "reserved", "renamed", "immutable", "verified"]) {
+    acknowledged = await removeStore.transition(acknowledged, phase);
+  }
+  acknowledged = await removeStore.transition(acknowledged, "acknowledged", {
+    authorizationSessionId: "authorization_session_remove_sync",
+    activationAckRequestReference: "3".repeat(64),
+    activationAckRequestHash: "4".repeat(64)
+  });
+  let removeSyncCount = 0;
+  const failingRemove = new DesktopCredentialOperationJournalStore({
+    root: removeRoot,
+    safeStorage: storage,
+    directorySync() {
+      removeSyncCount += 1;
+      if (removeSyncCount === 2) throw new Error(`${removeBase}/${tokenCanary}`);
+      return Promise.resolve();
+    }
+  });
+  await assert.rejects(failingRemove.removeAcknowledged(acknowledged), (error) => {
+    assert.equal(error.code, "desktop_credential_journal_corrupt");
+    assert.equal(String(error.message).includes(removeBase), false);
+    assert.equal(String(error.message).includes(tokenCanary), false);
+    return true;
+  });
+  assert.equal((await lstat(path.join(removeRoot, "operation_remove_sync.sec"))).isFile(), true);
+  assert.equal((await lstat(path.join(removeRoot, "operation_remove_sync.sec.commit-8"))).isFile(), true);
+  const removed = await removeStore.load("operation_remove_sync");
+  assert.equal(removed.phase, "removed");
+  assert.equal((await removeStore.removeAcknowledged(acknowledged)).recordDigest, removed.recordDigest);
+  assert.deepEqual(await removeStore.listOperationIds(), []);
+  assert.deepEqual(await removeStore.listPendingOperationIds(), []);
+});
+
+test("removed successors bind every ACK provenance field in direct CAS and recovery", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-removed-provenance-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, "journal");
+  const storage = new FakeSafeStorage();
+  const store = new DesktopCredentialOperationJournalStore({
+    root,
+    safeStorage: storage,
+    now: () => new Date("2026-07-13T00:00:00.000Z")
+  });
+  const mutations = [
+    ["authorizationSessionId", "authorization_session_removed_forged"],
+    ["activationAckRequestReference", "a".repeat(64)],
+    ["activationAckRequestHash", "b".repeat(64)],
+    ["acknowledgedAt", "2026-07-13T00:00:01.000Z"]
+  ];
+  for (const [index, [field, forgedValue]] of mutations.entries()) {
+    const operationId = `operation_removed_provenance_${index}`;
+    let acknowledged = await store.create({
+      executorId: "executor_removed_provenance",
+      operationId,
+      sourceKind: "operation",
+      sourceId: `source_removed_provenance_${index}`,
+      sourceOwnershipDigest: null,
+      targetRevision: index + 1,
+      expectedDigest: String(index + 1).repeat(64),
+      createdAt: "2026-07-13T00:00:00.000Z",
+      ackReplay: null
+    });
+    for (const phase of ["source_durable", "reserved", "renamed", "immutable", "verified"]) {
+      acknowledged = await store.transition(acknowledged, phase);
+    }
+    acknowledged = await store.transition(acknowledged, "acknowledged", {
+      authorizationSessionId: `authorization_session_removed_${index}`,
+      activationAckRequestReference: "c".repeat(64),
+      activationAckRequestHash: "d".repeat(64)
+    });
+
+    const forgedPredecessor = {
+      ...acknowledged,
+      [field]: forgedValue
+    };
+    if (field === "acknowledgedAt") {
+      forgedPredecessor.updatedAt = forgedValue;
+    }
+    const signedForgedPredecessor = withOperationRecordDigest(forgedPredecessor);
+    await assert.rejects(store.removeAcknowledged(signedForgedPredecessor), {
+      code: "desktop_credential_journal_conflict"
+    });
+    assert.equal((await store.load(operationId)).recordDigest, acknowledged.recordDigest);
+
+    const forgedRemoved = {
+      ...acknowledged,
+      generation: acknowledged.generation + 1,
+      phase: "removed",
+      updatedAt: "2026-07-13T00:00:02.000Z",
+      [field]: forgedValue
+    };
+    await writeFile(
+      path.join(root, `${operationId}.sec.commit-8`),
+      operationJournalEnvelope(storage, forgedRemoved),
+      { mode: 0o600 }
+    );
+    await assert.rejects(store.load(operationId), {
+      code: "desktop_credential_journal_corrupt"
+    });
+  }
+});
+
+test("operation journal rejects phase skips, divergent temporaries, and generation gaps", async (t) => {
+  const makePrepared = async (suffix) => {
+    const base = await mkdtemp(path.join(os.tmpdir(), `aicrm-operation-cas-${suffix}-`));
+    t.after(() => rm(base, { recursive: true, force: true }));
+    const root = path.join(base, "journal");
+    const storage = new FakeSafeStorage();
+    const store = new DesktopCredentialOperationJournalStore({
+      root,
+      safeStorage: storage,
+      now: () => new Date("2026-07-13T00:00:00.000Z")
+    });
+    const prepared = await store.create({
+      executorId: "executor_cas",
+      operationId: `operation_${suffix}`,
+      sourceKind: "operation",
+      sourceId: "source_cas",
+      sourceOwnershipDigest: null,
+      targetRevision: 1,
+      expectedDigest: "b".repeat(64),
+      createdAt: "2026-07-13T00:00:00.000Z",
+      ackReplay: null
+    });
+    return { base, root, storage, store, prepared };
+  };
+
+  const skipped = await makePrepared("skip");
+  await assert.rejects(skipped.store.transition(skipped.prepared, "reserved"), {
+    code: "desktop_credential_journal_conflict"
+  });
+  const quarantined = await skipped.store.transition(skipped.prepared, "quarantined");
+  await assert.rejects(skipped.store.transition(quarantined, "prepared"), {
+    code: "desktop_credential_journal_conflict"
+  });
+
+  const terminalBranch = {
+    ...quarantined,
+    generation: quarantined.generation + 1,
+    phase: "prepared",
+    updatedAt: "2026-07-13T00:00:03.000Z",
+    authorizationSessionId: null,
+    activationAckRequestReference: null,
+    activationAckRequestHash: null,
+    acknowledgedAt: null
+  };
+  await writeFile(
+    path.join(skipped.root, "operation_skip.sec.commit-3"),
+    operationJournalEnvelope(skipped.storage, terminalBranch),
+    { mode: 0o600 }
+  );
+  await assert.rejects(skipped.store.load("operation_skip"), {
+    code: "desktop_credential_journal_corrupt"
+  });
+
+  const divergent = await makePrepared("divergent");
+  let armed = true;
+  const interrupted = new DesktopCredentialOperationJournalStore({
+    root: divergent.root,
+    safeStorage: divergent.storage,
+    now: () => new Date("2026-07-13T00:00:01.000Z"),
+    faultInjector(point) {
+      if (armed && point === "after_commit_fsync") {
+        armed = false;
+        throw new Error("transition interrupted");
+      }
+    }
+  });
+  await assert.rejects(interrupted.transition(divergent.prepared, "source_durable"));
+  const commit = await readFile(path.join(
+    divergent.root,
+    "operation_divergent.sec.commit-2"
+  ));
+  const committed = JSON.parse(divergent.storage.decryptString(
+    commit.subarray(Buffer.byteLength("AICRM-CREDENTIAL-OP-ENC-V2\n"))
+  ));
+  const branch = {
+    ...committed,
+    updatedAt: "2026-07-13T00:00:02.000Z"
+  };
+  await writeFile(
+    path.join(divergent.root, "operation_divergent.sec.tmp"),
+    operationJournalEnvelope(divergent.storage, branch),
+    { mode: 0o600 }
+  );
+  await assert.rejects(divergent.store.load("operation_divergent"), {
+    code: "desktop_credential_journal_corrupt"
+  });
+
+  const gap = await makePrepared("gap");
+  const generationGap = {
+    ...gap.prepared,
+    generation: 3,
+    phase: "source_durable",
+    updatedAt: "2026-07-13T00:00:02.000Z"
+  };
+  await writeFile(
+    path.join(gap.root, "operation_gap.sec.commit-3"),
+    operationJournalEnvelope(gap.storage, generationGap),
+    { mode: 0o600 }
+  );
+  await assert.rejects(gap.store.load("operation_gap"), {
+    code: "desktop_credential_journal_corrupt"
+  });
+
+  const transitionCrash = await makePrepared("transition_commit");
+  let transitionArmed = true;
+  const transitionWriter = new DesktopCredentialOperationJournalStore({
+    root: transitionCrash.root,
+    safeStorage: transitionCrash.storage,
+    now: () => new Date("2026-07-13T00:00:01.000Z"),
+    faultInjector(point) {
+      if (transitionArmed && point === "after_commit_fsync") {
+        transitionArmed = false;
+        throw new Error("transition commit-only crash");
+      }
+    }
+  });
+  await assert.rejects(
+    transitionWriter.transition(transitionCrash.prepared, "source_durable")
+  );
+  const transitionRecovery = new DesktopCredentialOperationJournalStore({
+    root: transitionCrash.root,
+    safeStorage: transitionCrash.storage,
+    now: () => new Date("2026-07-13T00:00:02.000Z")
+  });
+  let recovered = await transitionRecovery.load("operation_transition_commit");
+  assert.equal(recovered.phase, "source_durable");
+  for (const phase of ["reserved", "renamed", "immutable", "verified"]) {
+    recovered = await transitionRecovery.transition(recovered, phase);
+  }
+  let ackArmed = true;
+  const ackWriter = new DesktopCredentialOperationJournalStore({
+    root: transitionCrash.root,
+    safeStorage: transitionCrash.storage,
+    now: () => new Date("2026-07-13T00:00:03.000Z"),
+    faultInjector(point) {
+      if (ackArmed && point === "after_commit_fsync") {
+        ackArmed = false;
+        throw new Error("ACK commit-only crash");
+      }
+    }
+  });
+  await assert.rejects(ackWriter.transition(recovered, "acknowledged", {
+    authorizationSessionId: "authorization_session_commit_only",
+    activationAckRequestReference: "5".repeat(64),
+    activationAckRequestHash: "6".repeat(64)
+  }));
+  assert.equal(
+    (await transitionRecovery.load("operation_transition_commit")).phase,
+    "acknowledged"
+  );
+
+  const missingClaim = await makePrepared("missing_claim");
+  const claimlessNext = {
+    ...missingClaim.prepared,
+    generation: 2,
+    phase: "source_durable",
+    updatedAt: "2026-07-13T00:00:01.000Z"
+  };
+  await writeFile(
+    path.join(missingClaim.root, "operation_missing_claim.sec.tmp"),
+    operationJournalEnvelope(missingClaim.storage, claimlessNext),
+    { mode: 0o600 }
+  );
+  await assert.rejects(missingClaim.store.load("operation_missing_claim"), {
+    code: "desktop_credential_journal_corrupt"
+  });
+
+  const tmpOnlyBase = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-tmp-only-"));
+  t.after(() => rm(tmpOnlyBase, { recursive: true, force: true }));
+  const tmpOnlyRoot = path.join(tmpOnlyBase, "journal");
+  await mkdir(tmpOnlyRoot, { mode: 0o700 });
+  const tmpOnlyStorage = new FakeSafeStorage();
+  await writeFile(
+    path.join(tmpOnlyRoot, "operation_tmp_only.sec.tmp"),
+    operationJournalEnvelope(tmpOnlyStorage, {
+      ...missingClaim.prepared,
+      operationId: "operation_tmp_only"
+    }),
+    { mode: 0o600 }
+  );
+  await assert.rejects(new DesktopCredentialOperationJournalStore({
+    root: tmpOnlyRoot,
+    safeStorage: tmpOnlyStorage
+  }).load("operation_tmp_only"), {
+    code: "desktop_credential_journal_corrupt"
+  });
+});
+
+test("persistent generation claims serialize real-process ACK versus quarantine successors", async (t) => {
+  const base = await mkdtemp(path.join(os.tmpdir(), "aicrm-operation-process-cas-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, "journal");
+  const storage = new FakeSafeStorage();
+  const store = new DesktopCredentialOperationJournalStore({
+    root,
+    safeStorage: storage,
+    now: () => new Date("2026-07-13T00:00:00.000Z")
+  });
+  const secondStore = new DesktopCredentialOperationJournalStore({
+    root,
+    safeStorage: storage,
+    now: () => new Date("2026-07-13T00:00:00.000Z")
+  });
+  let dualStoreVerified = await store.create({
+    executorId: "executor_process_cas",
+    operationId: "operation_dual_store",
+    sourceKind: "operation",
+    sourceId: "source_dual_store",
+    sourceOwnershipDigest: null,
+    targetRevision: 2,
+    expectedDigest: "7".repeat(64),
+    createdAt: "2026-07-13T00:00:00.000Z",
+    ackReplay: null
+  });
+  for (const phase of ["source_durable", "reserved", "renamed", "immutable", "verified"]) {
+    dualStoreVerified = await store.transition(dualStoreVerified, phase);
+  }
+  const dualStoreStale = await secondStore.load("operation_dual_store");
+  const dualResults = await Promise.allSettled([
+    store.transition(dualStoreVerified, "acknowledged", {
+      authorizationSessionId: "authorization_session_dual_store",
+      activationAckRequestReference: "8".repeat(64),
+      activationAckRequestHash: "9".repeat(64)
+    }),
+    secondStore.transition(dualStoreStale, "quarantined")
+  ]);
+  assert.equal(dualResults.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(dualResults.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(
+    (await store.load("operation_dual_store")).phase,
+    dualResults.find((result) => result.status === "fulfilled").value.phase
+  );
+
+  let verified = await store.create({
+    executorId: "executor_process_cas",
+    operationId: "operation_process_cas",
+    sourceKind: "operation",
+    sourceId: "source_process_cas",
+    sourceOwnershipDigest: null,
+    targetRevision: 1,
+    expectedDigest: "c".repeat(64),
+    createdAt: "2026-07-13T00:00:00.000Z",
+    ackReplay: null
+  });
+  for (const phase of ["source_durable", "reserved", "renamed", "immutable", "verified"]) {
+    verified = await store.transition(verified, phase);
+  }
+
+  const readyAck = path.join(base, "ready-ack");
+  const readyQuarantine = path.join(base, "ready-quarantine");
+  const go = path.join(base, "go");
+  const ack = runJournalContender(root, "ack", readyAck, go);
+  const quarantine = runJournalContender(root, "quarantine", readyQuarantine, go);
+  await Promise.all([waitForPath(readyAck), waitForPath(readyQuarantine)]);
+  await writeFile(go, "go");
+  const results = await Promise.all([ack, quarantine]);
+  assert.equal(results.filter((result) => result.ok).length, 1);
+  assert.equal(results.filter((result) => !result.ok).length, 1);
+  const winner = results.find((result) => result.ok);
+  const current = await store.load("operation_process_cas");
+  assert.equal(current.phase, winner.phase);
+  assert.equal(current.recordDigest, winner.digest);
+  assert.equal(["acknowledged", "quarantined"].includes(current.phase), true);
+  const losingPhase = current.phase === "acknowledged" ? "quarantined" : "acknowledged";
+  await assert.rejects(
+    losingPhase === "acknowledged"
+      ? store.transition(verified, losingPhase, {
+          authorizationSessionId: "authorization_session_process_cas",
+          activationAckRequestReference: "1".repeat(64),
+          activationAckRequestHash: "2".repeat(64)
+        })
+      : store.transition(verified, losingPhase),
+    { code: "desktop_credential_journal_conflict" }
+  );
+  const afterRetry = await store.load("operation_process_cas");
+  assert.equal(afterRetry.recordDigest, current.recordDigest);
+  const generationSevenClaim = await readFile(path.join(
+    root,
+    "operation_process_cas.sec.commit-7"
+  ));
+  assert.equal(generationSevenClaim.includes(Buffer.from(base)), false);
+});
+
+test("promotion recovery rejects a forged staging owner fence without leaking nonce or path", async (t) => {
+  let armed = true;
+  const current = await managerFixture({
+    faultInjector(point) {
+      if (armed && point === "after_journal_prepared") {
+        armed = false;
+        throw new Error("promotion interrupted");
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const staging = await seedStaging(
+    current.manager,
+    "executor_owner_forge",
+    "session_owner_forge"
+  );
+  await assert.rejects(current.manager.promoteStaging({
+    executorId: "executor_owner_forge",
+    sessionId: "session_owner_forge",
+    operationId: "operation_owner_forge",
+    revision: 1,
+    expectedDigest: staging.digest.digest
+  }));
+  const forgedNonce = "f".repeat(64);
+  const forged = current.storage.encryptString(JSON.stringify({
+    version: 1,
+    kind: "staging",
+    executorId: "executor_owner_forge",
+    sessionId: "session_owner_forge",
+    nonce: forgedNonce
+  }));
+  await writeFile(
+    path.join(current.root, "executor_owner_forge", "staging", "session_owner_forge", "owner.fence"),
+    Buffer.concat([Buffer.from("AICRM-CREDENTIAL-OWNER-FENCE-V1\n"), forged]),
+    { mode: 0o600 }
+  );
+  await assert.rejects(
+    current.manager.recoverOperation("executor_owner_forge", "operation_owner_forge"),
+    (error) => {
+      assert.equal(error.code, "desktop_credential_recovery_required");
+      assert.equal(String(error.message).includes(forgedNonce), false);
+      assert.equal(String(error.message).includes(current.root), false);
+      return true;
+    }
+  );
+});
+
 test("exact staging creation is idempotent and recovers a crash after mkdir", async (t) => {
   let armed = true;
   const current = await managerFixture({
@@ -627,8 +1432,10 @@ test("exact staging creation is idempotent and recovers a crash after mkdir", as
       executorId: "executor_exact",
       sessionId: "session_exact"
     },
-    recovered: true
+    recovered: true,
+    ownershipDigest: recovered.ownershipDigest
   });
+  assert.match(recovered.ownershipDigest, /^[0-9a-f]{64}$/);
   assert.deepEqual(
     await restarted.createOrRecoverStaging("executor_exact", "session_exact"),
     recovered
@@ -1227,7 +2034,10 @@ test("rejected activation quarantines the exact verified promotion idempotently"
   });
   assert.deepEqual(await current.manager.quarantinePromotion(input), first);
   assert.equal((await current.manager.listPendingOperations("executor_reject"))[0].phase, "quarantined");
-  await assert.rejects(current.manager.completeAfterAcknowledgement(input), {
+  await assert.rejects(current.manager.completeAfterAcknowledgement({
+    ...input,
+    ...acknowledgementProvenance
+  }), {
     code: "desktop_credential_recovery_required"
   });
   const quarantined = current.manager.mainOnlyResolvePath({
@@ -1399,6 +2209,7 @@ test("atomic permanent reservation prevents cross-process revision replacement",
     "expectedDigest",
     "operationId",
     "revision",
+    "sourceOwnershipDigest",
     "version"
   ]);
   assert.equal(fence.operationId, winner.operationId);
@@ -1613,7 +2424,8 @@ for (const crashPoint of [
         executorId: "executor_1",
         operationId: "promote_1",
         revision: 1,
-        expectedDigest: "0".repeat(64)
+        expectedDigest: "0".repeat(64),
+        ...acknowledgementProvenance
       }),
       { code: "desktop_credential_recovery_required" }
     );
@@ -1947,7 +2759,7 @@ test("simulated Windows directory flush failure is not treated as success", asyn
       revision: 1,
       expectedDigest: staging.digest.digest
     }),
-    { code: "desktop_credential_durability_failed" }
+    { code: "desktop_credential_journal_corrupt" }
   );
   assert.equal(protection.syncedDirectories.length > 0, true);
   assert.equal((await current.manager.listPendingOperations("executor_1"))[0].phase, "prepared");

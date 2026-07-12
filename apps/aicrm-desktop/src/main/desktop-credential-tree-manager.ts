@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   chmod,
@@ -15,6 +15,7 @@ import type { SafeStorageLike } from "./desktop-device-identity.ts";
 import {
   DesktopCredentialOperationJournalStore,
   type DesktopCredentialAckReplayReference,
+  type DesktopCredentialAcknowledgementProvenance,
   type DesktopCredentialOperationProjection,
   type DesktopCredentialOperationRecord,
   type DesktopCredentialPromotionSourceKind
@@ -31,6 +32,7 @@ import {
 } from "./desktop-credential-windows-protection.ts";
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,120}$/;
+const AUTHORIZATION_SESSION_ID = /^[A-Za-z0-9_-]{1,160}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const MAX_FILES = 4096;
 const MAX_TOTAL_BYTES = 128 << 20;
@@ -90,6 +92,7 @@ export interface DesktopCredentialStagingRef {
 export interface DesktopCredentialStagingCreationResult {
   ref: DesktopCredentialStagingRef;
   recovered: boolean;
+  ownershipDigest: string;
 }
 
 export interface DesktopCredentialRevisionRef {
@@ -142,12 +145,16 @@ export interface DesktopCredentialRevisionProjection {
   totalBytes: number;
 }
 
-export interface CompleteDesktopCredentialAcknowledgementInput {
+export interface DesktopCredentialPromotionFenceInput {
   executorId: string;
   operationId: string;
   revision: number;
   expectedDigest: string;
 }
+
+export interface CompleteDesktopCredentialAcknowledgementInput
+  extends DesktopCredentialPromotionFenceInput,
+    DesktopCredentialAcknowledgementProvenance {}
 
 export interface DesktopCredentialQuarantinedPromotionProjection {
   executorId: string;
@@ -168,11 +175,12 @@ export interface DesktopCredentialStagingQuarantineProjection {
 }
 
 interface DesktopCredentialReservationFence {
-  version: 1;
+  version: 2;
   executorId: string;
   operationId: string;
   revision: number;
   expectedDigest: string;
+  sourceOwnershipDigest: string | null;
 }
 
 interface DesktopCredentialStagingOwnerFence {
@@ -291,7 +299,11 @@ export class DesktopCredentialTreeManager {
             recovered = true;
           }
         }
-        await this.assertMutableStagingReservation(reservation, executorId, sessionId);
+        const ownerFence = await this.assertMutableStagingReservation(
+          reservation,
+          executorId,
+          sessionId
+        );
         await this.durableBarrier(this.pathFor(ref));
         await this.syncParent(reservation);
         if (await pathExists(quarantineReservation)) {
@@ -303,7 +315,8 @@ export class DesktopCredentialTreeManager {
         await this.syncParent(parent);
         return {
           ref,
-          recovered
+          recovered,
+          ownershipDigest: stagingOwnershipDigest(ownerFence)
         };
       } catch (error) {
         throw normalizeStagingRecoveryError(error);
@@ -427,7 +440,7 @@ export class DesktopCredentialTreeManager {
     assertSafeId(executorId);
     return this.withExecutorLock(executorId, async () => {
       const journal = await this.journal(executorId);
-      const ids = await journal.listOperationIds();
+      const ids = await journal.listPendingOperationIds();
       const recovered: DesktopCredentialRevisionProjection[] = [];
       for (const operationId of ids) {
         const record = await journal.load(operationId);
@@ -445,7 +458,7 @@ export class DesktopCredentialTreeManager {
     return this.withExecutorLock(executorId, async () => {
       const journal = await this.journal(executorId);
       const values: DesktopCredentialOperationProjection[] = [];
-      for (const id of await journal.listOperationIds()) {
+      for (const id of await journal.listPendingOperationIds()) {
         const record = await journal.load(id);
         if (record === null || record.executorId !== executorId) {
           throw managerError("desktop_credential_recovery_required", "凭据操作日志归属不匹配");
@@ -481,9 +494,10 @@ export class DesktopCredentialTreeManager {
         root: journalRoot,
         safeStorage: this.safeStorage,
         platform: this.platform,
+        now: this.now,
         directorySync: (directory) => this.syncJournalDirectory(directory)
       });
-      if ((await journal.listOperationIds()).length > 0) pending.push(executorId);
+      if ((await journal.listPendingOperationIds()).length > 0) pending.push(executorId);
     }
     return pending.sort((left, right) =>
       Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"))
@@ -493,13 +507,15 @@ export class DesktopCredentialTreeManager {
   async completeAfterAcknowledgement(
     input: CompleteDesktopCredentialAcknowledgementInput
   ): Promise<DesktopCredentialRevisionProjection> {
-    validatePromotionInput(input);
+    validateAcknowledgementInput(input);
     return this.withExecutorLock(input.executorId, async () => {
       const journal = await this.journal(input.executorId);
-      const record = await journal.load(input.operationId);
+      let record = await journal.load(input.operationId);
       if (
         record === null ||
-        record.phase !== "verified" ||
+        (record.phase !== "verified" &&
+          record.phase !== "acknowledged" &&
+          record.phase !== "removed") ||
         record.executorId !== input.executorId ||
         record.operationId !== input.operationId ||
         record.targetRevision !== input.revision ||
@@ -507,6 +523,13 @@ export class DesktopCredentialTreeManager {
       ) {
         throw managerError("desktop_credential_recovery_required", "凭据 ACK 完成栅栏不匹配");
       }
+      if (
+        (record.phase === "acknowledged" || record.phase === "removed") &&
+        !acknowledgementMatches(record, input)
+      ) {
+        throw managerError("desktop_credential_recovery_required", "凭据 ACK 来源栅栏不匹配");
+      }
+      await this.assertPromotionSourceOwnership(record);
       const target = this.pathFor({
         kind: "revision",
         executorId: input.executorId,
@@ -523,9 +546,47 @@ export class DesktopCredentialTreeManager {
       if (verified.digest !== input.expectedDigest) {
         throw managerError("desktop_credential_digest_mismatch", "凭据 ACK 完成摘要不匹配");
       }
-      await this.fault("before_journal_remove");
-      await journal.removeVerified(record);
+      if (record.phase === "verified") {
+        record = await journal.transition(record, "acknowledged", acknowledgementFromInput(input));
+      }
       return revisionProjection(record, verified);
+    });
+  }
+
+  /** Exact coordinator inspection; a different ACK provenance never aliases. */
+  async inspectAcknowledged(
+    input: CompleteDesktopCredentialAcknowledgementInput
+  ): Promise<DesktopCredentialOperationProjection | null> {
+    validateAcknowledgementInput(input);
+    return this.withExecutorLock(input.executorId, async () => {
+      const journal = await this.journal(input.executorId);
+      const record = await journal.load(input.operationId);
+      if (record === null || record.phase !== "acknowledged") return null;
+      if (!acknowledgementRecordMatches(record, input)) {
+        throw managerError("desktop_credential_recovery_required", "凭据 ACK 墓碑来源不匹配");
+      }
+      return journal.projection(record);
+    });
+  }
+
+  /** Removes only the exact current ACK tombstone after coordinator retention. */
+  async removeAcknowledged(
+    input: CompleteDesktopCredentialAcknowledgementInput
+  ): Promise<void> {
+    validateAcknowledgementInput(input);
+    return this.withExecutorLock(input.executorId, async () => {
+      const journal = await this.journal(input.executorId);
+      const record = await journal.load(input.operationId);
+      if (
+        record === null ||
+        (record.phase !== "acknowledged" && record.phase !== "removed") ||
+        !acknowledgementRecordMatches(record, input)
+      ) {
+        throw managerError("desktop_credential_recovery_required", "凭据 ACK 墓碑清理栅栏不匹配");
+      }
+      if (record.phase === "removed") return;
+      await this.fault("before_journal_remove");
+      await journal.removeAcknowledged(record);
     });
   }
 
@@ -535,13 +596,13 @@ export class DesktopCredentialTreeManager {
    * retries idempotent after any rename or sealing crash window.
    */
   async quarantinePromotion(
-    input: CompleteDesktopCredentialAcknowledgementInput
+    input: DesktopCredentialPromotionFenceInput
   ): Promise<DesktopCredentialQuarantinedPromotionProjection> {
     validatePromotionInput(input);
     return this.withExecutorLock(input.executorId, async () => {
       try {
         const journal = await this.journal(input.executorId);
-        const record = await journal.load(input.operationId);
+        let record = await journal.load(input.operationId);
         if (
           record === null ||
           record.executorId !== input.executorId ||
@@ -556,9 +617,9 @@ export class DesktopCredentialTreeManager {
           );
         }
         if (record.phase === "verified") {
+          await this.assertPromotionSourceOwnership(record);
           await this.verifyPromotionRevision(record);
-          record.phase = "quarantined";
-          await journal.save(record);
+          record = await journal.transition(record, "quarantined");
           await this.fault("after_quarantine_journal");
         }
         const measured = await this.finishQuarantinedPromotion(record);
@@ -779,9 +840,13 @@ export class DesktopCredentialTreeManager {
       const targetContainer = this.revisionContainerPath(input.executorId, input.revision);
       await this.ensurePrivatePath(input.executorId, "revisions");
       const journal = await this.journal(input.executorId);
+      const sourceOwnershipDigest = await this.readPromotionSourceOwnershipDigest(
+        sourceRef,
+        sourceKind
+      );
       const existing = await journal.load(input.operationId);
       if (existing !== null) {
-        if (!sameOperation(existing, input, sourceKind, sourceId)) {
+        if (!sameOperation(existing, input, sourceKind, sourceId, sourceOwnershipDigest)) {
           throw managerError("desktop_credential_recovery_required", "凭据操作标识已被其他事务占用");
         }
         return this.executePromotion(journal, existing);
@@ -794,31 +859,74 @@ export class DesktopCredentialTreeManager {
       if (measured.digest !== input.expectedDigest) {
         throw managerError("desktop_credential_digest_mismatch", "凭据绑定摘要不匹配");
       }
-      const record: DesktopCredentialOperationRecord = {
-        version: 1,
+      const record = await journal.create({
         executorId: input.executorId,
         operationId: input.operationId,
         sourceKind,
         sourceId,
+        sourceOwnershipDigest,
         targetRevision: input.revision,
         expectedDigest: input.expectedDigest,
-        phase: "prepared",
         createdAt: this.now().toISOString(),
         ackReplay: input.ackReplay ?? null
-      };
-      await journal.save(record);
+      });
       await this.fault("after_journal_prepared");
       return this.executePromotion(journal, record);
     });
   }
 
+  private async readPromotionSourceOwnershipDigest(
+    sourceRef: DesktopCredentialStagingRef | DesktopCredentialOperationRef,
+    sourceKind: DesktopCredentialPromotionSourceKind
+  ): Promise<string | null> {
+    if (sourceKind === "operation") return null;
+    if (sourceRef.kind !== "staging") {
+      throw managerError("desktop_credential_recovery_required", "凭据来源所有权类型不匹配");
+    }
+    const fence = await this.readStagingOwnerFence(
+      this.stagingReservationPath(sourceRef.executorId, sourceRef.sessionId),
+      sourceRef.executorId,
+      sourceRef.sessionId,
+      false
+    );
+    return stagingOwnershipDigest(fence);
+  }
+
+  private async assertPromotionSourceOwnership(
+    record: DesktopCredentialOperationRecord
+  ): Promise<void> {
+    if (record.sourceKind === "operation") {
+      if (record.sourceOwnershipDigest !== null) {
+        throw managerError("desktop_credential_recovery_required", "凭据操作来源所有权栅栏无效");
+      }
+      return;
+    }
+    const fence = await this.readStagingOwnerFence(
+      this.stagingReservationPath(record.executorId, record.sourceId),
+      record.executorId,
+      record.sourceId,
+      false
+    );
+    if (stagingOwnershipDigest(fence) !== record.sourceOwnershipDigest) {
+      throw managerError("desktop_credential_recovery_required", "凭据 staging 所有权摘要不匹配");
+    }
+  }
+
   private async executePromotion(
     journal: DesktopCredentialOperationJournalStore,
-    record: DesktopCredentialOperationRecord
+    initialRecord: DesktopCredentialOperationRecord
   ): Promise<DesktopCredentialRevisionProjection> {
+    let record = initialRecord;
     if (record.phase === "quarantined") {
       throw managerError("desktop_credential_recovery_required", "凭据操作已进入隔离终态");
     }
+    if (record.phase === "acknowledged") {
+      throw managerError("desktop_credential_recovery_required", "凭据操作已完成 ACK，不属于待恢复事务");
+    }
+    if (record.phase === "removed") {
+      throw managerError("desktop_credential_recovery_required", "凭据操作 ACK 记录已进入删除高水位");
+    }
+    await this.assertPromotionSourceOwnership(record);
     const sourceRef = sourceRefFromRecord(record);
     const source = this.pathFor(sourceRef);
     const targetContainer = this.revisionContainerPath(record.executorId, record.targetRevision);
@@ -840,8 +948,8 @@ export class DesktopCredentialTreeManager {
           "凭据版本由其他操作持有，禁止触碰其目标目录"
         );
       }
-      record.phase = "quarantined";
-      await journal.save(record);
+      await this.assertPromotionSourceOwnership(record);
+      record = await journal.transition(record, "quarantined");
       let quarantineFailed = false;
       try {
         if (sourceRef.kind === "staging") {
@@ -877,60 +985,78 @@ export class DesktopCredentialTreeManager {
       throw managerError("desktop_credential_recovery_required", "凭据操作来源和目标均不存在");
     }
     if (sourceExists) {
+      if (
+        record.phase !== "prepared" &&
+        record.phase !== "source_durable" &&
+        record.phase !== "reserved"
+      ) {
+        throw managerError("desktop_credential_recovery_required", "凭据恢复阶段与来源目录不匹配");
+      }
+      await this.assertPromotionSourceOwnership(record);
       await this.assertSafeDirectory(source);
       const measured = await digestDesktopCredentialTree(source);
       if (measured.digest !== record.expectedDigest) {
         throw managerError("desktop_credential_digest_mismatch", "凭据恢复摘要不匹配");
       }
-      await this.durableBarrier(source);
-      record.phase = "source_durable";
-      await journal.save(record);
-      await this.fault("after_source_durable");
+      if (record.phase === "prepared") {
+        await this.durableBarrier(source);
+        await this.assertPromotionSourceOwnership(record);
+        record = await journal.transition(record, "source_durable");
+        await this.fault("after_source_durable");
+      }
       const sourceParent = path.dirname(source);
-      await this.ensureRevisionReservation(record);
-      record.phase = "reserved";
-      await journal.save(record);
-      await this.fault("after_reservation_fence");
-      await renameIntoPrivateReservation(source, target, targetContainer);
-      await this.fault("after_rename");
-      await this.syncParent(sourceParent);
-      await this.syncParent(targetContainer);
-      await this.fault("after_rename_parent_fsync");
-      record.phase = "renamed";
-      await journal.save(record);
+      if (record.phase === "source_durable") {
+        await this.ensureRevisionReservation(record);
+        await this.assertPromotionSourceOwnership(record);
+        record = await journal.transition(record, "reserved");
+        await this.fault("after_reservation_fence");
+      }
+      if (record.phase === "reserved") {
+        await this.ensureRevisionReservation(record);
+        await this.assertPromotionSourceOwnership(record);
+        await renameIntoPrivateReservation(source, target, targetContainer);
+        await this.fault("after_rename");
+        await this.syncParent(sourceParent);
+        await this.syncParent(targetContainer);
+        await this.fault("after_rename_parent_fsync");
+        await this.assertPromotionSourceOwnership(record);
+        record = await journal.transition(record, "renamed");
+      }
     }
     await this.assertSafeDirectory(target);
     const fence = await this.readReservationFence(record.executorId, record.targetRevision);
     if (!reservationMatches(fence, record)) {
       throw managerError("desktop_credential_recovery_required", "凭据预留所有权栅栏不匹配");
     }
-    if (this.platform === "win32") {
-      if (record.phase === "immutable" || record.phase === "verified") {
-        // A durable journal phase is the recovery receipt for the native seal.
-        // Never weaken an already sealed tree merely to obtain a new write handle.
-        await this.validateReadOnlyTree(targetContainer);
-      } else {
+    await this.assertPromotionSourceOwnership(record);
+    if (record.phase === "reserved") {
+      // Crash after rename and parent durability, before the journal advance.
+      await this.syncParent(targetContainer);
+      record = await journal.transition(record, "renamed");
+    }
+    if (record.phase === "renamed") {
+      if (this.platform === "win32") {
         await this.sealWindowsReadOnlyTree(targetContainer);
         await this.syncParent(path.dirname(targetContainer));
-        record.phase = "immutable";
-        await journal.save(record);
-        await this.fault("after_readonly");
+      } else {
+        await makeReadOnly(target, this.platform);
+        await makeReservationReadOnly(targetContainer, this.platform);
+        await this.durableBarrier(targetContainer);
+        await this.syncParent(path.dirname(targetContainer));
       }
-    } else {
-      await makeReadOnly(target, this.platform);
+      await this.assertPromotionSourceOwnership(record);
+      record = await journal.transition(record, "immutable");
       await this.fault("after_readonly");
-      record.phase = "immutable";
-      await journal.save(record);
-      await makeReservationReadOnly(targetContainer, this.platform);
-      await this.durableBarrier(targetContainer);
-      await this.syncParent(path.dirname(targetContainer));
+    }
+    if (record.phase !== "immutable" && record.phase !== "verified") {
+      throw managerError("desktop_credential_recovery_required", "凭据恢复阶段无法验证");
     }
     await this.fault("after_target_durable");
     await this.validateReadOnlyTree(targetContainer);
     const verified = await digestDesktopCredentialTree(target);
     if (verified.digest !== record.expectedDigest) {
-      record.phase = "quarantined";
-      await journal.save(record);
+      await this.assertPromotionSourceOwnership(record);
+      record = await journal.transition(record, "quarantined");
       await this.quarantineUnlocked({
         kind: "revision",
         executorId: record.executorId,
@@ -938,9 +1064,11 @@ export class DesktopCredentialTreeManager {
       });
       throw managerError("desktop_credential_digest_mismatch", "凭据版本复核摘要不匹配");
     }
-    record.phase = "verified";
-    await journal.save(record);
-    await this.fault("after_verified");
+    if (record.phase === "immutable") {
+      await this.assertPromotionSourceOwnership(record);
+      record = await journal.transition(record, "verified");
+      await this.fault("after_verified");
+    }
     return revisionProjection(record, verified);
   }
 
@@ -1692,11 +1820,12 @@ export class DesktopCredentialTreeManager {
     }
     await this.fault("after_reservation_mkdir");
     const fence: DesktopCredentialReservationFence = {
-      version: 1,
+      version: 2,
       executorId: record.executorId,
       operationId: record.operationId,
       revision: record.targetRevision,
-      expectedDigest: record.expectedDigest
+      expectedDigest: record.expectedDigest,
+      sourceOwnershipDigest: record.sourceOwnershipDigest
     };
     const target = path.join(container, RESERVATION_FENCE);
     let handle;
@@ -1805,6 +1934,7 @@ export class DesktopCredentialTreeManager {
       root,
       safeStorage: this.safeStorage,
       platform: this.platform,
+      now: this.now,
       directorySync: (directory) => this.syncJournalDirectory(directory)
     });
   }
@@ -2271,6 +2401,49 @@ function validatePromotionInput(input: DesktopCredentialPromotionInput): void {
   }
 }
 
+function validateAcknowledgementInput(
+  input: CompleteDesktopCredentialAcknowledgementInput
+): void {
+  validatePromotionInput(input);
+  if (
+    !AUTHORIZATION_SESSION_ID.test(input.authorizationSessionId) ||
+    !DIGEST.test(input.activationAckRequestReference) ||
+    !DIGEST.test(input.activationAckRequestHash)
+  ) {
+    throw managerError("desktop_credential_path_invalid", "凭据 ACK 来源参数无效");
+  }
+}
+
+function acknowledgementFromInput(
+  input: CompleteDesktopCredentialAcknowledgementInput
+): DesktopCredentialAcknowledgementProvenance {
+  return {
+    authorizationSessionId: input.authorizationSessionId,
+    activationAckRequestReference: input.activationAckRequestReference,
+    activationAckRequestHash: input.activationAckRequestHash
+  };
+}
+
+function acknowledgementMatches(
+  record: DesktopCredentialOperationRecord,
+  input: CompleteDesktopCredentialAcknowledgementInput
+): boolean {
+  return record.authorizationSessionId === input.authorizationSessionId &&
+    record.activationAckRequestReference === input.activationAckRequestReference &&
+    record.activationAckRequestHash === input.activationAckRequestHash;
+}
+
+function acknowledgementRecordMatches(
+  record: DesktopCredentialOperationRecord,
+  input: CompleteDesktopCredentialAcknowledgementInput
+): boolean {
+  return record.executorId === input.executorId &&
+    record.operationId === input.operationId &&
+    record.targetRevision === input.revision &&
+    record.expectedDigest === input.expectedDigest &&
+    acknowledgementMatches(record, input);
+}
+
 function validateRef(ref: DesktopCredentialTreeRef): void {
   assertSafeId(ref.executorId);
   switch (ref.kind) {
@@ -2295,14 +2468,25 @@ function sourceRefFromRecord(
 }
 
 function validateReservationFence(value: unknown): DesktopCredentialReservationFence {
-  if (!isExactRecord(value, ["version", "executorId", "operationId", "revision", "expectedDigest"])) {
+  if (!isExactRecord(value, [
+    "version",
+    "executorId",
+    "operationId",
+    "revision",
+    "expectedDigest",
+    "sourceOwnershipDigest"
+  ])) {
     throw managerError("desktop_credential_recovery_required", "凭据版本所有权栅栏结构无效");
   }
   const fence = value as unknown as DesktopCredentialReservationFence;
   assertSafeId(fence.executorId);
   assertSafeId(fence.operationId);
   assertRevision(fence.revision);
-  if (fence.version !== 1 || !DIGEST.test(fence.expectedDigest)) {
+  if (
+    fence.version !== 2 ||
+    !DIGEST.test(fence.expectedDigest) ||
+    (fence.sourceOwnershipDigest !== null && !DIGEST.test(fence.sourceOwnershipDigest))
+  ) {
     throw managerError("desktop_credential_recovery_required", "凭据版本所有权栅栏字段无效");
   }
   return { ...fence };
@@ -2316,7 +2500,8 @@ function reservationMatches(
     fence.executorId === record.executorId &&
     fence.operationId === record.operationId &&
     fence.revision === record.targetRevision &&
-    fence.expectedDigest === record.expectedDigest
+    fence.expectedDigest === record.expectedDigest &&
+    fence.sourceOwnershipDigest === record.sourceOwnershipDigest
   );
 }
 
@@ -2339,17 +2524,30 @@ function sameOperation(
   record: DesktopCredentialOperationRecord,
   input: DesktopCredentialPromotionInput,
   sourceKind: DesktopCredentialPromotionSourceKind,
-  sourceId: string
+  sourceId: string,
+  sourceOwnershipDigest: string | null
 ): boolean {
   return (
     record.executorId === input.executorId &&
     record.operationId === input.operationId &&
     record.sourceKind === sourceKind &&
     record.sourceId === sourceId &&
+    record.sourceOwnershipDigest === sourceOwnershipDigest &&
     record.targetRevision === input.revision &&
     record.expectedDigest === input.expectedDigest &&
     JSON.stringify(record.ackReplay) === JSON.stringify(input.ackReplay ?? null)
   );
+}
+
+function stagingOwnershipDigest(fence: DesktopCredentialStagingOwnerFence): string {
+  return createHash("sha256")
+    .update("AICRM-CREDENTIAL-STAGING-OWNERSHIP-V1\n", "utf8")
+    .update(fence.executorId, "utf8")
+    .update("\n", "utf8")
+    .update(fence.sessionId, "utf8")
+    .update("\n", "utf8")
+    .update(fence.nonce, "utf8")
+    .digest("hex");
 }
 
 function refId(ref: DesktopCredentialTreeRef): string {
