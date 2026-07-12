@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  DESKTOP_CODEX_AUTHORIZATION_PROGRESS,
   DesktopCodexAuthorizationSessionStore,
   desktopCodexAuthorizationSessionData
 } from "./desktop-codex-authorization-session-store.ts";
@@ -312,6 +313,183 @@ async function progressToAckStarting(store, current) {
     ackRequestHash: ACK_HASH
   });
 }
+
+async function advanceOneAuthorizationStage(store, current) {
+  switch (current.status) {
+    case "accepted":
+      return advance(store, current, "handoff_claim_starting", {
+        claimRequestReference: CLAIM_REFERENCE,
+        claimRequestHash: CLAIM_HASH
+      });
+    case "handoff_claim_starting":
+      return advance(store, current, "handoff_claimed", {
+        claimToken: CLAIM_TOKEN,
+        claimExpiresAt: CLAIM_EXPIRES_AT,
+        sessionRevision: 2
+      });
+    case "handoff_claimed":
+      return advance(store, current, "app_server_starting");
+    case "app_server_starting":
+      return advance(store, current, "app_server_started");
+    case "app_server_started":
+      return advance(store, current, "login_starting");
+    case "login_starting":
+      return advance(store, current, "waiting_user");
+    case "waiting_user":
+      return advance(store, current, "login_completed", {
+        loginIdHash: LOGIN_ID_HASH,
+        accountFingerprint: ACCOUNT_FINGERPRINT,
+        candidateBindingDigest: CANDIDATE_DIGEST
+      });
+    case "login_completed":
+      return advance(store, current, "proof_submit_starting", {
+        proofRequestReference: PROOF_REFERENCE,
+        proofRequestHash: PROOF_HASH
+      });
+    case "proof_submit_starting":
+      return advance(store, current, "proof_prepared", {
+        proofId: "proof_1",
+        activationOperationId: "activation_operation_1",
+        activationId: "activation_1",
+        activationToken: ACTIVATION_TOKEN,
+        activationExpiresAt: ACTIVATION_EXPIRES_AT,
+        credentialRevision: 3,
+        leaseEpoch: 2,
+        sourceCredentialRevision: 1,
+        revocationEpoch: 4,
+        bindingDigest: BINDING_DIGEST,
+        sessionRevision: 3
+      });
+    case "proof_prepared":
+      return advance(store, current, "activation_pending");
+    case "activation_pending":
+      return advance(store, current, "credential_promotion_starting");
+    case "credential_promotion_starting":
+      return advance(store, current, "credential_durable", {
+        promotionReceipt: {
+          executorId: "executor_1",
+          revision: 3,
+          operationId: "activation_operation_1",
+          digestAlgorithm: "aicrm-credential-tree-rfc8785-nfc-v1",
+          digest: CREDENTIAL_DIGEST,
+          fileCount: 12,
+          totalBytes: 4096
+        }
+      });
+    case "credential_durable":
+      return advance(store, current, "activation_ack_starting", {
+        ackRequestReference: ACK_REFERENCE,
+        ackRequestHash: ACK_HASH
+      });
+    case "activation_ack_starting":
+      return advance(store, current, "activation_ack_response_received", {
+        sessionRevision: 4
+      });
+    case "activation_ack_response_received":
+      return advance(store, current, "activation_acked", {
+        claimToken: null,
+        activationToken: null
+      });
+    default:
+      throw new Error(`cannot advance authorization status ${current.status}`);
+  }
+}
+
+test("superseded is a durable token-clearing terminal at every unfinished progress stage", async (t) => {
+  for (const targetStatus of DESKTOP_CODEX_AUTHORIZATION_PROGRESS.slice(0, -1)) {
+    await t.test(targetStatus, async (st) => {
+      const current = await fixture();
+      st.after(() => rm(current.base, { recursive: true, force: true }));
+      let record = await current.store.create(initial());
+      while (record.status !== targetStatus) {
+        record = await advanceOneAuthorizationStage(current.store, record);
+      }
+      const frozenProgress = record.lastProgressStatus;
+      const superseded = await current.store.terminalize(record, "superseded");
+      assert.equal(superseded.status, "superseded");
+      assert.equal(superseded.lastProgressStatus, frozenProgress);
+      assert.equal(superseded.localFailureCode, null);
+      assert.equal(superseded.claimToken, null);
+      assert.equal(superseded.activationToken, null);
+
+      const restarted = new DesktopCodexAuthorizationSessionStore(current.options);
+      const persisted = await restarted.read(record.sessionId);
+      assert.deepEqual(persisted, superseded);
+      assert.deepEqual(await restarted.snapshot(record.sessionId), {
+        sessionId: record.sessionId,
+        executorId: record.executorId,
+        sequence: superseded.generation,
+        status: "superseded",
+        canReopen: false,
+        canCancel: false
+      });
+      const raw = await readFile(path.join(current.root, `${record.sessionId}.sec`));
+      const encryptedRecord = JSON.parse(
+        current.safeStorage.decryptString(raw.subarray(ENVELOPE_MAGIC.length))
+      );
+      assert.equal(encryptedRecord.status, "superseded");
+      assert.equal(encryptedRecord.lastProgressStatus, frozenProgress);
+      assert.equal(encryptedRecord.claimToken, null);
+      assert.equal(encryptedRecord.activationToken, null);
+
+      await assert.rejects(
+        advanceOneAuthorizationStage(restarted, record),
+        { code: "desktop_codex_authorization_conflict" }
+      );
+      await assert.rejects(
+        restarted.transition(persisted, desktopCodexAuthorizationSessionData(persisted)),
+        { code: "desktop_codex_authorization_conflict" }
+      );
+    });
+  }
+});
+
+test("superseded rejects non-null failure codes through APIs and encrypted recovery", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const record = await current.store.create(initial());
+  const supersededWithFailure = {
+    ...desktopCodexAuthorizationSessionData(record),
+    status: "superseded",
+    localFailureCode: "desktop_authorization_superseded"
+  };
+
+  await assert.rejects(
+    async () =>
+      current.store.terminalize(
+        record,
+        "superseded",
+        "desktop_authorization_superseded"
+      ),
+    { code: "desktop_codex_authorization_unsafe" }
+  );
+  await assert.rejects(
+    async () => current.store.transition(record, supersededWithFailure),
+    { code: "desktop_codex_authorization_unsafe" }
+  );
+  assert.deepEqual(await current.store.read(record.sessionId), record);
+
+  const target = path.join(current.root, `${record.sessionId}.sec`);
+  const raw = await readFile(target);
+  const forged = JSON.parse(
+    current.safeStorage.decryptString(raw.subarray(ENVELOPE_MAGIC.length))
+  );
+  forged.status = "superseded";
+  forged.localFailureCode = "desktop_authorization_superseded";
+  await writeFile(
+    target,
+    Buffer.concat([
+      ENVELOPE_MAGIC,
+      current.safeStorage.encryptString(JSON.stringify(forged))
+    ]),
+    { mode: 0o600 }
+  );
+
+  const restarted = new DesktopCodexAuthorizationSessionStore(current.options);
+  await assert.rejects(restarted.read(record.sessionId), {
+    code: "desktop_codex_authorization_corrupt"
+  });
+});
 
 test("full success chain is monotonic, encrypted, and exposes only the documented safe snapshot", async (t) => {
   const current = await fixture();

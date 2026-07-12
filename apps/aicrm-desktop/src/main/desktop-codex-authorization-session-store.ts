@@ -44,6 +44,7 @@ export const DESKTOP_CODEX_AUTHORIZATION_TERMINAL = [
   "cancelled",
   "expired",
   "interrupted",
+  "superseded",
   "indeterminate"
 ] as const;
 
@@ -1416,6 +1417,7 @@ function validStatusShape(data: DesktopCodexAuthorizationSessionData): boolean {
   const terminal = isTerminalStatus(data.status);
   if (terminal) {
     if (data.claimToken !== null || data.activationToken !== null) return false;
+    if (data.status === "superseded" && data.localFailureCode !== null) return false;
     if (data.status === "indeterminate" && data.localFailureCode !== INDETERMINATE_FAILURE_CODE) {
       return false;
     }
@@ -1611,6 +1613,12 @@ function projectTerminalFailureCode(
   value: string | null
 ): string | null {
   if (status === "indeterminate") return INDETERMINATE_FAILURE_CODE;
+  if (status === "superseded" && value !== null) {
+    throw sessionError(
+      "desktop_codex_authorization_unsafe",
+      "Codex 授权替代终态不得携带错误码"
+    );
+  }
   if ((status === "failed" || status === "interrupted") && value === null) {
     throw sessionError(
       "desktop_codex_authorization_unsafe",
@@ -1641,7 +1649,13 @@ function snapshotStatus(
   status: DesktopCodexAuthorizationSessionStatus
 ): CodexAuthorizationSnapshot["status"] {
   if (status === "activation_acked") return "succeeded";
-  if (status === "failed" || status === "cancelled" || status === "expired" || status === "interrupted") {
+  if (
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "expired" ||
+    status === "interrupted" ||
+    status === "superseded"
+  ) {
     return status;
   }
   if (status === "indeterminate") return "interrupted";
