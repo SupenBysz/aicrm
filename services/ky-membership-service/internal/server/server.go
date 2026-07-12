@@ -37,6 +37,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	mux.HandleFunc("POST /internal/v1/access-decisions", s.internalAccessDecision)
 
 	const allWs = "platform,agency,enterprise"
 	const orgWs = "agency,enterprise"
@@ -117,16 +118,18 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	databaseReady := s.store != nil && s.store.Ping(r.Context()) == nil
 	tokenSecretConfigured := s.cfg.AuthTokenSecret != ""
+	internalTokenConfigured := s.cfg.InternalToken != ""
 	status := "ok"
-	if !databaseReady || !tokenSecretConfigured {
+	if !databaseReady || !tokenSecretConfigured || !internalTokenConfigured {
 		status = "degraded"
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	writeJSON(w, map[string]any{
-		"status":                status,
-		"service":               s.cfg.ServiceName,
-		"databaseReady":         databaseReady,
-		"tokenSecretConfigured": tokenSecretConfigured,
+		"status":                  status,
+		"service":                 s.cfg.ServiceName,
+		"databaseReady":           databaseReady,
+		"tokenSecretConfigured":   tokenSecretConfigured,
+		"internalTokenConfigured": internalTokenConfigured,
 	})
 }
 
