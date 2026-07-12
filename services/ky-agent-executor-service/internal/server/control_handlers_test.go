@@ -15,8 +15,11 @@ import (
 )
 
 type fakeControl struct {
-	created store.CreateExecutorInput
-	patched store.ExecutorPatch
+	created     store.CreateExecutorInput
+	patched     store.ExecutorPatch
+	authCreated store.CreateAuthorizationSessionInput
+	session     store.AuthorizationSessionProjection
+	cancelInput store.CancelAuthorizationInput
 }
 
 func (f *fakeControl) Ping(context.Context) error { return nil }
@@ -46,6 +49,41 @@ func (f *fakeControl) PutWorkspaceGrant(context.Context, string, string, string,
 func (f *fakeControl) DeleteWorkspaceGrant(context.Context, string, string, string, string, int64) (store.WorkspaceGrantProjection, error) {
 	return store.WorkspaceGrantProjection{ID: "grant_1", Status: "disabled"}, nil
 }
+func (f *fakeControl) CreateAuthorizationSession(_ context.Context, input store.CreateAuthorizationSessionInput) (store.CreateAuthorizationSessionResult, error) {
+	f.authCreated = input
+	f.session = store.AuthorizationSessionProjection{ID: input.ID, ExecutorID: input.ExecutorID, RuntimeType: "server", FlowType: "device_code", Intent: input.Intent, Status: "starting", Revision: 1, Sequence: 1, RequestedBy: input.ActorID, SessionDeadlineAt: input.Deadline.UTC().Format(time.RFC3339Nano)}
+	return store.CreateAuthorizationSessionResult{Session: f.session, Created: true}, nil
+}
+func (f *fakeControl) GetCurrentAuthorizationSession(context.Context, string) (store.AuthorizationSessionProjection, error) {
+	if f.session.ID == "" {
+		return store.AuthorizationSessionProjection{}, store.ErrNotFound
+	}
+	return f.session, nil
+}
+func (f *fakeControl) GetAuthorizationSession(context.Context, string) (store.AuthorizationSessionProjection, error) {
+	if f.session.ID == "" {
+		return store.AuthorizationSessionProjection{}, store.ErrNotFound
+	}
+	return f.session, nil
+}
+func (f *fakeControl) ListAuthorizationEvents(context.Context, string, int64, int) ([]store.AuthorizationEventProjection, error) {
+	return []store.AuthorizationEventProjection{}, nil
+}
+func (f *fakeControl) CancelAuthorizationSession(_ context.Context, input store.CancelAuthorizationInput) (store.AuthorizationSessionProjection, bool, error) {
+	f.cancelInput = input
+	f.session.Status = "cancelled"
+	f.session.Revision++
+	return f.session, true, nil
+}
+func (f *fakeControl) RecordAuthorizationReopen(context.Context, string, string, string, string) error {
+	return nil
+}
+func (f *fakeControl) FailAuthorizationSession(_ context.Context, id, _ string, status, code string) (store.AuthorizationSessionProjection, error) {
+	f.session.ID = id
+	f.session.Status = status
+	f.session.Failure = &store.SessionFailure{Code: code}
+	return f.session, nil
+}
 
 type fakeAuthorizer struct {
 	request accessclient.Request
@@ -57,9 +95,12 @@ func (f *fakeAuthorizer) Evaluate(_ context.Context, _ string, request accesscli
 	if f.err != nil {
 		return accessclient.Decision{}, f.err
 	}
+	granted := append([]string{}, request.RequiredAllPermissions...)
+	granted = append(granted, request.RequiredAnyPermissions...)
 	return accessclient.Decision{
 		Allowed: true, ActorID: request.ActorID, MembershipID: "membership_1",
 		WorkspaceType: request.WorkspaceType, WorkspaceID: request.WorkspaceID,
+		GrantedRequiredPermissions: granted,
 	}, nil
 }
 

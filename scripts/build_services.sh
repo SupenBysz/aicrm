@@ -19,4 +19,8 @@ for service in "${services[@]}"; do
   go build -o "$OUT_DIR/$service" "$ROOT_DIR/services/$service/cmd/server"
 done
 
+echo "Building ky-agent-executor-runtime-broker"
+go build -o "$OUT_DIR/ky-agent-executor-runtime-broker" \
+  "$ROOT_DIR/services/ky-agent-executor-service/cmd/runtime-broker"
+
 echo "Service binaries written to $OUT_DIR"

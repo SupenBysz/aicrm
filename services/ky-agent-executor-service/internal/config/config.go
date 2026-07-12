@@ -2,10 +2,14 @@ package config
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strings"
+	"time"
 )
 
 const (
@@ -15,18 +19,21 @@ const (
 )
 
 type Config struct {
-	HTTPAddr          string
-	RuntimeEnvFile    string
-	DatabaseURL       string
-	WriterDatabaseURL string
-	InternalToken     string
-	AuthTokenSecret   string
-	MembershipURL     string
-	WriteEnabled      bool
-	CredentialRoot    string
-	CodexBinary       string
-	SystemdRunPath    string
-	OwnerInstanceID   string
+	HTTPAddr            string
+	RuntimeEnvFile      string
+	DatabaseURL         string
+	WriterDatabaseURL   string
+	InternalToken       string
+	AuthTokenSecret     string
+	MembershipURL       string
+	WriteEnabled        bool
+	CredentialRoot      string
+	CodexBinary         string
+	SystemdRunPath      string
+	OwnerInstanceID     string
+	CodexVersion        string
+	RuntimeBindingID    string
+	RuntimeBrokerSocket string
 }
 
 func Load() Config {
@@ -56,21 +63,35 @@ func Load() Config {
 	ownerInstanceID := strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID"))
 	if ownerInstanceID == "" {
 		hostname, _ := os.Hostname()
-		ownerInstanceID = hostname
+		ownerInstanceID = fmt.Sprintf("%s-%d-%d", hostname, os.Getpid(), time.Now().UnixNano())
+	}
+	hostname, _ := os.Hostname()
+	bindingDigest := sha256.Sum256([]byte(hostname))
+	runtimeBindingID := "server_" + hex.EncodeToString(bindingDigest[:12])
+	codexVersion := strings.TrimSpace(os.Getenv("KY_CODEX_VERSION"))
+	if codexVersion == "" {
+		codexVersion = "0.144.1"
+	}
+	runtimeBrokerSocket := strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET"))
+	if runtimeBrokerSocket == "" {
+		runtimeBrokerSocket = "/run/aicrm-agent-runtime/control.sock"
 	}
 	return Config{
-		HTTPAddr:          addr,
-		RuntimeEnvFile:    runtimeEnvFile,
-		DatabaseURL:       strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
-		WriterDatabaseURL: strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
-		InternalToken:     internalToken,
-		AuthTokenSecret:   strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
-		MembershipURL:     membershipURL,
-		WriteEnabled:      strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
-		CredentialRoot:    credentialRoot,
-		CodexBinary:       strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
-		SystemdRunPath:    strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
-		OwnerInstanceID:   ownerInstanceID,
+		HTTPAddr:            addr,
+		RuntimeEnvFile:      runtimeEnvFile,
+		DatabaseURL:         strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
+		WriterDatabaseURL:   strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
+		InternalToken:       internalToken,
+		AuthTokenSecret:     strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
+		MembershipURL:       membershipURL,
+		WriteEnabled:        strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
+		CredentialRoot:      credentialRoot,
+		CodexBinary:         strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
+		SystemdRunPath:      strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
+		OwnerInstanceID:     ownerInstanceID,
+		CodexVersion:        codexVersion,
+		RuntimeBindingID:    runtimeBindingID,
+		RuntimeBrokerSocket: runtimeBrokerSocket,
 	}
 }
 
@@ -95,13 +116,16 @@ func (c Config) validateControlPlane() error {
 		return nil
 	}
 	for name, value := range map[string]string{
-		"KY_AGENT_EXECUTOR_DATABASE_URL":        c.DatabaseURL,
-		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL": c.WriterDatabaseURL,
-		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":      c.InternalToken,
-		"KY_AUTH_TOKEN_SECRET":                  c.AuthTokenSecret,
-		"KY_MEMBERSHIP_SERVICE_URL":             c.MembershipURL,
-		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":     c.CredentialRoot,
-		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":   c.OwnerInstanceID,
+		"KY_AGENT_EXECUTOR_DATABASE_URL":          c.DatabaseURL,
+		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL":   c.WriterDatabaseURL,
+		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":        c.InternalToken,
+		"KY_AUTH_TOKEN_SECRET":                    c.AuthTokenSecret,
+		"KY_MEMBERSHIP_SERVICE_URL":               c.MembershipURL,
+		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":       c.CredentialRoot,
+		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":     c.OwnerInstanceID,
+		"KY_CODEX_VERSION":                        c.CodexVersion,
+		"KY_AGENT_EXECUTOR_RUNTIME_BINDING_ID":    c.RuntimeBindingID,
+		"KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET": c.RuntimeBrokerSocket,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return errors.New(name + " is required when Agent Executor writes are enabled")

@@ -9,6 +9,8 @@ SYSTEMD_DIR="${KY_SYSTEMD_DIR:-/etc/systemd/system}"
 SYSUSERS_DIR="${KY_SYSUSERS_DIR:-/usr/lib/sysusers.d}"
 AGENT_EXECUTOR_SYSUSERS="ky-agent-executor-service.sysusers.conf"
 AGENT_EXECUTOR_ENV="$DEPLOY_ROOT/config/ky-agent-executor-service.env"
+AGENT_RUNTIME_BROKER="ky-agent-executor-runtime-broker"
+AGENT_RUNTIME_ROOT="/var/lib/aicrm-agent-executors"
 
 services=(
   ky-auth-service
@@ -24,6 +26,9 @@ for service in "${services[@]}"; do
   test -f "$ROOT_DIR/ops/native/$service.service"
 done
 test -f "$ROOT_DIR/ops/native/$AGENT_EXECUTOR_SYSUSERS"
+test -x "$SRC_DIR/$AGENT_RUNTIME_BROKER"
+test -f "$ROOT_DIR/ops/native/$AGENT_RUNTIME_BROKER.service"
+test -f "$ROOT_DIR/ops/native/$AGENT_RUNTIME_BROKER.socket"
 
 echo "Service deploy dry run."
 echo "- target bin dir: $TARGET_BIN_DIR"
@@ -36,6 +41,8 @@ for service in "${services[@]}"; do
 done
 echo "- install sysusers: $ROOT_DIR/ops/native/$AGENT_EXECUTOR_SYSUSERS -> $SYSUSERS_DIR/$AGENT_EXECUTOR_SYSUSERS"
 echo "- require dedicated config: $AGENT_EXECUTOR_ENV (root:ky-agent-executor 0640)"
+echo "- install runtime broker binary and systemd socket"
+echo "- require credential root: $AGENT_RUNTIME_ROOT (ky-agent-executor:ky-agent-executor 0700)"
 
 echo "Set KY_EXECUTE_SERVICE_DEPLOY=1 to install binaries/units, daemon-reload, enable, restart, and verify."
 if [[ "${KY_EXECUTE_SERVICE_DEPLOY:-}" == "1" ]]; then
@@ -48,18 +55,29 @@ if [[ "${KY_EXECUTE_SERVICE_DEPLOY:-}" == "1" ]]; then
     echo "Agent Executor config must be root:ky-agent-executor mode 0640: $AGENT_EXECUTOR_ENV" >&2
     exit 1
   fi
+  install -d -m 0700 -o ky-agent-executor -g ky-agent-executor "$AGENT_RUNTIME_ROOT"
   install -d "$TARGET_BIN_DIR"
   for service in "${services[@]}"; do
     install -m 0755 "$SRC_DIR/$service" "$TARGET_BIN_DIR/$service"
     install -m 0644 "$ROOT_DIR/ops/native/$service.service" "$SYSTEMD_DIR/$service.service"
   done
+  install -m 0755 "$SRC_DIR/$AGENT_RUNTIME_BROKER" "$TARGET_BIN_DIR/$AGENT_RUNTIME_BROKER"
+  install -m 0644 "$ROOT_DIR/ops/native/$AGENT_RUNTIME_BROKER.service" "$SYSTEMD_DIR/$AGENT_RUNTIME_BROKER.service"
+  install -m 0644 "$ROOT_DIR/ops/native/$AGENT_RUNTIME_BROKER.socket" "$SYSTEMD_DIR/$AGENT_RUNTIME_BROKER.socket"
 
   systemctl daemon-reload
+  systemctl enable --now "$AGENT_RUNTIME_BROKER.socket"
+  systemctl try-restart "$AGENT_RUNTIME_BROKER.service" || true
   for service in "${services[@]}"; do
     systemctl enable "$service.service"
     systemctl restart "$service.service"
     systemctl --no-pager --full status "$service.service" >/dev/null
   done
+
+  if [[ "$(stat -c '%U:%G:%a' "$AGENT_RUNTIME_ROOT")" != "ky-agent-executor:ky-agent-executor:700" ]]; then
+    echo "Agent Executor credential root ownership is unsafe: $AGENT_RUNTIME_ROOT" >&2
+    exit 1
+  fi
 
   "$ROOT_DIR/scripts/verify_deployment.sh" --readyz-only
 fi

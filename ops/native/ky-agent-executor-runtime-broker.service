@@ -1,16 +1,18 @@
 [Unit]
-Description=AiCRM Agent Executor Control Plane
-After=network-online.target ky-agent-executor-runtime-broker.socket
-Wants=network-online.target
+Description=AiCRM Agent Executor Root Runtime Broker
 Requires=ky-agent-executor-runtime-broker.socket
+After=ky-agent-executor-runtime-broker.socket
 
 [Service]
 Type=simple
-User=ky-agent-executor
-Group=ky-agent-executor
-WorkingDirectory=/data/kyai_crm
-EnvironmentFile=/data/kyai_crm/config/ky-agent-executor-service.env
-ExecStart=/data/kyai_crm/bin/ky-agent-executor-service
+User=root
+Group=root
+ExecStart=/data/kyai_crm/bin/ky-agent-executor-runtime-broker
+Environment=KY_AGENT_EXECUTOR_CREDENTIAL_ROOT=/var/lib/aicrm-agent-executors
+Environment=KY_AGENT_EXECUTOR_USER=ky-agent-executor
+Environment=KY_CODEX_BINARY=/usr/bin/codex
+Environment=KY_SYSTEMD_RUN_PATH=/usr/bin/systemd-run
+Environment=KY_SYSTEMCTL_PATH=/usr/bin/systemctl
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=20
@@ -23,7 +25,6 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/aicrm-agent-executors
 ProtectClock=true
 ProtectControlGroups=true
 ProtectKernelLogs=true
@@ -32,15 +33,15 @@ ProtectKernelTunables=true
 ProtectHostname=true
 ProtectProc=invisible
 ProcSubset=pid
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
-CapabilityBoundingSet=
-AmbientCapabilities=
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER
 
 [Install]
 WantedBy=multi-user.target

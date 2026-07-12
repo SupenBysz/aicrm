@@ -8,16 +8,27 @@ import (
 	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/accessclient"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/appserver"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/authorization"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/config"
+	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/credentialfs"
 	"github.com/Kysion/KyaiCRM/services/ky-agent-executor-service/internal/store"
 	"github.com/Kysion/KyaiCRM/shared/auth"
 )
 
 type Server struct {
-	cfg        config.Config
-	reader     store.Reader
-	control    controlStore
-	authorizer accessclient.Authorizer
+	cfg         config.Config
+	reader      store.Reader
+	control     controlStore
+	authorizer  accessclient.Authorizer
+	authRuntime authorizationRuntime
+}
+
+type authorizationRuntime interface {
+	Start(store.AuthorizationSessionProjection) error
+	UserAction(string, string) (authorization.UserAction, error)
+	Cancel(string)
+	Shutdown(context.Context)
 }
 
 type controlStore interface {
@@ -30,6 +41,13 @@ type controlStore interface {
 	ListWorkspaceGrants(context.Context, string) ([]store.WorkspaceGrantProjection, error)
 	PutWorkspaceGrant(context.Context, string, string, string, string, string, int64) (store.WorkspaceGrantProjection, error)
 	DeleteWorkspaceGrant(context.Context, string, string, string, string, int64) (store.WorkspaceGrantProjection, error)
+	CreateAuthorizationSession(context.Context, store.CreateAuthorizationSessionInput) (store.CreateAuthorizationSessionResult, error)
+	GetCurrentAuthorizationSession(context.Context, string) (store.AuthorizationSessionProjection, error)
+	GetAuthorizationSession(context.Context, string) (store.AuthorizationSessionProjection, error)
+	ListAuthorizationEvents(context.Context, string, int64, int) ([]store.AuthorizationEventProjection, error)
+	CancelAuthorizationSession(context.Context, store.CancelAuthorizationInput) (store.AuthorizationSessionProjection, bool, error)
+	RecordAuthorizationReopen(context.Context, string, string, string, string) error
+	FailAuthorizationSession(context.Context, string, string, string, string) (store.AuthorizationSessionProjection, error)
 }
 
 func New(cfg config.Config) *Server {
@@ -68,6 +86,24 @@ func (s *Server) Run(ctx context.Context) error {
 			return err
 		}
 		s.authorizer = authorizer
+		credentials, err := credentialfs.New(s.cfg.CredentialRoot)
+		if err != nil {
+			return err
+		}
+		launcher := appserver.BrokerLauncher{SocketPath: s.cfg.RuntimeBrokerSocket}
+		runtime, err := authorization.New(opened, launcher, credentials, authorization.Config{
+			OwnerInstanceID: s.cfg.OwnerInstanceID, CodexVersion: s.cfg.CodexVersion,
+			RuntimeBindingID: s.cfg.RuntimeBindingID, RuntimeBindingRevision: 1,
+		})
+		if err != nil {
+			return err
+		}
+		s.authRuntime = runtime
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			runtime.Shutdown(shutdownCtx)
+		}()
 	}
 
 	httpServer := &http.Server{
@@ -119,19 +155,36 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/ai-executors/{executorId}/workspace-grants", s.public([]string{"platform.ai_executors.view"}, nil, s.listExecutorWorkspaceGrants))
 	mux.HandleFunc("PUT /api/v1/ai-executors/{executorId}/workspace-grants/{workspaceType}/{workspaceId}", s.public([]string{"platform.ai_executors.update"}, nil, s.putExecutorWorkspaceGrant))
 	mux.HandleFunc("DELETE /api/v1/ai-executors/{executorId}/workspace-grants/{workspaceType}/{workspaceId}", s.public([]string{"platform.ai_executors.update"}, nil, s.deleteExecutorWorkspaceGrant))
+	mux.HandleFunc("POST /api/v1/ai-executors/{executorId}/authorization-sessions", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.createAuthorizationSession))
+	mux.HandleFunc("GET /api/v1/ai-executors/{executorId}/authorization-sessions/current", s.public([]string{"platform.ai_executors.view"}, nil, s.getCurrentAuthorizationSession))
+	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}", s.public([]string{"platform.ai_executors.view"}, nil, s.getAuthorizationSession))
+	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/user-action", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.getAuthorizationUserAction))
+	mux.HandleFunc("POST /api/v1/ai-executor-authorization-sessions/{sessionId}/reopen", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.reopenAuthorizationSession))
+	mux.HandleFunc("POST /api/v1/ai-executor-authorization-sessions/{sessionId}/cancel", s.public(nil, []string{"platform.ai_executors.authorize", "platform.ai_executors.change_account"}, s.cancelAuthorizationSession))
+	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/events", s.public([]string{"platform.ai_executors.view"}, nil, s.listAuthorizationSessionEvents))
+	mux.HandleFunc("GET /api/v1/ai-executor-authorization-sessions/{sessionId}/events-stream", s.public([]string{"platform.ai_executors.view"}, nil, s.streamAuthorizationSessionEvents))
 
 	return mux
 }
 
 type actorContext struct {
-	ActorID       string
-	SessionID     string
-	MembershipID  string
-	WorkspaceType string
-	WorkspaceID   string
+	ActorID            string
+	SessionID          string
+	MembershipID       string
+	WorkspaceType      string
+	WorkspaceID        string
+	GrantedPermissions map[string]bool
 }
 
 type publicHandler func(http.ResponseWriter, *http.Request, actorContext)
+
+func permissionSet(values []string) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for _, value := range values {
+		result[value] = true
+	}
+	return result
+}
 
 func (s *Server) public(requiredAll, requiredAny []string, next publicHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -177,6 +230,7 @@ func (s *Server) public(requiredAll, requiredAny []string, next publicHandler) h
 		next(w, r, actorContext{
 			ActorID: payload.UserID, SessionID: payload.SessionID, MembershipID: decision.MembershipID,
 			WorkspaceType: workspaceType, WorkspaceID: workspaceID,
+			GrantedPermissions: permissionSet(decision.GrantedRequiredPermissions),
 		})
 	}
 }

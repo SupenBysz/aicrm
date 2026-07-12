@@ -41,6 +41,9 @@ func TestValidateWriteModeRequiresDedicatedDependencies(t *testing.T) {
 	base.MembershipURL = "http://127.0.0.1:18083"
 	base.CredentialRoot = "/var/lib/aicrm-agent-executors"
 	base.OwnerInstanceID = "instance-1"
+	base.CodexVersion = "0.144.1"
+	base.RuntimeBindingID = "server_test"
+	base.RuntimeBrokerSocket = "/run/aicrm-agent-runtime/control.sock"
 	if err := base.Validate(); err != nil {
 		t.Fatalf("complete control-plane config rejected: %v", err)
 	}

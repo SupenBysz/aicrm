@@ -58,7 +58,11 @@ func TestProductionTreeOnlyAllowsIsolatedStdioAppServerLauncher(t *testing.T) {
 			return err
 		}
 		if strings.Contains(text, `"os/exec"`) || strings.Contains(text, "exec.Command") {
-			if filepath.ToSlash(relative) != "internal/appserver/launcher_linux.go" {
+			allowed := map[string]bool{
+				"internal/appserver/launcher_linux.go":   true,
+				"internal/runtimebroker/server_linux.go": true,
+			}
+			if !allowed[filepath.ToSlash(relative)] {
 				t.Fatalf("process spawning escaped isolated launcher: %s", path)
 			}
 		}
@@ -83,6 +87,15 @@ func TestProductionTreeOnlyAllowsIsolatedStdioAppServerLauncher(t *testing.T) {
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("isolated launcher is missing %q", required)
+		}
+	}
+	broker, err := os.ReadFile(filepath.Join(root, "internal", "runtimebroker", "server_linux.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"SO_PEERCRED", "agentUID", "ReadMsgUnix", "receivedFDs", "validateCredentialHome", "lockCredentialHome", "Openat", "Fchown"} {
+		if !strings.Contains(string(broker), required) {
+			t.Fatalf("runtime broker is missing %q", required)
 		}
 	}
 }

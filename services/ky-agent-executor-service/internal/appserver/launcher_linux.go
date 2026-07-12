@@ -115,6 +115,7 @@ func (l SystemdLauncher) Command(operationID, credentialHome string) (string, []
 		"--property=UMask=0077",
 		"--property=LimitCORE=0",
 		"--property=KillMode=control-group",
+		"--property=RuntimeMaxSec=15min",
 		"--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
 		"--property=BindPaths=" + home + ":/codex-home:idmap",
 		"--setenv=PATH=/usr/bin:/bin",
