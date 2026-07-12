@@ -122,6 +122,125 @@ export interface CodexExecutorAuthStatusProjection {
   message: string;
 }
 
+/**
+ * Bridge v2 advertises these capabilities only after the trusted device
+ * runtime has been installed. The fail-closed desktop skeleton returns a
+ * structured error instead of fabricating this projection.
+ */
+export interface CodexAuthorizationCapabilities {
+  bridgeVersion: 2;
+  supportsAppServerAuth: true;
+  supportsDeviceProof: true;
+  supportsSignedCatalog: true;
+}
+
+export interface CodexAuthorizationStartInput {
+  sessionId: string;
+  executorId: string;
+  handoffId: string;
+  handoffTicket: string;
+}
+
+export interface CodexSessionCommandInput {
+  sessionId: string;
+  operationId: string;
+  expectedSessionRevision: number;
+  commandTicket: string;
+}
+
+export interface CodexVerifyCommandInput {
+  executorId: string;
+  operationId: string;
+  expectedExecutorRevision: number;
+  expectedCredentialRevision: number;
+  commandTicket: string;
+}
+
+export interface CodexModelCatalogRefreshCommandInput {
+  executorId: string;
+  operationId: string;
+  expectedExecutorRevision: number;
+  expectedCatalogRevision: number;
+  commandTicket: string;
+}
+
+export interface CodexReadinessCheckCommandInput {
+  executorId: string;
+  operationId: string;
+  expectedExecutorRevision: number;
+  expectedCredentialRevision: number;
+  expectedCatalogRevision: number;
+  commandTicket: string;
+}
+
+export interface CodexCredentialLogoutCommandInput {
+  executorId: string;
+  revocationId: string;
+  operationId: string;
+  credentialRevision: number;
+  commandTicket: string;
+}
+
+export type CodexAuthorizationStatus =
+  | "starting"
+  | "waiting_user"
+  | "verifying"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "expired"
+  | "interrupted"
+  | "superseded";
+
+export interface CodexAuthorizationSnapshot {
+  sessionId: string;
+  executorId: string;
+  sequence: number;
+  status: CodexAuthorizationStatus;
+  canReopen: boolean;
+  canCancel: boolean;
+  localFailureCode?: string;
+}
+
+export interface CodexModelCatalogItem {
+  modelKey: string;
+  displayName: string;
+  inputModalities: string[];
+  reasoningEfforts: string[];
+  hidden: boolean;
+  upgradeModelKey?: string;
+}
+
+export interface CodexModelCatalogSnapshot {
+  executorId: string;
+  credentialRevision: number;
+  catalogRevision: number;
+  models: CodexModelCatalogItem[];
+  observedAt: string;
+}
+
+/**
+ * Non-persistent native events carry only the safe snapshot subset and the
+ * sequence-bearing runtime envelope required for gap recovery.
+ */
+export interface CodexAuthorizationChangedEvent {
+  id: string;
+  name: "codex.authorization.changed";
+  version: 2;
+  source: "main";
+  scope: "executor";
+  occurredAt: string;
+  correlationId?: string;
+  payload: {
+    operationId: string;
+    runtimeSessionId: string;
+    runtimeEpoch: number;
+    nativeSequence: number;
+    scopeHash: string;
+    snapshot: CodexAuthorizationSnapshot;
+  };
+}
+
 export type MatrixAccountPlatform = "douyin" | "kuaishou" | "xiaohongshu";
 
 export type MatrixAccountLoginStatus =

@@ -49,6 +49,17 @@ export const IPC_CHANNELS = {
   aiExecutorOpenTerminalWindow: "ai-executor:open-terminal-window",
   codexExecutorAuthorize: "codex-executor:authorize",
   codexExecutorGetAuthStatus: "codex-executor:get-auth-status",
+  codexAuthorizationGetCapabilities: "codex-authorization:get-capabilities",
+  codexAuthorizationStart: "codex-authorization:start",
+  codexAuthorizationGetSnapshot: "codex-authorization:get-snapshot",
+  codexAuthorizationCancel: "codex-authorization:cancel",
+  codexAuthorizationReopen: "codex-authorization:reopen",
+  codexAuthorizationVerify: "codex-authorization:verify",
+  codexAuthorizationCheckReadiness: "codex-authorization:check-readiness",
+  codexAuthorizationGetModelCatalog: "codex-authorization:get-model-catalog",
+  codexAuthorizationRefreshModelCatalog: "codex-authorization:refresh-model-catalog",
+  codexAuthorizationLogout: "codex-authorization:logout",
+  codexAuthorizationChanged: "codex-authorization:changed",
   networkLogSnapshot: "network-log:snapshot",
   networkLogClear: "network-log:clear"
 } as const;

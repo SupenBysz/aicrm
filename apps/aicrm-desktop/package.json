@@ -12,6 +12,7 @@
     "build": "electron-vite build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:codex-executor-auth-safety": "node --test src/main/codex-executor-auth-safety.test.mjs",
+    "test:codex-authorization-bridge-v2": "node --test src/main/codex-authorization-bridge-v2.test.mjs",
     "test:controlled-window-release": "node --test src/main/controlled-window-release.test.mjs",
     "test:matrix-account-policy": "node --test src/main/matrix-account-script-policy.test.mjs",
     "test:matrix-account-session-vault": "node --test src/main/matrix-account-session-vault.test.mjs",

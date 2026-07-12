@@ -39,7 +39,30 @@ const bridge: AiCrmDesktopBridge = {
   },
   codex: {
     authorize: (...args: unknown[]) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorAuthorize, ...args),
-    getAuthStatus: (...args: unknown[]) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorGetAuthStatus, ...args)
+    getAuthStatus: (...args: unknown[]) => ipcRenderer.invoke(IPC_CHANNELS.codexExecutorGetAuthStatus, ...args),
+    authorization: {
+      getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationGetCapabilities),
+      start: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationStart, input),
+      getSnapshot: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationGetSnapshot, sessionId),
+      cancel: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationCancel, input),
+      reopen: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationReopen, input),
+      verify: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationVerify, input),
+      checkReadiness: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationCheckReadiness, input),
+      getModelCatalog: (executorId) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationGetModelCatalog, executorId),
+      refreshModelCatalog: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationRefreshModelCatalog, input),
+      logout: (input) => ipcRenderer.invoke(IPC_CHANNELS.codexAuthorizationLogout, input),
+      onChanged: (listener) => {
+        const handler = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => {
+          try {
+            listener(payload);
+          } catch {
+            // A renderer listener must not break later native event delivery.
+          }
+        };
+        ipcRenderer.on(IPC_CHANNELS.codexAuthorizationChanged, handler);
+        return () => ipcRenderer.off(IPC_CHANNELS.codexAuthorizationChanged, handler);
+      }
+    }
   },
   matrixAccount: {
     getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.matrixAccountGetCapabilities),

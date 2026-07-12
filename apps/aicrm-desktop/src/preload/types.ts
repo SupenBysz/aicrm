@@ -3,7 +3,17 @@ import type {
   DesktopApiResponse,
   AiExecutorTerminalWindowInput,
   AiExecutorTerminalWindowResult,
+  CodexAuthorizationCapabilities,
+  CodexAuthorizationChangedEvent,
+  CodexAuthorizationSnapshot,
+  CodexAuthorizationStartInput,
+  CodexCredentialLogoutCommandInput,
   CodexExecutorAuthStatusProjection,
+  CodexModelCatalogRefreshCommandInput,
+  CodexModelCatalogSnapshot,
+  CodexReadinessCheckCommandInput,
+  CodexSessionCommandInput,
+  CodexVerifyCommandInput,
   DesktopConfig,
   DesktopCommandResult,
   MatrixAccountBrowserInput,
@@ -77,6 +87,23 @@ export interface AiCrmDesktopBridge {
   codex: {
     authorize: () => Promise<DesktopCommandResult<never>>;
     getAuthStatus: () => Promise<DesktopCommandResult<CodexExecutorAuthStatusProjection>>;
+    authorization: {
+      getCapabilities: () => Promise<DesktopCommandResult<CodexAuthorizationCapabilities>>;
+      start: (input: CodexAuthorizationStartInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      getSnapshot: (sessionId: string) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      cancel: (input: CodexSessionCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      reopen: (input: CodexSessionCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      verify: (input: CodexVerifyCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      checkReadiness: (
+        input: CodexReadinessCheckCommandInput
+      ) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      getModelCatalog: (executorId: string) => Promise<DesktopCommandResult<CodexModelCatalogSnapshot>>;
+      refreshModelCatalog: (
+        input: CodexModelCatalogRefreshCommandInput
+      ) => Promise<DesktopCommandResult<CodexModelCatalogSnapshot>>;
+      logout: (input: CodexCredentialLogoutCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      onChanged: (listener: (event: CodexAuthorizationChangedEvent) => void) => () => void;
+    };
   };
   matrixAccount: {
     getCapabilities: () => Promise<DesktopCommandResult<MatrixAccountCapabilities>>;
