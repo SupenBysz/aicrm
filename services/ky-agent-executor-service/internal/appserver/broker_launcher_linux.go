@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -53,9 +54,7 @@ func (p *brokerProcess) Wait() error {
 		for {
 			n, _, _, _, err := p.control.ReadMsgUnix(buffer, nil)
 			if err != nil {
-				if !errors.Is(err, io.EOF) {
-					p.waitErr = ErrClosed
-				}
+				p.waitErr = ErrClosed
 				break
 			}
 			var message brokerprotocol.Message
@@ -125,11 +124,32 @@ func (l BrokerLauncher) Launch(ctx context.Context, operationID, credentialHome 
 		return nil, ErrClosed
 	}
 	var response brokerprotocol.Message
-	if json.Unmarshal(buffer[:n], &response) != nil || response.Version != brokerprotocol.Version || response.Type != brokerprotocol.MessageStarted {
+	if json.Unmarshal(buffer[:n], &response) != nil || response.Version != brokerprotocol.Version {
+		cleanup()
+		return nil, ErrClosed
+	}
+	if response.Type == brokerprotocol.MessageFailed && safeBrokerFailureCode(response.FailureCode) {
+		cleanup()
+		return nil, fmt.Errorf("runtime broker rejected launch: %s", response.FailureCode)
+	}
+	if response.Type != brokerprotocol.MessageStarted {
 		cleanup()
 		return nil, ErrClosed
 	}
 	process := &brokerProcess{stdin: stdinWrite, stdout: stdoutRead, control: connection}
 	process.stopCtx = context.AfterFunc(ctx, func() { _ = process.Kill() })
 	return process, nil
+}
+
+func safeBrokerFailureCode(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for i, char := range value {
+		if (char >= 'a' && char <= 'z') || (i > 0 && char >= '0' && char <= '9') || (i > 0 && char == '_') {
+			continue
+		}
+		return false
+	}
+	return true
 }

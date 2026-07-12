@@ -38,12 +38,17 @@ if find "$SERVICE_DIR" -type f -name '*.go' ! -name '*_test.go' \
   fail "runtime spawning escaped the isolated App Server launcher"
 fi
 grep -q 'DynamicUser=yes' "$SERVICE_DIR/internal/appserver/launcher_linux.go" || fail "DynamicUser runtime missing"
+grep -q 'StateDirectory=' "$SERVICE_DIR/internal/appserver/launcher_linux.go" || fail "DynamicUser state directory missing"
+if grep -q ':idmap' "$SERVICE_DIR/internal/appserver/launcher_linux.go"; then
+  fail "unsupported BindPaths idmap option remains"
+fi
 grep -q '"app-server", "--listen", "stdio://"' "$SERVICE_DIR/internal/appserver/launcher_linux.go" || fail "stdio App Server command missing"
 grep -q 'if s.cfg.WriteEnabled {' "$SERVICE_DIR/internal/server/server.go" || fail "P2A runtime is not feature-gated"
 grep -q 'authorization.New' "$SERVICE_DIR/internal/server/server.go" || fail "P2A runtime manager missing"
 grep -q 'BrokerLauncher' "$SERVICE_DIR/internal/server/server.go" || fail "Agent service bypasses the root runtime broker"
 grep -q '^User=root$' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.service" || fail "runtime broker is not root-owned"
-grep -q '^ListenSequentialPacket=/run/aicrm-agent-runtime/control.sock$' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.socket" || fail "runtime broker socket contract missing"
+grep -q -- '-m 1770 /var/lib/aicrm-agent-executors' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.service" || fail "credential root anchor contract missing"
+grep -q '^ListenSequentialPacket=/run/aicrm-agent-runtime.sock$' "$ROOT_DIR/ops/native/ky-agent-executor-runtime-broker.socket" || fail "runtime broker socket contract missing"
 grep -Eq 'uid[[:space:]]*!=[[:space:]]*s\.agentUID' "$SERVICE_DIR/internal/runtimebroker/server_linux.go" || fail "runtime broker peer UID check missing"
 if grep -R -n -E 'INSERT[[:space:]]+INTO|UPDATE[[:space:]]+ky_|DELETE[[:space:]]+FROM|TRUNCATE[[:space:]]+' \
   "$SERVICE_DIR/internal/store" --include='*.go' --exclude='*_test.go' --exclude='control_*.go'; then

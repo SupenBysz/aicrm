@@ -83,7 +83,8 @@ func TestProductionTreeOnlyAllowsIsolatedStdioAppServerLauncher(t *testing.T) {
 	text := string(launcher)
 	for _, required := range []string{
 		`"/usr/bin/env"`, `"-i"`, "systemd-run", "DynamicUser=yes", "ProtectSystem=strict",
-		"PrivateDevices=true", "CapabilityBoundingSet=", `"app-server", "--listen", "stdio://"`,
+		"PrivateDevices=true", "CapabilityBoundingSet=", "StateDirectory=", "InaccessiblePaths=",
+		`"app-server", "--listen", "stdio://"`,
 	} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("isolated launcher is missing %q", required)
@@ -93,7 +94,7 @@ func TestProductionTreeOnlyAllowsIsolatedStdioAppServerLauncher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"SO_PEERCRED", "agentUID", "ReadMsgUnix", "receivedFDs", "validateCredentialHome", "lockCredentialHome", "Openat", "Fchown"} {
+	for _, required := range []string{"SO_PEERCRED", "agentUID", "ReadMsgUnix", "receivedFDs", "lockCredentialHome", "Openat2", "RESOLVE_NO_SYMLINKS", "Renameat2", "Fchown"} {
 		if !strings.Contains(string(broker), required) {
 			t.Fatalf("runtime broker is missing %q", required)
 		}

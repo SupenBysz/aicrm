@@ -186,8 +186,7 @@ func (c *Client) Close() error {
 		_ = c.process.Kill()
 	})
 	<-c.done
-	_ = c.process.Wait()
-	return nil
+	return c.process.Wait()
 }
 
 func (c *Client) notify(method string, params any) error {

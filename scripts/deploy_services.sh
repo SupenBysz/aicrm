@@ -11,6 +11,7 @@ AGENT_EXECUTOR_SYSUSERS="ky-agent-executor-service.sysusers.conf"
 AGENT_EXECUTOR_ENV="$DEPLOY_ROOT/config/ky-agent-executor-service.env"
 AGENT_RUNTIME_BROKER="ky-agent-executor-runtime-broker"
 AGENT_RUNTIME_ROOT="/var/lib/aicrm-agent-executors"
+AGENT_RUNTIME_STATE_ROOT="/var/lib/private/aicrm-codex-runtime"
 
 services=(
   ky-auth-service
@@ -42,7 +43,8 @@ done
 echo "- install sysusers: $ROOT_DIR/ops/native/$AGENT_EXECUTOR_SYSUSERS -> $SYSUSERS_DIR/$AGENT_EXECUTOR_SYSUSERS"
 echo "- require dedicated config: $AGENT_EXECUTOR_ENV (root:ky-agent-executor 0640)"
 echo "- install runtime broker binary and systemd socket"
-echo "- require credential root: $AGENT_RUNTIME_ROOT (ky-agent-executor:ky-agent-executor 0700)"
+echo "- require credential root anchor: $AGENT_RUNTIME_ROOT (root:ky-agent-executor 1770)"
+echo "- require private runtime state root: $AGENT_RUNTIME_STATE_ROOT (root:root 0700)"
 
 echo "Set KY_EXECUTE_SERVICE_DEPLOY=1 to install binaries/units, daemon-reload, enable, restart, and verify."
 if [[ "${KY_EXECUTE_SERVICE_DEPLOY:-}" == "1" ]]; then
@@ -55,7 +57,8 @@ if [[ "${KY_EXECUTE_SERVICE_DEPLOY:-}" == "1" ]]; then
     echo "Agent Executor config must be root:ky-agent-executor mode 0640: $AGENT_EXECUTOR_ENV" >&2
     exit 1
   fi
-  install -d -m 0700 -o ky-agent-executor -g ky-agent-executor "$AGENT_RUNTIME_ROOT"
+  install -d -m 1770 -o root -g ky-agent-executor "$AGENT_RUNTIME_ROOT"
+  install -d -m 0700 -o root -g root "$AGENT_RUNTIME_STATE_ROOT"
   install -d "$TARGET_BIN_DIR"
   for service in "${services[@]}"; do
     install -m 0755 "$SRC_DIR/$service" "$TARGET_BIN_DIR/$service"
@@ -74,8 +77,12 @@ if [[ "${KY_EXECUTE_SERVICE_DEPLOY:-}" == "1" ]]; then
     systemctl --no-pager --full status "$service.service" >/dev/null
   done
 
-  if [[ "$(stat -c '%U:%G:%a' "$AGENT_RUNTIME_ROOT")" != "ky-agent-executor:ky-agent-executor:700" ]]; then
+  if [[ "$(stat -c '%U:%G:%a' "$AGENT_RUNTIME_ROOT")" != "root:ky-agent-executor:1770" ]]; then
     echo "Agent Executor credential root ownership is unsafe: $AGENT_RUNTIME_ROOT" >&2
+    exit 1
+  fi
+  if [[ "$(stat -c '%U:%G:%a' "$AGENT_RUNTIME_STATE_ROOT")" != "root:root:700" ]]; then
+    echo "Agent Executor runtime state root ownership is unsafe: $AGENT_RUNTIME_STATE_ROOT" >&2
     exit 1
   fi
 

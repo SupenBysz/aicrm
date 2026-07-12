@@ -7,6 +7,8 @@ After=ky-agent-executor-runtime-broker.socket
 Type=simple
 User=root
 Group=root
+ExecStartPre=/usr/bin/install -d -o root -g ky-agent-executor -m 1770 /var/lib/aicrm-agent-executors
+ExecStartPre=/usr/bin/install -d -o root -g root -m 0700 /var/lib/private/aicrm-codex-runtime
 ExecStart=/data/kyai_crm/bin/ky-agent-executor-runtime-broker
 Environment=KY_AGENT_EXECUTOR_CREDENTIAL_ROOT=/var/lib/aicrm-agent-executors
 Environment=KY_AGENT_EXECUTOR_USER=ky-agent-executor
@@ -25,6 +27,8 @@ PrivateTmp=true
 PrivateDevices=true
 ProtectHome=true
 ProtectSystem=strict
+ReadWritePaths=/var/lib/aicrm-agent-executors /var/lib/private/aicrm-codex-runtime
+InaccessiblePaths=/data/kyai_crm/config /data/kyai_crm/backups
 ProtectClock=true
 ProtectControlGroups=true
 ProtectKernelLogs=true
@@ -36,12 +40,13 @@ ProcSubset=pid
 RestrictAddressFamilies=AF_UNIX
 RestrictNamespaces=true
 RestrictRealtime=true
-RestrictSUIDSGID=true
+# systemd 255's RestrictSUIDSGID seccomp profile rejects openat2; the broker
+# requires openat2 for anchored no-symlink traversal and keeps NoNewPrivileges.
 LockPersonality=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER
-AmbientCapabilities=CAP_CHOWN CAP_FOWNER
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH
 
 [Install]
 WantedBy=multi-user.target

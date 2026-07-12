@@ -24,7 +24,12 @@ func main() {
 	if err != nil {
 		log.Fatal("runtime broker socket activation failed")
 	}
-	runtimebroker.CleanupStaleUnits(cfg.SystemctlPath)
+	if err := runtimebroker.CleanupStaleUnits(cfg.SystemctlPath); err != nil {
+		log.Fatal("runtime broker stale unit cleanup failed")
+	}
+	if err := server.RecoverOrphans(); err != nil {
+		log.Fatal("runtime broker orphan recovery failed")
+	}
 	if err := server.Serve(ctx, listener); err != nil && ctx.Err() == nil {
 		log.Fatal("runtime broker stopped")
 	}

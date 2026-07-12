@@ -74,7 +74,7 @@ func Load() Config {
 	}
 	runtimeBrokerSocket := strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET"))
 	if runtimeBrokerSocket == "" {
-		runtimeBrokerSocket = "/run/aicrm-agent-runtime/control.sock"
+		runtimeBrokerSocket = "/run/aicrm-agent-runtime.sock"
 	}
 	return Config{
 		HTTPAddr:            addr,

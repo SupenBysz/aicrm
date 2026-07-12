@@ -43,7 +43,7 @@ func TestValidateWriteModeRequiresDedicatedDependencies(t *testing.T) {
 	base.OwnerInstanceID = "instance-1"
 	base.CodexVersion = "0.144.1"
 	base.RuntimeBindingID = "server_test"
-	base.RuntimeBrokerSocket = "/run/aicrm-agent-runtime/control.sock"
+	base.RuntimeBrokerSocket = "/run/aicrm-agent-runtime.sock"
 	if err := base.Validate(); err != nil {
 		t.Fatalf("complete control-plane config rejected: %v", err)
 	}

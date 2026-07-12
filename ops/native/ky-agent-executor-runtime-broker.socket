@@ -2,11 +2,10 @@
 Description=AiCRM Agent Executor Runtime Broker Socket
 
 [Socket]
-ListenSequentialPacket=/run/aicrm-agent-runtime/control.sock
+ListenSequentialPacket=/run/aicrm-agent-runtime.sock
 SocketUser=root
 SocketGroup=ky-agent-executor
 SocketMode=0660
-DirectoryMode=0750
 RemoveOnStop=true
 
 [Install]

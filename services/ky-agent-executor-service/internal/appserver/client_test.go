@@ -3,6 +3,7 @@ package appserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ type fakeProcess struct {
 	outputReader *io.PipeReader
 	outputWriter *io.PipeWriter
 	killOnce     sync.Once
+	waitErr      error
 }
 
 func newFakeProcess() *fakeProcess {
@@ -26,13 +28,22 @@ func newFakeProcess() *fakeProcess {
 
 func (p *fakeProcess) Stdin() io.WriteCloser { return p.inputWriter }
 func (p *fakeProcess) Stdout() io.ReadCloser { return p.outputReader }
-func (p *fakeProcess) Wait() error           { return nil }
+func (p *fakeProcess) Wait() error           { return p.waitErr }
 func (p *fakeProcess) Kill() error {
 	p.killOnce.Do(func() {
 		_ = p.inputWriter.Close()
 		_ = p.outputWriter.Close()
 	})
 	return nil
+}
+
+func TestCloseReturnsRuntimeFinalizationFailure(t *testing.T) {
+	process := newFakeProcess()
+	process.waitErr = errors.New("runtime finalization failed")
+	client := NewClient(process)
+	if err := client.Close(); !errors.Is(err, process.waitErr) {
+		t.Fatalf("close error = %v", err)
+	}
 }
 
 func TestDeviceCodeLoginAccountAndCatalogUseStructuredProtocol(t *testing.T) {

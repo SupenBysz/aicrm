@@ -20,13 +20,15 @@ func TestSystemdCommandIsStdioOnlyAndEnvironmentIsCleared(t *testing.T) {
 	for _, required := range []string{
 		"/usr/bin/env -i", "DynamicUser=yes", "ProtectSystem=strict", "ProtectHome=true",
 		"PrivateDevices=true", "NoNewPrivileges=true", "CapabilityBoundingSet=", "UMask=0077",
-		"KillMode=control-group", "CODEX_HOME=/codex-home", "app-server --listen stdio://",
+		"KillMode=control-group", "StateDirectory=aicrm-codex-runtime/operation_1",
+		"StateDirectoryMode=0700", "InaccessiblePaths=-/var/lib/aicrm-agent-executors",
+		"CODEX_HOME=/var/lib/aicrm-codex-runtime/operation_1", "app-server --listen stdio://",
 	} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("missing %q in %s", required, joined)
 		}
 	}
-	for _, forbidden := range []string{"ws://", "unix://", "codex --remote", "pty", "DATABASE_URL", "INTERNAL_TOKEN", "API_KEY", "ACCESS_TOKEN"} {
+	for _, forbidden := range []string{"ws://", "unix://", "codex --remote", "pty", ":idmap", "DATABASE_URL", "INTERNAL_TOKEN", "API_KEY", "ACCESS_TOKEN"} {
 		if strings.Contains(strings.ToUpper(joined), strings.ToUpper(forbidden)) {
 			t.Fatalf("forbidden %q in %s", forbidden, joined)
 		}
