@@ -137,6 +137,7 @@ export interface CodexAuthorizationCapabilities {
 export interface CodexAuthorizationStartInput {
   sessionId: string;
   executorId: string;
+  sessionRevision: number;
   handoffId: string;
   handoffTicket: string;
 }

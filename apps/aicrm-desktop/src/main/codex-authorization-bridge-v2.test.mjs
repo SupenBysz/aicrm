@@ -25,6 +25,7 @@ const commandTicket = "eyJhbGciOiJFZERTQSJ9.eyJwdXJwb3NlIjoiY29tbWFuZCJ9.c2lnbmF
 const validStart = {
   sessionId: "authsession_1",
   executorId: "aiexec_1",
+  sessionRevision: 1,
   handoffId: "handoff_1",
   handoffTicket
 };
@@ -200,6 +201,7 @@ test("Bridge v2 exact validators run before true-gated delegation", async () => 
   const handlers = createCodexAuthorizationBridgeV2Handlers({ ready: true, runtime: current.runtime });
   const invalidCases = [
     () => handlers.start({ ...validStart, extra: true }),
+    () => handlers.start({ ...validStart, sessionRevision: 0 }),
     () => handlers.getSnapshot("../authsession_1"),
     () => handlers.cancel({ ...validSessionCommand, commandTicket: "raw-ticket" }),
     () => handlers.reopen({ ...validSessionCommand, expectedSessionRevision: 0 }),
@@ -257,6 +259,7 @@ test("Bridge v2 rejects raw IDs, missing tickets, extra fields, and malformed re
     queryCodexAuthorizationCapabilities([undefined]),
     startCodexAuthorization({ executorId: "aiexec_1" }),
     startCodexAuthorization({ ...validStart, deviceId: "renderer_claimed_device" }),
+    startCodexAuthorization({ ...validStart, sessionRevision: 1.5 }),
     queryCodexAuthorizationSnapshot("../authsession_1"),
     cancelCodexAuthorization({ ...validSessionCommand, commandTicket: "raw-ticket" }),
     reopenCodexAuthorization({ sessionId: "authsession_1", operationId: "operation_1" }),

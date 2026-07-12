@@ -120,8 +120,25 @@ function isCompactTicket(value: unknown): value is string {
 }
 
 function isStartInput(value: unknown): value is CodexAuthorizationStartInput {
-  if (!isRecord(value) || !hasExactKeys(value, ["sessionId", "executorId", "handoffId", "handoffTicket"])) return false;
-  return isOpaqueId(value.sessionId) && isOpaqueId(value.executorId) && isOpaqueId(value.handoffId) && isCompactTicket(value.handoffTicket);
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "sessionId",
+      "executorId",
+      "sessionRevision",
+      "handoffId",
+      "handoffTicket"
+    ])
+  ) {
+    return false;
+  }
+  return (
+    isOpaqueId(value.sessionId) &&
+    isOpaqueId(value.executorId) &&
+    isPositiveRevision(value.sessionRevision) &&
+    isOpaqueId(value.handoffId) &&
+    isCompactTicket(value.handoffTicket)
+  );
 }
 
 function isSessionCommand(value: unknown): value is CodexSessionCommandInput {

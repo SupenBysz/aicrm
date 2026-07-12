@@ -166,6 +166,7 @@ test("Desktop flow performs registration, server handoff, and bridge.start witho
   assert.deepEqual(startInput, {
     sessionId: SESSION.id,
     executorId: SESSION.executorId,
+    sessionRevision: SESSION.revision,
     handoffId: HANDOFF.handoffId,
     handoffTicket: HANDOFF_TICKET
   });

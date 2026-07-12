@@ -169,6 +169,7 @@ async function startDesktopAuthorization(
     result = await bridge.start({
       sessionId: session.id,
       executorId: session.executorId,
+      sessionRevision: session.revision,
       handoffId: handoff.handoffId,
       handoffTicket: handoff.handoffTicket
     });
