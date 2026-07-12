@@ -6,6 +6,7 @@ import type { SafeStorageLike } from "./desktop-device-identity.ts";
 const ENVELOPE_MAGIC = Buffer.from("AICRM-EXECUTOR-BINDING-ENC-V1\n", "ascii");
 const MAX_FILE_BYTES = 64 << 10;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,120}$/;
+const AUTHORIZATION_SESSION_ID = /^[A-Za-z0-9_-]{1,160}$/;
 const DEVICE_ID = /^[0-9a-f]{64}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const CANONICAL_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -29,6 +30,9 @@ export interface DesktopExecutorBindingState {
   accountFingerprint: string;
   activationOperationId: string;
   activationId: string;
+  authorizationSessionId: string;
+  activationAckRequestReference: string;
+  activationAckRequestHash: string;
   activatedAt: string;
   revocationOperationId: string | null;
   revocationId: string | null;
@@ -43,6 +47,9 @@ export interface ActivateDesktopExecutorBindingInput {
   deviceId: string;
   operationId: string;
   activationId: string;
+  authorizationSessionId: string;
+  activationAckRequestReference: string;
+  activationAckRequestHash: string;
   credentialRevision: number;
   sourceCredentialRevision: number;
   revocationEpoch: number;
@@ -190,6 +197,9 @@ export class DesktopExecutorBindingStateStore {
         accountFingerprint: candidate.accountFingerprint,
         activationOperationId: candidate.operationId,
         activationId: candidate.activationId,
+        authorizationSessionId: candidate.authorizationSessionId,
+        activationAckRequestReference: candidate.activationAckRequestReference,
+        activationAckRequestHash: candidate.activationAckRequestHash,
         activatedAt: canonicalNow(this.now()),
         revocationOperationId: null,
         revocationId: null,
@@ -625,6 +635,9 @@ function validateState(value: unknown): DesktopExecutorBindingState {
     "accountFingerprint",
     "activationOperationId",
     "activationId",
+    "authorizationSessionId",
+    "activationAckRequestReference",
+    "activationAckRequestHash",
     "activatedAt",
     "revocationOperationId",
     "revocationId",
@@ -651,6 +664,10 @@ function validateState(value: unknown): DesktopExecutorBindingState {
     !DIGEST.test(state.accountFingerprint) ||
     !SAFE_ID.test(state.activationOperationId) ||
     !SAFE_ID.test(state.activationId) ||
+    typeof state.authorizationSessionId !== "string" ||
+    !AUTHORIZATION_SESSION_ID.test(state.authorizationSessionId) ||
+    !DIGEST.test(state.activationAckRequestReference) ||
+    !DIGEST.test(state.activationAckRequestHash) ||
     !canonicalTime(state.activatedAt)
   ) {
     throw bindingError("desktop_executor_binding_corrupt", "执行器绑定状态字段无效");
@@ -698,6 +715,9 @@ function validateActivationInput(
       "deviceId",
       "operationId",
       "activationId",
+      "authorizationSessionId",
+      "activationAckRequestReference",
+      "activationAckRequestHash",
       "credentialRevision",
       "sourceCredentialRevision",
       "revocationEpoch",
@@ -708,6 +728,10 @@ function validateActivationInput(
     !DEVICE_ID.test(input.deviceId) ||
     !SAFE_ID.test(input.operationId) ||
     !SAFE_ID.test(input.activationId) ||
+    typeof input.authorizationSessionId !== "string" ||
+    !AUTHORIZATION_SESSION_ID.test(input.authorizationSessionId) ||
+    !DIGEST.test(input.activationAckRequestReference) ||
+    !DIGEST.test(input.activationAckRequestHash) ||
     !positiveRevision(input.credentialRevision) ||
     !nonNegativeRevision(input.sourceCredentialRevision) ||
     input.credentialRevision <= input.sourceCredentialRevision ||
@@ -772,7 +796,8 @@ function assertActivationTransition(
       current.deviceId === next.deviceId &&
       current.credentialRevision === next.sourceCredentialRevision &&
       current.revocationEpoch === next.revocationEpoch &&
-      next.credentialRevision > current.credentialRevision
+      next.credentialRevision > current.credentialRevision &&
+      distinctActivationProvenance(current, next)
     ) {
       return;
     }
@@ -780,7 +805,8 @@ function assertActivationTransition(
     current.status === "revoked" &&
     next.sourceCredentialRevision === 0 &&
     next.revocationEpoch === current.revocationEpoch &&
-    next.credentialRevision > current.credentialRevision
+    next.credentialRevision > current.credentialRevision &&
+    distinctActivationProvenance(current, next)
   ) {
     return;
   }
@@ -800,7 +826,10 @@ function sameActivation(
     current.bindingDigest === input.bindingDigest &&
     current.accountFingerprint === input.accountFingerprint &&
     current.activationOperationId === input.operationId &&
-    current.activationId === input.activationId
+    current.activationId === input.activationId &&
+    current.authorizationSessionId === input.authorizationSessionId &&
+    current.activationAckRequestReference === input.activationAckRequestReference &&
+    current.activationAckRequestHash === input.activationAckRequestHash
   );
 }
 
@@ -846,7 +875,8 @@ function validSuccessor(
       next.revocationEpoch === current.revocationEpoch &&
       next.credentialRevision > current.credentialRevision &&
       next.activationOperationId !== current.activationOperationId &&
-      next.activationId !== current.activationId
+      next.activationId !== current.activationId &&
+      distinctActivationProvenance(current, next)
     );
   }
   if (current.status === "active" && next.status === "revoking") {
@@ -869,7 +899,22 @@ function validSuccessor(
     next.revocationEpoch === current.revocationEpoch &&
     next.credentialRevision > current.credentialRevision &&
     next.activationOperationId !== current.activationOperationId &&
-    next.activationId !== current.activationId
+    next.activationId !== current.activationId &&
+    distinctActivationProvenance(current, next)
+  );
+}
+
+function distinctActivationProvenance(
+  current: DesktopExecutorBindingState,
+  next: Pick<
+    ActivateDesktopExecutorBindingInput,
+    "authorizationSessionId" | "activationAckRequestReference" | "activationAckRequestHash"
+  >
+): boolean {
+  return (
+    next.authorizationSessionId !== current.authorizationSessionId &&
+    next.activationAckRequestReference !== current.activationAckRequestReference &&
+    next.activationAckRequestHash !== current.activationAckRequestHash
   );
 }
 
@@ -886,6 +931,9 @@ function sameActivationStateFields(
     left.accountFingerprint === right.accountFingerprint &&
     left.activationOperationId === right.activationOperationId &&
     left.activationId === right.activationId &&
+    left.authorizationSessionId === right.authorizationSessionId &&
+    left.activationAckRequestReference === right.activationAckRequestReference &&
+    left.activationAckRequestHash === right.activationAckRequestHash &&
     left.activatedAt === right.activatedAt
   );
 }

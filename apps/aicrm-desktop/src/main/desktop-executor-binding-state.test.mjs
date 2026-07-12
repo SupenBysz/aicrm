@@ -12,6 +12,13 @@ const BINDING_2 = "4".repeat(64);
 const ACCOUNT_1 = "5".repeat(64);
 const ACCOUNT_2 = "6".repeat(64);
 const QUARANTINE = "7".repeat(64);
+const AUTHORIZATION_SESSION_1 = "authorization_session_1";
+const AUTHORIZATION_SESSION_2 = "authorization_session_2";
+const ACK_REFERENCE_1 = "8".repeat(64);
+const ACK_HASH_1 = "9".repeat(64);
+const ACK_REFERENCE_2 = "a".repeat(64);
+const ACK_HASH_2 = "b".repeat(64);
+const ENVELOPE_MAGIC = Buffer.from("AICRM-EXECUTOR-BINDING-ENC-V1\n", "ascii");
 
 class FakeSafeStorage {
   constructor({ available = true, backend = "gnome_libsecret" } = {}) {
@@ -67,11 +74,24 @@ async function fixture(overrides = {}) {
 }
 
 function activation(overrides = {}) {
+  const operationId = overrides.operationId ?? "operation_1";
+  const provenance = operationId === "operation_1"
+    ? {
+        authorizationSessionId: AUTHORIZATION_SESSION_1,
+        activationAckRequestReference: ACK_REFERENCE_1,
+        activationAckRequestHash: ACK_HASH_1
+      }
+    : {
+        authorizationSessionId: AUTHORIZATION_SESSION_2,
+        activationAckRequestReference: ACK_REFERENCE_2,
+        activationAckRequestHash: ACK_HASH_2
+      };
   return {
     executorId: "executor_1",
     deviceId: DEVICE_1,
-    operationId: "operation_1",
+    operationId,
     activationId: "activation_1",
+    ...provenance,
     credentialRevision: 1,
     sourceCredentialRevision: 0,
     revocationEpoch: 0,
@@ -102,6 +122,35 @@ function revocation(overrides = {}) {
   };
 }
 
+function assertProvenance(state, variant = 1) {
+  assert.equal(
+    state.authorizationSessionId,
+    variant === 1 ? AUTHORIZATION_SESSION_1 : AUTHORIZATION_SESSION_2
+  );
+  assert.equal(
+    state.activationAckRequestReference,
+    variant === 1 ? ACK_REFERENCE_1 : ACK_REFERENCE_2
+  );
+  assert.equal(
+    state.activationAckRequestHash,
+    variant === 1 ? ACK_HASH_1 : ACK_HASH_2
+  );
+}
+
+async function rewriteEncryptedState(file, safeStorage, mutate) {
+  const raw = await readFile(file);
+  const state = JSON.parse(safeStorage.decryptString(raw.subarray(ENVELOPE_MAGIC.length)));
+  mutate(state);
+  await writeFile(
+    file,
+    Buffer.concat([
+      ENVELOPE_MAGIC,
+      safeStorage.encryptString(JSON.stringify(state))
+    ]),
+    { mode: 0o600 }
+  );
+}
+
 test("active binding is encrypted, mode 0600, restart-readable and exact-replay safe", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
@@ -109,10 +158,21 @@ test("active binding is encrypted, mode 0600, restart-readable and exact-replay 
   assert.equal(active.generation, 1);
   assert.equal(active.status, "active");
   assert.equal(active.sourceCredentialRevision, 0);
+  assert.equal(active.authorizationSessionId, AUTHORIZATION_SESSION_1);
+  assert.equal(active.activationAckRequestReference, ACK_REFERENCE_1);
+  assert.equal(active.activationAckRequestHash, ACK_HASH_1);
   assert.deepEqual(await current.store.activate(activation()), active);
   const target = path.join(current.root, "executor_1.sec");
   const raw = await readFile(target);
-  for (const canary of ["executor_1", DEVICE_1, BINDING_1, ACCOUNT_1]) {
+  for (const canary of [
+    "executor_1",
+    DEVICE_1,
+    BINDING_1,
+    ACCOUNT_1,
+    AUTHORIZATION_SESSION_1,
+    ACK_REFERENCE_1,
+    ACK_HASH_1
+  ]) {
     assert.equal(raw.includes(Buffer.from(canary)), false);
   }
   if (process.platform !== "win32") assert.equal((await stat(target)).mode & 0o777, 0o600);
@@ -120,6 +180,72 @@ test("active binding is encrypted, mode 0600, restart-readable and exact-replay 
   const restarted = new DesktopExecutorBindingStateStore(current.options);
   assert.deepEqual(await restarted.read("executor_1"), active);
   assert.deepEqual(await restarted.list(), [active]);
+});
+
+test("activation ACK provenance is exact, immutable on replay, and rejects raw artifacts", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const active = await current.store.activate(activation());
+
+  for (const overrides of [
+    { authorizationSessionId: "authorization_session_forged" },
+    { activationAckRequestReference: "c".repeat(64) },
+    { activationAckRequestHash: "d".repeat(64) }
+  ]) {
+    await assert.rejects(
+      current.store.activate(activation(overrides)),
+      { code: "desktop_executor_binding_conflict" }
+    );
+    assert.deepEqual(await current.store.read("executor_1"), active);
+  }
+
+  for (const invalid of [
+    { authorizationSessionId: "" },
+    { authorizationSessionId: undefined },
+    { authorizationSessionId: "s".repeat(161) },
+    { activationAckRequestReference: "not-a-digest" },
+    { activationAckRequestHash: "not-a-digest" }
+  ]) {
+    assert.throws(
+      () => current.store.activate(activation({ operationId: "operation_invalid", ...invalid })),
+      { code: "desktop_executor_binding_unsafe" }
+    );
+  }
+  for (const extra of [
+    { activationToken: "raw.header.signature" },
+    { requestPath: "/api/private/activation/ack" },
+    { requestBody: "raw-body-canary" }
+  ]) {
+    assert.throws(
+      () => current.store.activate({ ...activation({ operationId: "operation_extra" }), ...extra }),
+      { code: "desktop_executor_binding_unsafe" }
+    );
+  }
+});
+
+test("legacy binding records without ACK provenance fail closed", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  await current.store.activate(activation());
+  const target = path.join(current.root, "executor_1.sec");
+  const raw = await readFile(target);
+  const legacy = JSON.parse(
+    current.safeStorage.decryptString(raw.subarray(ENVELOPE_MAGIC.length))
+  );
+  delete legacy.authorizationSessionId;
+  delete legacy.activationAckRequestReference;
+  delete legacy.activationAckRequestHash;
+  await writeFile(
+    target,
+    Buffer.concat([
+      ENVELOPE_MAGIC,
+      current.safeStorage.encryptString(JSON.stringify(legacy))
+    ]),
+    { mode: 0o600 }
+  );
+  await assert.rejects(current.store.read("executor_1"), {
+    code: "desktop_executor_binding_corrupt"
+  });
 });
 
 test("activation CAS serializes reauthorization and rejects stale competing sources", async (t) => {
@@ -139,6 +265,20 @@ test("activation CAS serializes reauthorization and rejects stale competing sour
   assert.equal(active.generation, 2);
   assert.equal(active.credentialRevision, 2);
   assert.equal(active.sourceCredentialRevision, 1);
+  assertProvenance(active, 2);
+  await assert.rejects(
+    current.store.activate(
+      activation({
+        operationId: "operation_reused_provenance",
+        activationId: "activation_reused_provenance",
+        credentialRevision: 3,
+        sourceCredentialRevision: 2,
+        bindingDigest: BINDING_1,
+        accountFingerprint: ACCOUNT_1
+      })
+    ),
+    { code: "desktop_executor_binding_conflict" }
+  );
   await assert.rejects(
     current.store.activate({
       ...replacement,
@@ -170,11 +310,13 @@ test("activation CAS serializes reauthorization and rejects stale competing sour
 test("revocation is a durable epoch tombstone and only source zero may authorize again", async (t) => {
   const current = await fixture();
   t.after(() => rm(current.base, { recursive: true, force: true }));
-  await current.store.activate(activation());
+  const original = await current.store.activate(activation());
   current.setNow("2026-07-13T09:00:01.000Z");
   const revoking = await current.store.beginRevocation(revocationIntent());
   assert.equal(revoking.status, "revoking");
   assert.equal(revoking.generation, 2);
+  assertProvenance(revoking, 1);
+  assert.equal(revoking.authorizationSessionId, original.authorizationSessionId);
   assert.deepEqual(await current.store.beginRevocation(revocationIntent()), revoking);
   current.setNow("2026-07-13T09:00:02.000Z");
   const revoked = await current.store.markRevoked(revocation());
@@ -182,6 +324,9 @@ test("revocation is a durable epoch tombstone and only source zero may authorize
   assert.equal(revoked.generation, 3);
   assert.equal(revoked.revocationEpoch, 1);
   assert.equal(revoked.revocationResult, "succeeded");
+  assertProvenance(revoked, 1);
+  assert.equal(revoked.activationAckRequestReference, original.activationAckRequestReference);
+  assert.equal(revoked.activationAckRequestHash, original.activationAckRequestHash);
   assert.deepEqual(await current.store.markRevoked(revocation()), revoked);
   await assert.rejects(
     current.store.activate(
@@ -212,6 +357,7 @@ test("revocation is a durable epoch tombstone and only source zero may authorize
   assert.equal(reauthorized.status, "active");
   assert.equal(reauthorized.generation, 4);
   assert.equal(reauthorized.deviceId, DEVICE_2);
+  assertProvenance(reauthorized, 2);
 });
 
 test("revoking is durable before cleanup and failed or stale logout can never revive active state", async (t) => {
@@ -280,6 +426,49 @@ test("a crash after the pre-cleanup fence recovers revoking instead of active", 
   const recovered = await restarted.read("executor_1");
   assert.equal(recovered?.status, "revoking");
   assert.equal(recovered?.generation, 2);
+  assertProvenance(recovered, 1);
+});
+
+test("atomic recovery rejects forged ACK provenance in a revocation successor", async (t) => {
+  let failFence = false;
+  const current = await fixture({
+    faultInjector: (point) => {
+      if (failFence && point === "after_temporary_fsync") {
+        failFence = false;
+        throw new Error("simulated crash with revocation evidence");
+      }
+    }
+  });
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const active = await current.store.activate(activation());
+  failFence = true;
+  await assert.rejects(current.store.beginRevocation(revocationIntent()));
+  for (const file of [
+    path.join(current.root, "executor_1.sec.tmp"),
+    path.join(current.root, "executor_1.sec.commit-2")
+  ]) {
+    await rewriteEncryptedState(file, current.safeStorage, (state) => {
+      state.authorizationSessionId = AUTHORIZATION_SESSION_2;
+      state.activationAckRequestReference = ACK_REFERENCE_2;
+      state.activationAckRequestHash = ACK_HASH_2;
+    });
+  }
+
+  const restarted = new DesktopExecutorBindingStateStore({
+    root: current.root,
+    safeStorage: current.safeStorage,
+    now: current.options.now
+  });
+  await assert.rejects(restarted.read("executor_1"), {
+    code: "desktop_executor_binding_corrupt"
+  });
+  const target = await readFile(path.join(current.root, "executor_1.sec"));
+  const preserved = JSON.parse(
+    current.safeStorage.decryptString(target.subarray(ENVELOPE_MAGIC.length))
+  );
+  assert.equal(preserved.status, "active");
+  assert.equal(preserved.generation, active.generation);
+  assertProvenance(preserved, 1);
 });
 
 test("CAS rejects epoch gaps and identifier reuse with a different payload", async (t) => {
@@ -357,6 +546,7 @@ test("a fsynced newer temporary generation is promoted after crash", async (t) =
   const recovered = await restarted.read("executor_1");
   assert.equal(recovered?.generation, 2);
   assert.equal(recovered?.credentialRevision, 2);
+  assertProvenance(recovered, 2);
   await assert.rejects(stat(path.join(current.root, "executor_1.sec.tmp")), { code: "ENOENT" });
 });
 
@@ -432,6 +622,7 @@ for (const faultPoint of ["after_rename", "before_directory_fsync"]) {
     const recovered = await restarted.read("executor_1");
     assert.equal(recovered?.generation, 2);
     assert.equal(recovered?.credentialRevision, 2);
+    assertProvenance(recovered, 2);
     assert.equal(
       (await readdir(current.root)).some((name) => name.includes(".commit-")),
       false
@@ -473,6 +664,7 @@ test("a directory-sync failure is recovered without accepting an unbarriered exa
   const recovered = await restarted.activate(replacement);
   assert.equal(recovered.generation, 2);
   assert.equal(recovered.credentialRevision, 2);
+  assertProvenance(recovered, 2);
 });
 
 test("unsupported directory fsync retains one flushed generation shadow and allows later CAS", async (t) => {
@@ -497,6 +689,7 @@ test("unsupported directory fsync retains one flushed generation shadow and allo
     })
   );
   assert.equal(replacement.generation, 2);
+  assertProvenance(replacement, 2);
   assert.deepEqual(
     (await readdir(current.root)).filter((name) => name.includes(".commit-")),
     ["executor_1.sec.commit-2"]
