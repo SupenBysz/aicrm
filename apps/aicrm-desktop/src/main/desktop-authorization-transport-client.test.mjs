@@ -104,6 +104,7 @@ function claimInput(overrides = {}) {
 function claimData(overrides = {}) {
   return {
     handoffId: "handoff_1",
+    executorId: "executor_desktop_1",
     claimToken: CLAIM_TOKEN,
     expiresAt: "2026-07-13T09:02:00.123Z",
     sessionRevision: 2,
@@ -315,6 +316,33 @@ test("invalid successful projections are not journaled and retry the same signat
   await current.client({ fetch: validFetch }).claimDesktopHandoff(claimInput());
   assert.deepEqual(requests[1], requests[0]);
   assert.equal(current.signCount(), 1);
+});
+
+test("claim response requires an exact trusted executor id", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const missingExecutor = claimData();
+  delete missingExecutor.executorId;
+  const responses = [missingExecutor, claimData({ executorId: "" }), claimData()];
+  const requests = [];
+  const hostFetch = async (url, init) => {
+    requests.push(requestProjection(url, init));
+    return response(responses.shift());
+  };
+  const client = current.client({ fetch: hostFetch });
+
+  await assert.rejects(client.claimDesktopHandoff(claimInput()), {
+    code: "desktop_authorization_transport_response_invalid"
+  });
+  await assert.rejects(client.claimDesktopHandoff(claimInput()), {
+    code: "desktop_authorization_transport_response_invalid"
+  });
+  const accepted = await client.claimDesktopHandoff(claimInput());
+
+  assert.equal(accepted.data.executorId, "executor_desktop_1");
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.deepEqual(requests[2], requests[0]);
 });
 
 test("shared lane orders authorization behind heartbeat work and cancellation releases it", async (t) => {

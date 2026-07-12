@@ -133,7 +133,8 @@ func TestManagerIssuesDeterministicTargetBoundTokens(t *testing.T) {
 	claimClaims, err := trustedtoken.Verify(claimed.ClaimToken, keys, issuedAt.Add(61*time.Second),
 		trustedtoken.AudienceClaim, trustedtoken.PurposeAuthorizationClaim)
 	if err != nil || claimClaims.HandoffID != created.HandoffID || claimClaims.ExpectedSessionRevision == nil ||
-		*claimClaims.ExpectedSessionRevision != 4 || claimed.SessionRevision != 4 {
+		*claimClaims.ExpectedSessionRevision != 4 || claimed.ExecutorID != "executor_desktop_1" ||
+		claimed.SessionRevision != 4 {
 		t.Fatalf("claim claims=%#v result=%#v err=%v", claimClaims, claimed, err)
 	}
 }

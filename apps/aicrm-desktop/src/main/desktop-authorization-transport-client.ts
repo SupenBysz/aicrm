@@ -79,6 +79,7 @@ export interface ClaimDesktopHandoffInput {
 
 export interface ClaimDesktopHandoffResponse {
   handoffId: string;
+  executorId: string;
   claimToken: string;
   expiresAt: string;
   sessionRevision: number;
@@ -626,12 +627,22 @@ function validateRegisteredIdentity(identity: DesktopDeviceIdentityProjection): 
 }
 
 function validateClaimResponse(value: unknown, handoffId: string): ClaimDesktopHandoffResponse {
-  if (!exactObject(value, ["handoffId", "claimToken", "expiresAt", "sessionRevision", "replayed"])) {
+  if (
+    !exactObject(value, [
+      "handoffId",
+      "executorId",
+      "claimToken",
+      "expiresAt",
+      "sessionRevision",
+      "replayed"
+    ])
+  ) {
     throw invalidResponse("Desktop 认领响应不是安全投影");
   }
   const response = value as unknown as ClaimDesktopHandoffResponse;
   if (
     response.handoffId !== handoffId ||
+    !isOpaque(response.executorId) ||
     !isTicket(response.claimToken) ||
     !canonicalServerTime(response.expiresAt) ||
     !isPositiveRevision(response.sessionRevision) ||

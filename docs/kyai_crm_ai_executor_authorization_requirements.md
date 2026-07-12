@@ -775,7 +775,7 @@ POST /api/v1/ai-executor-authorization-sessions/{sessionId}/desktop-commands/{op
 ```
 
 - Handoff 由有 authorize 权限的发起人以 `{deviceId, expectedSessionRevision}` 创建并强制 Idempotency-Key，作用域 `(actorId,sessionId,deviceId,key)`；返回 audience=`aicrm-desktop` 的 compact JWS `handoffTicket`、nonce、handoffId 和 120 秒有效期。相同 key/hash 返回同一 handoff 和由持久 claims 可确定性重建的同一 ticket；同 key 不同 hash 返回 409。Ticket 过期后同 key 仍返回原过期 handoff，必须用新 key 显式重建。
-- Claim 使用 `Authorization: AiCRM-Handoff <handoffTicket>` 加设备签名，body 为 `{handoffId, claimedAt}`；只允许成功一次，相同设备相同请求幂等，其他 claim 返回 409。成功返回只在内存展示一次的 5 分钟 `claimToken`。
+- Claim 使用 `Authorization: AiCRM-Handoff <handoffTicket>` 加设备签名，body 为 `{handoffId, claimedAt}`；只允许成功一次，相同设备相同请求幂等，其他 claim 返回 409。成功响应固定为 `{handoffId, executorId, claimToken, expiresAt, sessionRevision, replayed}`，其中 `executorId` 只能来自服务端已冻结并完成票据校验的 handoff/session 事实，不接受 Desktop 输入或推断；5 分钟 `claimToken` 只允许在受信 Desktop 内存及加密恢复 journal 中短暂保留。
 - Proof 使用 `Authorization: AiCRM-Claim <claimToken>` 加设备签名，body 固定为 `{handoffId, sessionRevision, loginIdHash, result, checkedAt, accountFingerprint, candidateBindingDigest}`；不得包含凭据、路径、URL或账号原文。
 - 成功 proof 在取得 executor operation lease 后返回 `{operationId, activationId, credentialRevision, leaseEpoch, sourceCredentialRevision, revocationEpoch, activationToken}`；ACK 后服务端才激活。
 - ACK 使用 `Authorization: AiCRM-Activation <activationToken>` 加设备签名，body 固定为 `{operationId, activationId, credentialRevision, leaseEpoch, sourceCredentialRevision, revocationEpoch, durableBarrierCompletedAt, bindingDigest}`，并执行 §20.2 fencing CAS。

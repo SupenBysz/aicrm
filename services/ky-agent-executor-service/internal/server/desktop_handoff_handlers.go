@@ -174,8 +174,9 @@ func (s *Server) claimDesktopHandoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeData(w, r, http.StatusOK, map[string]any{
-		"handoffId": result.HandoffID, "claimToken": result.ClaimToken,
-		"expiresAt": result.ExpiresAt, "sessionRevision": result.SessionRevision,
+		"handoffId": result.HandoffID, "executorId": result.ExecutorID,
+		"claimToken": result.ClaimToken,
+		"expiresAt":  result.ExpiresAt, "sessionRevision": result.SessionRevision,
 		"replayed": result.Replayed,
 	})
 }

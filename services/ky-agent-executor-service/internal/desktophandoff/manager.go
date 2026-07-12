@@ -117,6 +117,7 @@ type ClaimInput struct {
 
 type ClaimResult struct {
 	HandoffID       string
+	ExecutorID      string
 	ClaimToken      string
 	ExpiresAt       string
 	SessionRevision int64
@@ -136,7 +137,8 @@ func (m *Manager) Claim(ctx context.Context, input ClaimInput) (ClaimResult, err
 		return ClaimResult{}, err
 	}
 	return ClaimResult{
-		HandoffID: result.Handoff.ID, ClaimToken: result.ClaimToken,
+		HandoffID: result.Handoff.ID, ExecutorID: result.Handoff.ExecutorID,
+		ClaimToken:      result.ClaimToken,
 		ExpiresAt:       result.Handoff.ClaimExpiresAt.Time.UTC().Format(time.RFC3339Nano),
 		SessionRevision: result.SessionRevision, Replayed: result.Replayed,
 	}, nil

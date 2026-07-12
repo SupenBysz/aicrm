@@ -170,8 +170,9 @@ func TestCreateDesktopHandoffRejectsDuplicateHeadersAndProof(t *testing.T) {
 func TestClaimDesktopHandoffVerifiesDeviceOnlySignedRequest(t *testing.T) {
 	fixture := newDeviceHandlerFixture(t)
 	runtime := &fakeDesktopHandoffRuntime{claimResult: desktophandoff.ClaimResult{
-		HandoffID: "handoff_1", ClaimToken: "claim.header.payload",
-		ExpiresAt: "2026-07-13T01:05:00Z", SessionRevision: 4,
+		HandoffID: "handoff_1", ExecutorID: "executor_desktop_1",
+		ClaimToken: "claim.header.payload",
+		ExpiresAt:  "2026-07-13T01:05:00Z", SessionRevision: 4,
 	}}
 	control := &fakeDeviceControl{verificationKey: store.DeviceVerificationKey{
 		DeviceID: fixture.deviceID, PublicKey: fixture.publicKey, KeyGeneration: 2,
@@ -193,6 +194,7 @@ func TestClaimDesktopHandoffVerifiesDeviceOnlySignedRequest(t *testing.T) {
 		t.Fatalf("claim input=%#v", runtime.claimInput)
 	}
 	if !runtime.claimInput.ClaimedAt.Equal(mustParseDesktopHandoffTime(t, claimedAt)) ||
+		!strings.Contains(recorder.Body.String(), `"executorId":"executor_desktop_1"`) ||
 		!strings.Contains(recorder.Body.String(), `"claimToken":"claim.header.payload"`) ||
 		recorder.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("claim response=%s", recorder.Body.String())
@@ -216,7 +218,15 @@ func TestClaimDesktopHandoffRejectsOverridesAndAlteredBody(t *testing.T) {
 		t.Fatalf("override status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
-	request = signedDesktopHandoffClaimRequest(t, fixture, path, body, "handoff.header.payload", 9)
+	untrustedBody := fmt.Sprintf(`{"handoffId":"handoff_1","claimedAt":%q,"executorId":"executor_attacker"}`, time.Now().UTC().Format(time.RFC3339Nano))
+	request = signedDesktopHandoffClaimRequest(t, fixture, path, untrustedBody, "handoff.header.payload", 9)
+	recorder = httptest.NewRecorder()
+	server.buildMux().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || runtime.claimCalls != 0 {
+		t.Fatalf("untrusted executor status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	request = signedDesktopHandoffClaimRequest(t, fixture, path, body, "handoff.header.payload", 10)
 	alteredBody := fmt.Sprintf(`{"handoffId":"handoff_1","claimedAt":%q}`, time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano))
 	request.Body = io.NopCloser(strings.NewReader(alteredBody))
 	request.ContentLength = int64(len(alteredBody))
