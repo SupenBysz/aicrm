@@ -505,6 +505,12 @@ func (h *lockedCredentialHome) restore() error {
 	}
 	_ = unix.Close(oldHomeFD)
 	oldHomeFD = -1
+	// The exchanged backup still contains the control-plane-owned tree. The
+	// broker deliberately runs without CAP_DAC_OVERRIDE, so normalize every
+	// descendant before RemoveAll instead of relying on root bypass semantics.
+	if err := makeTreeRemovable(returnPath, h.server.brokerUID, h.server.brokerGID); err != nil {
+		return runtimeHomeError("old_home_normalize_failed")
+	}
 	if err := os.RemoveAll(returnPath); err != nil {
 		return runtimeHomeError("old_home_cleanup_failed")
 	}

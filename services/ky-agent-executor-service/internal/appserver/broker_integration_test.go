@@ -101,6 +101,35 @@ func TestInstalledBrokerLaunchesRealCodexOverStdioOnly(t *testing.T) {
 		t.Fatalf("runtime finalization failed: %v", err)
 	}
 	closed = true
+	verificationProcess, err := (appserver.BrokerLauncher{SocketPath: "/run/aicrm-agent-runtime.sock"}).Launch(ctx, operationID, staging)
+	if err != nil {
+		t.Fatalf("same operation id could not be reused for verification: %v", err)
+	}
+	verificationClient := appserver.NewClient(verificationProcess)
+	verificationClosed := false
+	defer func() {
+		if !verificationClosed {
+			_ = verificationClient.Close()
+		}
+	}()
+	if err := verificationClient.Initialize(ctx, "broker-verification-probe"); err != nil {
+		t.Fatal("verification App Server initialize failed")
+	}
+	if _, err := verificationClient.ReadAccount(ctx, false); err != nil {
+		t.Fatal("verification structured account/read failed")
+	}
+	verificationModels, err := verificationClient.ListModels(ctx)
+	if err != nil || len(verificationModels) == 0 {
+		t.Fatal("verification model/list failed")
+	}
+	if err := verificationClient.Close(); err != nil {
+		t.Fatalf("verification runtime finalization failed: %v", err)
+	}
+	verificationClosed = true
+	backups, err := filepath.Glob(filepath.Join(filepath.Dir(staging), ".broker-return-"+operationID))
+	if err != nil || len(backups) != 0 {
+		t.Fatal("broker left an exchanged credential backup behind")
+	}
 	if _, err := credentialfs.DigestTree(staging); err != nil {
 		t.Fatal("credential home was not restored safely")
 	}
