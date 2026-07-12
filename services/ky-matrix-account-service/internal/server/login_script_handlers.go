@@ -189,15 +189,13 @@ func (s *Server) updateLoginScriptStatus(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) activateLoginScriptVersion(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	item, err := s.store.ActivateLoginScriptVersion(r.Context(), wc.WorkspaceType, wc.WorkspaceID, r.PathValue("id"), r.PathValue("versionId"), wc.UserID)
-	if err != nil {
-		writeStoreError(w, r, err)
-		return
-	}
-	s.audit(r.Context(), r, wc, "matrix_account.login_script_version_activated", "matrix_account_login_script", r.PathValue("id"), map[string]any{
-		"version": item.Version,
-	})
-	writeData(w, r, item)
+	writeError(
+		w,
+		r,
+		http.StatusServiceUnavailable,
+		"contract_test_unavailable",
+		"可信契约测试与 revision CAS 尚未启用，当前不能激活候选脚本版本",
+	)
 }
 
 func normalizeLoginScriptResolveInput(in *store.LoginScriptResolveInput) {

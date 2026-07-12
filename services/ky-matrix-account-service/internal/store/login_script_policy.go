@@ -26,6 +26,15 @@ type executableLoginScriptStep struct {
 	Action string `json:"action"`
 }
 
+type loginScriptRunTarget struct {
+	scriptPurpose       string
+	scriptStatus        string
+	activeVersionID     string
+	targetVersionID     string
+	targetVersionStatus string
+	dsl                 json.RawMessage
+}
+
 func validateExecutableLoginScriptDSL(raw json.RawMessage, expectedPurpose string) error {
 	var dsl executableLoginScriptDSL
 	if err := json.Unmarshal(raw, &dsl); err != nil {
@@ -51,13 +60,17 @@ func validExecutableLoginScriptAction(action string) bool {
 	}
 }
 
-func validateLoginScriptRunPromotion(
+// validateLoginScriptRunRecord verifies that a reported successful run belongs
+// to the requested script/version and that the DSL is executable. Recording a
+// successful run never activates a candidate. v9 activation is a separate CAS
+// command and remains fail-closed until the matching contract revision has a
+// trusted successful contract-test result.
+func validateLoginScriptRunRecord(
 	ctx context.Context,
 	tx *sql.Tx,
 	workspaceType, workspaceID, scriptID, requestedVersionID, reportedPurpose string,
 ) error {
-	var scriptPurpose, scriptStatus, activeVersionID, targetVersionID, targetVersionStatus string
-	var dsl json.RawMessage
+	var target loginScriptRunTarget
 	err := tx.QueryRowContext(ctx, `
 		SELECT s.purpose,
 		       s.status,
@@ -72,12 +85,12 @@ func validateLoginScriptRunPromotion(
 		WHERE s.workspace_type=$1 AND s.workspace_id=$2 AND s.id=$3 AND s.deleted_at IS NULL
 		FOR UPDATE OF s
 	`, workspaceType, workspaceID, scriptID, requestedVersionID).Scan(
-		&scriptPurpose,
-		&scriptStatus,
-		&activeVersionID,
-		&targetVersionID,
-		&targetVersionStatus,
-		&dsl,
+		&target.scriptPurpose,
+		&target.scriptStatus,
+		&target.activeVersionID,
+		&target.targetVersionID,
+		&target.targetVersionStatus,
+		&target.dsl,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
@@ -85,20 +98,20 @@ func validateLoginScriptRunPromotion(
 	if err != nil {
 		return err
 	}
-	if scriptPurpose != reportedPurpose {
+	return validateLoginScriptRunTarget(target, reportedPurpose, time.Now())
+}
+
+func validateLoginScriptRunTarget(target loginScriptRunTarget, reportedPurpose string, now time.Time) error {
+	if target.scriptPurpose != reportedPurpose {
 		return ErrValidation
 	}
-	if targetVersionID == "" {
-		if requestedVersionID != "" {
-			return ErrValidation
-		}
+	if target.scriptStatus != "enabled" || target.targetVersionID == "" || target.activeVersionID != target.targetVersionID || target.targetVersionStatus != "active" {
+		return ErrValidation
+	}
+	if target.scriptPurpose == "account_detect" && isExactLegacyCredentialAdapter(target.targetVersionID, target.dsl, now) {
 		return nil
 	}
-	alreadyActive := scriptStatus == "enabled" && activeVersionID == targetVersionID && targetVersionStatus == "active"
-	if alreadyActive && scriptPurpose == "account_detect" && isExactLegacyCredentialAdapter(targetVersionID, dsl, time.Now()) {
-		return nil
-	}
-	return validateExecutableLoginScriptDSL(dsl, scriptPurpose)
+	return validateExecutableLoginScriptDSL(target.dsl, target.scriptPurpose)
 }
 
 // The legacy payload may remain executable only while it is already the

@@ -89,10 +89,12 @@ func (s *Store) RecordLoginScriptRun(ctx context.Context, workspaceType, workspa
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if scriptID != "" && status == "success" {
-		if err := validateLoginScriptRunPromotion(ctx, tx, workspaceType, workspaceID, scriptID, versionID, purpose); err != nil {
+	if scriptID != "" {
+		if err := validateLoginScriptRunRecord(ctx, tx, workspaceType, workspaceID, scriptID, versionID, purpose); err != nil {
 			return LoginScriptResolveResult{}, err
 		}
+	} else if versionID != "" {
+		return LoginScriptResolveResult{}, ErrValidation
 	}
 
 	_, err = tx.ExecContext(ctx, `
@@ -111,26 +113,10 @@ func (s *Store) RecordLoginScriptRun(ctx context.Context, workspaceType, workspa
 			if _, err = tx.ExecContext(ctx, `
 				UPDATE ky_matrix_account_login_script
 				SET success_count=success_count+1, consecutive_failure_count=0, last_success_at=now(),
-				    active_version_id=COALESCE(NULLIF($2,''), active_version_id), status='enabled', updated_by=$3, updated_at=now()
-				WHERE workspace_type=$4 AND workspace_id=$5 AND id=$1 AND deleted_at IS NULL
-			`, scriptID, versionID, actorUserID, workspaceType, workspaceID); err != nil {
+				    updated_by=$2, updated_at=now()
+				WHERE workspace_type=$3 AND workspace_id=$4 AND id=$1 AND deleted_at IS NULL
+			`, scriptID, actorUserID, workspaceType, workspaceID); err != nil {
 				return LoginScriptResolveResult{}, classifyWriteErr(err)
-			}
-			if versionID != "" {
-				if _, err = tx.ExecContext(ctx, `
-					UPDATE ky_matrix_account_login_script_version
-					SET status='archived'
-					WHERE script_id=$1 AND status='active' AND id<>$2
-				`, scriptID, versionID); err != nil {
-					return LoginScriptResolveResult{}, classifyWriteErr(err)
-				}
-				if _, err = tx.ExecContext(ctx, `
-					UPDATE ky_matrix_account_login_script_version
-					SET status='active'
-					WHERE script_id=$1 AND id=$2
-				`, scriptID, versionID); err != nil {
-					return LoginScriptResolveResult{}, classifyWriteErr(err)
-				}
 			}
 		} else {
 			if _, err = tx.ExecContext(ctx, `
@@ -148,15 +134,6 @@ func (s *Store) RecordLoginScriptRun(ctx context.Context, workspaceType, workspa
 				WHERE workspace_type=$4 AND workspace_id=$5 AND id=$1 AND deleted_at IS NULL
 			`, scriptID, firstNonEmpty(in.ErrorMessage, in.ErrorCode, status), actorUserID, workspaceType, workspaceID); err != nil {
 				return LoginScriptResolveResult{}, classifyWriteErr(err)
-			}
-			if versionID != "" {
-				if _, err = tx.ExecContext(ctx, `
-					UPDATE ky_matrix_account_login_script_version
-					SET status=CASE WHEN status='candidate' THEN 'failed' ELSE status END
-					WHERE script_id=$1 AND id=$2
-				`, scriptID, versionID); err != nil {
-					return LoginScriptResolveResult{}, classifyWriteErr(err)
-				}
 			}
 		}
 	}
@@ -419,20 +396,25 @@ func (s *Store) ListLoginScriptVersions(ctx context.Context, workspaceType, work
 func (s *Store) UpdateLoginScriptStatus(ctx context.Context, workspaceType, workspaceID, scriptID, status, actorUserID string) (LoginScript, error) {
 	if status == "enabled" {
 		var purpose string
+		var versionStatus string
 		var dsl json.RawMessage
 		err := s.db.QueryRowContext(ctx, `
-			SELECT s.purpose, v.dsl_json
+			SELECT s.purpose, v.status, v.dsl_json
 			FROM ky_matrix_account_login_script s
 			JOIN ky_matrix_account_login_script_version v ON v.id=s.active_version_id AND v.script_id=s.id
 			WHERE s.workspace_type=$1 AND s.workspace_id=$2 AND s.id=$3 AND s.deleted_at IS NULL
-		`, workspaceType, workspaceID, scriptID).Scan(&purpose, &dsl)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		`, workspaceType, workspaceID, scriptID).Scan(&purpose, &versionStatus, &dsl)
+		if errors.Is(err, sql.ErrNoRows) {
+			return LoginScript{}, ErrValidation
+		}
+		if err != nil {
 			return LoginScript{}, err
 		}
-		if err == nil {
-			if err := validateExecutableLoginScriptDSL(dsl, purpose); err != nil {
-				return LoginScript{}, err
-			}
+		if versionStatus != "active" {
+			return LoginScript{}, ErrValidation
+		}
+		if err := validateExecutableLoginScriptDSL(dsl, purpose); err != nil {
+			return LoginScript{}, err
 		}
 	}
 	res, err := s.db.ExecContext(ctx, `
@@ -447,57 +429,6 @@ func (s *Store) UpdateLoginScriptStatus(ctx context.Context, workspaceType, work
 		return LoginScript{}, err
 	}
 	return s.getLoginScript(ctx, workspaceType, workspaceID, scriptID)
-}
-
-func (s *Store) ActivateLoginScriptVersion(ctx context.Context, workspaceType, workspaceID, scriptID, versionID, actorUserID string) (LoginScriptVersion, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return LoginScriptVersion{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var purpose string
-	var dsl json.RawMessage
-	if err := tx.QueryRowContext(ctx, `
-		SELECT s.purpose, v.dsl_json
-		FROM ky_matrix_account_login_script s
-		JOIN ky_matrix_account_login_script_version v ON v.script_id=s.id
-		WHERE s.workspace_type=$1 AND s.workspace_id=$2 AND s.id=$3 AND v.id=$4 AND s.deleted_at IS NULL
-		LIMIT 1
-	`, workspaceType, workspaceID, scriptID, versionID).Scan(&purpose, &dsl); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return LoginScriptVersion{}, ErrNotFound
-		}
-		return LoginScriptVersion{}, err
-	}
-	if err := validateExecutableLoginScriptDSL(dsl, purpose); err != nil {
-		return LoginScriptVersion{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE ky_matrix_account_login_script_version
-		SET status='archived'
-		WHERE script_id=$1 AND status='active' AND id<>$2
-	`, scriptID, versionID); err != nil {
-		return LoginScriptVersion{}, classifyWriteErr(err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE ky_matrix_account_login_script_version
-		SET status='active'
-		WHERE script_id=$1 AND id=$2
-	`, scriptID, versionID); err != nil {
-		return LoginScriptVersion{}, classifyWriteErr(err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE ky_matrix_account_login_script
-		SET active_version_id=$3, status='enabled', updated_by=$4, updated_at=now()
-		WHERE workspace_type=$1 AND workspace_id=$2 AND id=$5 AND deleted_at IS NULL
-	`, workspaceType, workspaceID, versionID, actorUserID, scriptID); err != nil {
-		return LoginScriptVersion{}, classifyWriteErr(err)
-	}
-	if err := tx.Commit(); err != nil {
-		return LoginScriptVersion{}, err
-	}
-	return s.getLoginScriptVersion(ctx, scriptID, versionID)
 }
 
 func missingLoginScriptReason(purpose string) string {

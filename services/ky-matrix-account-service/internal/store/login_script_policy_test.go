@@ -69,3 +69,68 @@ func TestExactLegacyCredentialAdapterRequiresVersionHashAndDeadline(t *testing.T
 		t.Fatal("expected the expired adapter to be rejected")
 	}
 }
+
+func TestValidateLoginScriptRunTargetRequiresCurrentActiveVersion(t *testing.T) {
+	now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	safe := loginScriptRunTarget{
+		scriptPurpose:       "account_detect",
+		scriptStatus:        "enabled",
+		activeVersionID:     "version-active",
+		targetVersionID:     "version-active",
+		targetVersionStatus: "active",
+		dsl:                 json.RawMessage(`{"version":1,"purpose":"account_detect","steps":[{"action":"readText"}]}`),
+	}
+	if err := validateLoginScriptRunTarget(safe, "account_detect", now); err != nil {
+		t.Fatalf("active public adapter should be recordable: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*loginScriptRunTarget){
+		"candidate": func(target *loginScriptRunTarget) {
+			target.targetVersionID = "version-candidate"
+			target.targetVersionStatus = "candidate"
+		},
+		"disabled script": func(target *loginScriptRunTarget) {
+			target.scriptStatus = "disabled"
+		},
+		"purpose mismatch": func(target *loginScriptRunTarget) {
+			target.scriptPurpose = "session_check"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := safe
+			mutate(&target)
+			if err := validateLoginScriptRunTarget(target, "account_detect", now); err != ErrValidation {
+				t.Fatalf("expected ErrValidation, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateLoginScriptRunTargetAllowsOnlyExactActiveLegacySubstitute(t *testing.T) {
+	raw := json.RawMessage(`{
+		"purpose":"account_detect",
+		"steps":[
+			{"resultKey":"platformUid","storage":"cookie","key":"uid_tt","action":"readStorage"},
+			{"storage":"cookie","action":"readStorage","resultKey":"identityKey","key":"sessionid"},
+			{"key":"all","resultKey":"profileText","action":"readStorage","storage":"localStorage"}
+		],
+		"version":1
+	}`)
+	target := loginScriptRunTarget{
+		scriptPurpose:       "account_detect",
+		scriptStatus:        "enabled",
+		activeVersionID:     legacyDouyinAccountDetectVersionID,
+		targetVersionID:     legacyDouyinAccountDetectVersionID,
+		targetVersionStatus: "active",
+		dsl:                 raw,
+	}
+	before := time.Date(2026, 7, 12, 15, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+	if err := validateLoginScriptRunTarget(target, "account_detect", before); err != nil {
+		t.Fatalf("exact active legacy substitute should be recordable before expiry: %v", err)
+	}
+
+	target.targetVersionStatus = "candidate"
+	if err := validateLoginScriptRunTarget(target, "account_detect", before); err != ErrValidation {
+		t.Fatalf("legacy candidate must be rejected, got %v", err)
+	}
+}
