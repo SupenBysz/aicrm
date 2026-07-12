@@ -8,6 +8,9 @@
 > 关联文档：
 > - `docs/kyai_crm_multi_tenant_identity_requirements.md`
 > - `docs/kyai_crm_technical_selection.md`
+> - `docs/kyai_crm_v9_execution_architecture.md`（Post-Phase1 Matrix Account v9.1 覆盖扩展）
+
+> 覆盖说明：本文只锁定 Phase 1 历史基线。Matrix Account、可信 Desktop、AI Executor、Codex 授权和 AI 脚本维护的 Post-Phase1 实施，以 `docs/kyai_crm_v9_execution_architecture.md` 及其引用的 v9 锁定合同为准；本文中“第一阶段不包含 AI 执行器”等范围结论不适用于该 v9.1 扩展。
 
 ---
 
@@ -38,6 +41,8 @@ KyaiCRM 第一阶段架构需要支持：
 ---
 
 ## 3. 总体架构视图
+
+> 本节拓扑图是 Phase 1 身份与组织底座主干。Matrix Account、Agent Executor、可信 Desktop、App Server、SSE 与 NATS 扩展拓扑见 `docs/kyai_crm_v9_execution_architecture.md`。
 
 ```text
 浏览器 / 管理后台
@@ -215,7 +220,7 @@ ky-admin-host 启动
 
 后端按领域事实拆分服务，不按前端插件数量机械拆分。
 
-第一阶段推荐服务：
+以下是 Phase 1 推荐服务清单；Post-Phase1 的 Matrix Account 与 Agent Executor 服务扩展按 `docs/kyai_crm_v9_execution_architecture.md` 执行：
 
 ```text
 ky-auth-service
@@ -355,6 +360,8 @@ PATCH  /api/v1/ai-models/settings
 ```
 
 明确不包含：AI 员工、AI 执行器、AI 工作流、AI 协作、AI 人才市场。
+
+Post-Phase1 中，本服务仍只拥有 API Provider、API Model 与迁移期 legacy provider；不拥有 v9 Agent Executor、授权会话、凭据、任务或事件。历史 executor 数据迁移必须遵守 v9.1 单写者合同，禁止双写和跨服务私表读取。
 
 ---
 
@@ -693,6 +700,8 @@ enterprise_id，可选
 
 第一阶段可以同步写库，保留 NATS 作为事件总线能力。
 
+Post-Phase1 v9.1 中，数据库始终是真相源；NATS 只传递不含敏感正文的安全引用，并通过 transactional outbox 发布、幂等消费与 reconciler 收敛丢失或重复事件。NATS 不得代替状态表、任务表或事件表。
+
 推荐事件：
 
 ```text
@@ -708,11 +717,11 @@ ai.model.updated
 
 ---
 
-## 12. AI 配置架构
+## 12. AI 配置架构（Phase 1）
 
 ### 12.1 AI 配置边界
 
-AI 只做配置，不做业务执行。
+本节仅描述 Phase 1 的 `ky-ai-model-service` 配置边界：AI 只做配置，不做业务执行。Post-Phase1 的 Agent Executor 与异步脚本生成不归入本节，按 v9.1 扩展架构执行。
 
 保留：
 
@@ -776,6 +785,8 @@ plugins/ky-ai-configuration
 
 ### 13.3 systemd 服务
 
+以下为 Phase 1 服务清单；Matrix Account 与 Agent Executor 的原生 VM + systemd 扩展及内部网络边界见 v9.1 扩展架构。
+
 ```text
 ky-auth-service.service
 ky-org-service.service
@@ -829,7 +840,7 @@ Nginx 负责：
 
 ---
 
-## 15. 架构验收标准
+## 15. Phase 1 架构验收标准
 
 第一阶段架构验收应满足：
 
@@ -852,6 +863,10 @@ Nginx 负责：
 
 本文档是总体架构文档，后续细化文档包括：
 
+- `docs/kyai_crm_v9_execution_architecture.md`
+- `docs/kyai_crm_matrix_account_requirements.md`
+- `docs/kyai_crm_ai_executor_authorization_requirements.md`
+- `docs/matrix_account_ai_onboarding_contract.md`
 - `docs/kyai_crm_data_model.md`
 - `docs/kyai_crm_permission_matrix.md`
 - `docs/kyai_crm_admin_pages.md`

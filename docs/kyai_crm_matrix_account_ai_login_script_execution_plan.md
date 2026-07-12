@@ -1,9 +1,11 @@
 # AiCRM 矩阵账号 AI 登录脚本执行计划
 
-> 文档状态：已锁定 / v8 执行计划  
+> 文档状态：历史锁定 / v8 执行计划 / 已由 v9.1 取代
 > 锁定日期：2026-07-09  
 > 关联需求：`docs/kyai_crm_matrix_account_requirements.md` v8  
 > 适用范围：矩阵账号新增账号、Web 空间、Electron 受控浏览器、AI 执行代理、Codex app-server、xterm.js 终端投影、登录脚本契约、脚本版本与 token 统计、二维码刷新、AI 进展感知、扫码后账号识别、脚本版本展示与执行日志
+
+> 覆盖说明：本文保留为 v8 历史实施记录。Post-Phase1 v9.1 实施统一以 `docs/kyai_crm_v9_execution_architecture.md`、`docs/kyai_crm_matrix_account_requirements.md` v9、`docs/kyai_crm_ai_executor_authorization_requirements.md` 和 `docs/matrix_account_ai_onboarding_contract.md` 为准。本文中的 `codex --remote`、PTY/TUI、WebSocket、第二套 executor run 表及 API 模型兜底不得用于 v9.1 实现。
 
 ## 1. 锁定目标
 
