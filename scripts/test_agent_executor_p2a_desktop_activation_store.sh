@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Destructive P2A Desktop authorization proof/activation test on disposable PostgreSQL.
+# Destructive P2A Desktop authorization proof/activation/recovery test on disposable PostgreSQL.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -50,6 +50,7 @@ before_rollback="$(schema_fingerprint)"
 "${PSQL[@]}" -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
 BEGIN;
 \ir $ROOT_DIR/ops/db/048_agent_executor_desktop_activation.sql
+\ir $ROOT_DIR/ops/db/050_agent_executor_desktop_activation_recovery.sql
 ROLLBACK;
 SQL
 after_rollback="$(schema_fingerprint)"
@@ -61,6 +62,8 @@ after_rollback="$(schema_fingerprint)"
 "${PSQL[@]}" -X -d "$TEST_DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
 \ir $ROOT_DIR/ops/db/048_agent_executor_desktop_activation.sql
 \ir $ROOT_DIR/ops/db/048_agent_executor_desktop_activation.sql
+\ir $ROOT_DIR/ops/db/050_agent_executor_desktop_activation_recovery.sql
+\ir $ROOT_DIR/ops/db/050_agent_executor_desktop_activation_recovery.sql
 SQL
 
 "${PSQL[@]}" -X -d "$TEST_DB" -v ON_ERROR_STOP=1 \
@@ -97,6 +100,12 @@ assert_scalar \
   "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='ky_ai_executor_credential_activation_audit'" \
   "1" "activation immutable audit exists"
 assert_scalar \
+  "SELECT count(*) FROM pg_constraint WHERE conname IN ('ky_ai_exec_activation_audit_event_check','ky_ai_exec_activation_audit_sequence_check')" \
+  "2" "activation recovery terminal audit constraints exist once"
+assert_scalar \
+  "SELECT count(*) FROM pg_indexes WHERE indexname='ky_ai_exec_credential_activation_pending_recovery_idx'" \
+  "1" "pending activation recovery index exists once"
+assert_scalar \
   "SELECT count(*) FROM pg_trigger WHERE tgrelid='ky_ai_executor_credential_activation_audit'::regclass AND tgname='ky_ai_executor_credential_activation_audit_immutable_trg' AND NOT tgisinternal" \
   "1" "activation audit immutable trigger exists once"
 assert_scalar \
@@ -118,7 +127,7 @@ assert_scalar \
 CONTROL_URL="postgresql://${LOGIN_ROLE}:${LOGIN_PASSWORD}@127.0.0.1:5432/${TEST_DB}?sslmode=disable"
 (cd "$ROOT_DIR" && \
   KY_AGENT_EXECUTOR_DESKTOP_ACTIVATION_TEST_DATABASE_URL="$CONTROL_URL" \
-  go test -race -run '^TestDesktopAuthorizationProofAndActivationAgainstPostgres$' \
+  go test -race -run '^TestDesktop(AuthorizationProofAndActivation|CredentialActivationRecovery)AgainstPostgres$' \
   -v ./services/ky-agent-executor-service/internal/store)
 
-echo 'Agent Executor P2A Desktop authorization proof/activation contract passed'
+echo 'Agent Executor P2A Desktop authorization proof/activation/recovery contract passed'
