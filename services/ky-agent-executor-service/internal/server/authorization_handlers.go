@@ -366,6 +366,12 @@ func authorizationEventData(sessionID string, item store.AuthorizationEventProje
 			"sessionId": sessionID, "sequence": item.Sequence, "reason": "terminal",
 		}
 	}
+	var persisted struct {
+		Session store.AuthorizationSessionProjection `json:"session"`
+	}
+	if json.Unmarshal(item.SafePayload, &persisted) == nil && persisted.Session.ID == sessionID {
+		session = persisted.Session
+	}
 	return map[string]any{
 		"sessionId": sessionID, "sequence": item.Sequence,
 		"occurredAt": item.OccurredAt, "session": session,

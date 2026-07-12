@@ -1333,7 +1333,16 @@ func (s *ControlStore) RecordAuthorizationReopen(ctx context.Context, sessionID,
 }
 
 func insertSessionEvent(ctx context.Context, tx *sql.Tx, sessionID string, sequence int64, eventType string, payload map[string]any) error {
-	encoded, err := json.Marshal(payload)
+	session, err := scanAuthorizationSession(tx.QueryRowContext(ctx, authorizationSessionSelect+` WHERE id=$1`, sessionID))
+	if err != nil {
+		return err
+	}
+	safePayload := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		safePayload[key] = value
+	}
+	safePayload["session"] = session
+	encoded, err := json.Marshal(safePayload)
 	if err != nil {
 		return err
 	}

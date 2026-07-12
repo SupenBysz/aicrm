@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -170,6 +171,35 @@ func TestAuthorizationEventHistoryAndTerminalStreamFollowLockedContract(t *testi
 	if !strings.Contains(body, `"sessionId":"session_1"`) ||
 		!strings.Contains(body, `"sequence":3`) || !strings.Contains(body, `"reason":"terminal"`) {
 		t.Fatalf("closed envelope is invalid: %s", body)
+	}
+}
+
+func TestAuthorizationEventDataUsesPersistedSessionSnapshot(t *testing.T) {
+	current := store.AuthorizationSessionProjection{
+		ID: "session_1", Status: "cancelled", Sequence: 4, AccountSummary: []byte(`{}`),
+	}
+	event := store.AuthorizationEventProjection{
+		Sequence:   1,
+		EventType:  store.AuthorizationEventChanged,
+		OccurredAt: "2026-07-12T12:00:00Z",
+		SafePayload: []byte(`{
+			"change":"started",
+			"session":{"id":"session_1","status":"starting","sequence":1,"accountSummary":{}},
+			"userCode":"CANARY-SECRET"
+		}`),
+	}
+
+	data := authorizationEventData("session_1", event, current)
+	snapshot, ok := data["session"].(store.AuthorizationSessionProjection)
+	if !ok || snapshot.Status != "starting" || snapshot.Sequence != 1 {
+		t.Fatalf("event did not use its persisted snapshot: %#v", data["session"])
+	}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "CANARY-SECRET") {
+		t.Fatalf("event exposed unrelated persisted payload: %s", encoded)
 	}
 }
 
