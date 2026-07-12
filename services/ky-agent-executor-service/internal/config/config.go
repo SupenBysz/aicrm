@@ -19,21 +19,22 @@ const (
 )
 
 type Config struct {
-	HTTPAddr            string
-	RuntimeEnvFile      string
-	DatabaseURL         string
-	WriterDatabaseURL   string
-	InternalToken       string
-	AuthTokenSecret     string
-	MembershipURL       string
-	WriteEnabled        bool
-	CredentialRoot      string
-	CodexBinary         string
-	SystemdRunPath      string
-	OwnerInstanceID     string
-	CodexVersion        string
-	RuntimeBindingID    string
-	RuntimeBrokerSocket string
+	HTTPAddr              string
+	RuntimeEnvFile        string
+	DatabaseURL           string
+	WriterDatabaseURL     string
+	InternalToken         string
+	AuthTokenSecret       string
+	DeviceChallengeSecret string
+	MembershipURL         string
+	WriteEnabled          bool
+	CredentialRoot        string
+	CodexBinary           string
+	SystemdRunPath        string
+	OwnerInstanceID       string
+	CodexVersion          string
+	RuntimeBindingID      string
+	RuntimeBrokerSocket   string
 }
 
 func Load() Config {
@@ -77,21 +78,22 @@ func Load() Config {
 		runtimeBrokerSocket = "/run/aicrm-agent-runtime.sock"
 	}
 	return Config{
-		HTTPAddr:            addr,
-		RuntimeEnvFile:      runtimeEnvFile,
-		DatabaseURL:         strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
-		WriterDatabaseURL:   strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
-		InternalToken:       internalToken,
-		AuthTokenSecret:     strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
-		MembershipURL:       membershipURL,
-		WriteEnabled:        strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
-		CredentialRoot:      credentialRoot,
-		CodexBinary:         strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
-		SystemdRunPath:      strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
-		OwnerInstanceID:     ownerInstanceID,
-		CodexVersion:        codexVersion,
-		RuntimeBindingID:    runtimeBindingID,
-		RuntimeBrokerSocket: runtimeBrokerSocket,
+		HTTPAddr:              addr,
+		RuntimeEnvFile:        runtimeEnvFile,
+		DatabaseURL:           strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DATABASE_URL")),
+		WriterDatabaseURL:     strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITER_DATABASE_URL")),
+		InternalToken:         internalToken,
+		AuthTokenSecret:       strings.TrimSpace(os.Getenv("KY_AUTH_TOKEN_SECRET")),
+		DeviceChallengeSecret: strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET")),
+		MembershipURL:         membershipURL,
+		WriteEnabled:          strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true"),
+		CredentialRoot:        credentialRoot,
+		CodexBinary:           strings.TrimSpace(os.Getenv("KY_CODEX_BINARY")),
+		SystemdRunPath:        strings.TrimSpace(os.Getenv("KY_SYSTEMD_RUN_PATH")),
+		OwnerInstanceID:       ownerInstanceID,
+		CodexVersion:          codexVersion,
+		RuntimeBindingID:      runtimeBindingID,
+		RuntimeBrokerSocket:   runtimeBrokerSocket,
 	}
 }
 
@@ -116,20 +118,27 @@ func (c Config) validateControlPlane() error {
 		return nil
 	}
 	for name, value := range map[string]string{
-		"KY_AGENT_EXECUTOR_DATABASE_URL":          c.DatabaseURL,
-		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL":   c.WriterDatabaseURL,
-		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":        c.InternalToken,
-		"KY_AUTH_TOKEN_SECRET":                    c.AuthTokenSecret,
-		"KY_MEMBERSHIP_SERVICE_URL":               c.MembershipURL,
-		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":       c.CredentialRoot,
-		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":     c.OwnerInstanceID,
-		"KY_CODEX_VERSION":                        c.CodexVersion,
-		"KY_AGENT_EXECUTOR_RUNTIME_BINDING_ID":    c.RuntimeBindingID,
-		"KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET": c.RuntimeBrokerSocket,
+		"KY_AGENT_EXECUTOR_DATABASE_URL":            c.DatabaseURL,
+		"KY_AGENT_EXECUTOR_WRITER_DATABASE_URL":     c.WriterDatabaseURL,
+		"KY_AGENT_EXECUTOR_INTERNAL_TOKEN":          c.InternalToken,
+		"KY_AUTH_TOKEN_SECRET":                      c.AuthTokenSecret,
+		"KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET": c.DeviceChallengeSecret,
+		"KY_MEMBERSHIP_SERVICE_URL":                 c.MembershipURL,
+		"KY_AGENT_EXECUTOR_CREDENTIAL_ROOT":         c.CredentialRoot,
+		"KY_AGENT_EXECUTOR_OWNER_INSTANCE_ID":       c.OwnerInstanceID,
+		"KY_CODEX_VERSION":                          c.CodexVersion,
+		"KY_AGENT_EXECUTOR_RUNTIME_BINDING_ID":      c.RuntimeBindingID,
+		"KY_AGENT_EXECUTOR_RUNTIME_BROKER_SOCKET":   c.RuntimeBrokerSocket,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return errors.New(name + " is required when Agent Executor writes are enabled")
 		}
+	}
+	if len(c.DeviceChallengeSecret) < 32 {
+		return errors.New("KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET must be at least 32 bytes")
+	}
+	if c.DeviceChallengeSecret == c.AuthTokenSecret || c.DeviceChallengeSecret == c.InternalToken {
+		return errors.New("KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET must be independent")
 	}
 	if c.DatabaseURL != "" && c.DatabaseURL == c.WriterDatabaseURL {
 		return errors.New("reader and writer database URLs must use distinct roles")

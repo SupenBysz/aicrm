@@ -204,6 +204,30 @@ func TestVerifyRequestVector(t *testing.T) {
 	}
 }
 
+func TestPersistentLedgerVerificationDefersOnlyClockWindow(t *testing.T) {
+	input := vectorVerifyInput()
+	input.Now = time.UnixMilli(vectorTimestamp).Add(ClockWindow + time.Hour)
+	if _, err := VerifyRequest(input); !errors.Is(err, ErrTimestampOutsideWindow) {
+		t.Fatalf("ordinary verification accepted expired timestamp: %v", err)
+	}
+	verified, err := VerifyRequestForPersistentLedger(input)
+	if err != nil || verified.RequestHash != vectorRequestHash {
+		t.Fatalf("ledger verification=%#v err=%v", verified, err)
+	}
+
+	tampered := input
+	tampered.Body = []byte(`{"handoffId":"tampered"}`)
+	if _, err := VerifyRequestForPersistentLedger(tampered); !errors.Is(err, ErrBodyHashMismatch) {
+		t.Fatalf("ledger verification accepted body tampering: %v", err)
+	}
+	tampered = input
+	tampered.Headers = input.Headers.Clone()
+	tampered.Headers.Set(HeaderSignature, strings.Repeat("A", 86))
+	if _, err := VerifyRequestForPersistentLedger(tampered); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("ledger verification accepted signature tampering: %v", err)
+	}
+}
+
 func TestVerifyRequestFailsClosedForTamperingAndClockSkew(t *testing.T) {
 	tests := []struct {
 		name   string

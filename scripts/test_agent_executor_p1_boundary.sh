@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_DIR="$ROOT_DIR/services/ky-agent-executor-service"
 UNIT="$ROOT_DIR/ops/native/ky-agent-executor-service.service"
 ROLES="$ROOT_DIR/ops/db/roles/ky_agent_executor_p1_roles.sql"
+SERVICE_ENV_EXAMPLE="$ROOT_DIR/ops/native/ky-agent-executor-service.env.example"
 
 fail() {
   echo "Agent Executor P1 boundary test failed: $1" >&2
@@ -21,8 +22,11 @@ grep -q '^KillMode=control-group$' "$UNIT" || fail "process-group stop contract 
 grep -q "stat -c '%U:%G:%a'" "$ROOT_DIR/scripts/deploy_services.sh" || fail "dedicated config ownership check missing"
 grep -q 'root:ky-agent-executor:640' "$ROOT_DIR/scripts/deploy_services.sh" || fail "dedicated config mode check missing"
 
-if grep -qi 'agent.executor\|agent-executor\|18087' "$ROOT_DIR/ops/native/ky-admin-host.nginx.conf"; then
-  fail "P1 service was added to public Nginx routing"
+grep -Eq 'proxy_pass[[:space:]]+http://127\.0\.0\.1:18087;[[:space:]]*$' \
+  "$ROOT_DIR/ops/native/ky-admin-host.nginx.conf" || fail "Agent Executor loopback gateway target is missing"
+if grep -n '18087' "$ROOT_DIR/ops/native/ky-admin-host.nginx.conf" \
+  | grep -Ev 'proxy_pass[[:space:]]+http://127\.0\.0\.1:18087;[[:space:]]*$'; then
+  fail "Agent Executor gateway target is not the fixed loopback service"
 fi
 
 grep -q 'CREATE ROLE ky_agent_executor_reader NOLOGIN' "$ROLES" || fail "reader NOLOGIN group missing"
@@ -59,9 +63,14 @@ fi
 grep -q 'if s.cfg.WriteEnabled {' "$SERVICE_DIR/internal/server/server.go" || fail "P2A control store is not feature-gated"
 grep -q 'strings.EqualFold(strings.TrimSpace(os.Getenv("KY_AGENT_EXECUTOR_WRITE_ENABLED")), "true")' \
   "$SERVICE_DIR/internal/config/config.go" || fail "control writes are not explicit opt-in"
-if grep -q '^KY_AGENT_EXECUTOR_WRITE_ENABLED=true$' "$ROOT_DIR/ops/native/ky-agent-executor-service.env.example"; then
+if grep -q '^KY_AGENT_EXECUTOR_WRITE_ENABLED=true$' "$SERVICE_ENV_EXAMPLE"; then
   fail "P1 deployment example enables control writes"
 fi
+grep -q '^# KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET=' "$SERVICE_ENV_EXAMPLE" || fail "device challenge secret placeholder missing"
+grep -q 'KY_AGENT_EXECUTOR_DEVICE_CHALLENGE_SECRET' "$SERVICE_DIR/internal/config/config.go" || fail "device challenge secret config missing"
+grep -q 'len(c.DeviceChallengeSecret) < 32' "$SERVICE_DIR/internal/config/config.go" || fail "device challenge secret minimum length missing"
+grep -q 'c.DeviceChallengeSecret == c.AuthTokenSecret' "$SERVICE_DIR/internal/config/config.go" || fail "device/auth secret independence check missing"
+grep -q 'c.DeviceChallengeSecret == c.InternalToken' "$SERVICE_DIR/internal/config/config.go" || fail "device/internal secret independence check missing"
 
 grep -q 'ky-agent-executor-service' "$ROOT_DIR/go.work" || fail "go.work integration missing"
 grep -q 'ky-agent-executor-service' "$ROOT_DIR/scripts/build_services.sh" || fail "build integration missing"

@@ -293,6 +293,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/ai-executor-tasks/{taskId}/terminal-stream", s.public([]string{"platform.ai_executor_tasks.view"}, nil, s.streamPublicTaskTerminal))
 	mux.HandleFunc("POST /api/v1/ai-executor-tasks/{taskId}/cancel", s.public([]string{"platform.ai_executor_tasks.cancel"}, nil, s.cancelPublicTask))
 	s.registerControlTaskRoutes(mux)
+	s.registerDeviceRoutes(mux)
 
 	return mux
 }
@@ -399,7 +400,8 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	databaseReady := s.reader != nil && s.reader.Ping(r.Context()) == nil
 	internalTokenConfigured := s.cfg.InternalToken != ""
-	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil && s.cfg.AuthTokenSecret != "")
+	controlReady := !s.cfg.WriteEnabled || (s.control != nil && s.control.Ping(r.Context()) == nil && s.authorizer != nil &&
+		s.cfg.AuthTokenSecret != "" && validDeviceChallengeSecret(s.cfg.DeviceChallengeSecret, s.cfg.AuthTokenSecret, s.cfg.InternalToken))
 	status := "ok"
 	httpStatus := http.StatusOK
 	if !databaseReady || !internalTokenConfigured || !controlReady {

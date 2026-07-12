@@ -257,6 +257,20 @@ func RequestHash(signingInput []byte) string {
 }
 
 func VerifyRequest(input VerifyInput) (VerifiedRequest, error) {
+	return verifyRequest(input, true)
+}
+
+// VerifyRequestForPersistentLedger verifies the exact request bytes, headers,
+// authorization token hash, public-key binding, and Ed25519 signature while
+// deliberately deferring only the clock-window decision. Callers must pass the
+// result directly to a store transaction that checks an exact persisted ledger
+// replay first and validates the timestamp against database time for every new
+// request. It must never be used as a standalone authorization decision.
+func VerifyRequestForPersistentLedger(input VerifyInput) (VerifiedRequest, error) {
+	return verifyRequest(input, false)
+}
+
+func verifyRequest(input VerifyInput, validateTimestamp bool) (VerifiedRequest, error) {
 	publicKey, err := ParsePublicKey(input.PublicKey)
 	if err != nil {
 		return VerifiedRequest{}, err
@@ -288,8 +302,10 @@ func VerifyRequest(input VerifyInput) (VerifiedRequest, error) {
 	if err != nil {
 		return VerifiedRequest{}, err
 	}
-	if err := ValidateTimestamp(proof.TimestampMilli, input.Now); err != nil {
-		return VerifiedRequest{}, err
+	if validateTimestamp {
+		if err := ValidateTimestamp(proof.TimestampMilli, input.Now); err != nil {
+			return VerifiedRequest{}, err
+		}
 	}
 	signingInput, err := SigningInput(method, path, proof, authorizationHash)
 	if err != nil {

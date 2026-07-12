@@ -81,6 +81,8 @@ type RegisterDeviceInput struct {
 	WorkspaceID     string
 	PublicKey       string
 	ChallengeHash   string
+	DeviceLabel     string
+	AppVersion      string
 	Proof           deviceauth.VerifiedRequest
 	LedgerExpiresAt time.Time
 }
@@ -246,7 +248,8 @@ func (s *ControlStore) CreateDeviceRegistrationChallenge(
 func (s *ControlStore) RegisterDevice(ctx context.Context, input RegisterDeviceInput) (RegisterDeviceResult, error) {
 	publicKey, err := deviceauth.ParsePublicKey(input.PublicKey)
 	if err != nil || !validOpaqueValue(input.ChallengeID) || !validActorWorkspace(input.ActorID, input.WorkspaceType, input.WorkspaceID) ||
-		validateStoreDigest(input.ChallengeHash, false) != nil {
+		validateStoreDigest(input.ChallengeHash, false) != nil || !validDeviceLabel(input.DeviceLabel) ||
+		!validOptionalAppVersion(input.AppVersion) {
 		return RegisterDeviceResult{}, ErrDeviceStoreInputInvalid
 	}
 	deviceID, err := deviceauth.DeviceID(publicKey)
@@ -267,7 +270,9 @@ func (s *ControlStore) RegisterDevice(ctx context.Context, input RegisterDeviceI
 	if err != nil {
 		return RegisterDeviceResult{}, err
 	}
-	if result, handled, err := replayRegisteredDevice(ctx, tx, ledgerRequest, deviceID); handled || err != nil {
+	if result, handled, err := replayRegisteredDevice(
+		ctx, tx, ledgerRequest, deviceID, input.ActorID, input.WorkspaceType, input.WorkspaceID,
+	); handled || err != nil {
 		if err != nil {
 			return RegisterDeviceResult{}, err
 		}
@@ -288,7 +293,9 @@ func (s *ControlStore) RegisterDevice(ctx context.Context, input RegisterDeviceI
 	// A concurrent first registration can commit while the fast replay lookup
 	// is waiting for the challenge/device lock. Recheck the exact ledger row
 	// before any clock, expiry, consumed-state, or device-status decision.
-	if result, handled, err := replayRegisteredDevice(ctx, tx, ledgerRequest, deviceID); handled || err != nil {
+	if result, handled, err := replayRegisteredDevice(
+		ctx, tx, ledgerRequest, deviceID, input.ActorID, input.WorkspaceType, input.WorkspaceID,
+	); handled || err != nil {
 		if err != nil {
 			return RegisterDeviceResult{}, err
 		}
@@ -311,7 +318,9 @@ func (s *ControlStore) RegisterDevice(ctx context.Context, input RegisterDeviceI
 		challenge.Projection.WorkspaceType != input.WorkspaceType ||
 		challenge.Projection.WorkspaceID != input.WorkspaceID ||
 		challenge.Projection.PublicKeyDigest != deviceID ||
-		challenge.ChallengeHash != input.ChallengeHash {
+		challenge.ChallengeHash != input.ChallengeHash ||
+		challenge.Projection.DeviceLabel != input.DeviceLabel ||
+		challenge.Projection.AppVersion != input.AppVersion {
 		return RegisterDeviceResult{}, ErrDeviceChallengeMismatch
 	}
 	if challenge.ConsumedAt.Valid {
@@ -679,6 +688,9 @@ func replayRegisteredDevice(
 	tx *sql.Tx,
 	request deviceauth.LedgerRequest,
 	deviceID string,
+	actorID string,
+	workspaceType string,
+	workspaceID string,
 ) (RegisterDeviceResult, bool, error) {
 	existing, err := loadExactDeviceLedger(ctx, tx, request)
 	if err != nil || existing == nil {
@@ -697,6 +709,10 @@ func replayRegisteredDevice(
 	}
 	if !exists {
 		return RegisterDeviceResult{}, true, deviceauth.ErrInvalidLedgerState
+	}
+	if device.Projection.RegisteredBy != actorID || device.Projection.WorkspaceType != workspaceType ||
+		device.Projection.WorkspaceID != workspaceID {
+		return RegisterDeviceResult{}, true, ErrDeviceChallengeMismatch
 	}
 	return RegisterDeviceResult{
 		Device: device.Projection, ResponseReference: decision.ResponseReference, Replayed: true,

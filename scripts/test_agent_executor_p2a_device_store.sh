@@ -8,6 +8,7 @@ RUN_ID="$(date +%s)_$$"
 TEST_DB="aicrm_agent_device_${RUN_ID}"
 LOGIN_ROLE="ky_agent_device_test_${RUN_ID}"
 LOGIN_PASSWORD="DeviceTest${RUN_ID}Only"
+MINIMAL_WORK_DIR=""
 
 PSQL=(psql)
 if [[ "$(id -un)" != "postgres" ]]; then
@@ -15,6 +16,9 @@ if [[ "$(id -un)" != "postgres" ]]; then
 fi
 
 cleanup() {
+	if [[ -n "$MINIMAL_WORK_DIR" ]]; then
+		rm -rf "$MINIMAL_WORK_DIR"
+	fi
   "${PSQL[@]}" -X -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -v db_name="$TEST_DB" >/dev/null <<'SQL' || true
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity
 WHERE datname=:'db_name' AND pid<>pg_backend_pid();
@@ -63,8 +67,16 @@ assert_scalar "SELECT has_table_privilege('ky_agent_executor_writer','ky_ai_exec
 assert_scalar "SELECT has_table_privilege('ky_agent_executor_writer','ky_user','SELECT')::int" "0" "writer cannot read identity tables"
 
 CONTROL_URL="postgresql://${LOGIN_ROLE}:${LOGIN_PASSWORD}@127.0.0.1:5432/${TEST_DB}?sslmode=disable"
+MINIMAL_WORK_DIR="$(mktemp -d /tmp/aicrm-device-go-work.XXXXXX)"
+(cd "$MINIMAL_WORK_DIR" && GOWORK=off go work init \
+  "$ROOT_DIR/services/ky-agent-executor-service" "$ROOT_DIR/shared")
 (cd "$ROOT_DIR/services/ky-agent-executor-service" && \
   GOWORK=off GOFLAGS=-mod=readonly KY_AGENT_EXECUTOR_DEVICE_TEST_DATABASE_URL="$CONTROL_URL" \
   go test -race -run '^TestControlDeviceStoreAgainstPostgres$' -v ./internal/store)
+
+(cd "$ROOT_DIR/services/ky-agent-executor-service" && \
+  GOWORK="$MINIMAL_WORK_DIR/go.work" GOFLAGS=-mod=readonly \
+  KY_AGENT_EXECUTOR_DEVICE_HTTP_TEST_DATABASE_URL="$CONTROL_URL" \
+  go test -race -run '^TestDeviceHTTPAgainstPostgres$' -v ./internal/server)
 
 echo 'Agent Executor P2A Desktop device store contract passed'

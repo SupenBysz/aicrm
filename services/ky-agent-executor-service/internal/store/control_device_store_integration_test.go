@@ -110,6 +110,24 @@ func TestControlDeviceStoreAgainstPostgres(t *testing.T) {
 	if consumedCount != 1 || deviceCount != 1 || registrationLedgerCount != 1 {
 		t.Fatalf("registration atomicity consumed=%d device=%d ledger=%d", consumedCount, deviceCount, registrationLedgerCount)
 	}
+	var sensitiveLeakCount int
+	if err := control.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM (
+		 SELECT concat_ws('|',id,public_key_digest,actor_id,workspace_type,workspace_id,
+		                      challenge_hash,request_hash,idempotency_key_hash,device_label,app_version) AS payload
+		 FROM ky_ai_executor_device_registration_challenge WHERE id=$1
+		 UNION ALL
+		 SELECT concat_ws('|',device_id,key_generation,sequence,nonce,request_hash,
+		                      authorization_token_hash,response_reference)
+		 FROM ky_ai_executor_device_request_ledger WHERE device_id=$2
+		) rows
+		WHERE payload LIKE '%' || $3 || '%' OR payload LIKE '%' || $4 || '%'
+	`, challengeInput.ID, first.deviceID, "register-"+suffix, "registration-token").Scan(&sensitiveLeakCount); err != nil {
+		t.Fatal(err)
+	}
+	if sensitiveLeakCount != 0 {
+		t.Fatalf("device trust persistence leaked challenge/token canaries: %d", sensitiveLeakCount)
+	}
 	if _, err := control.db.ExecContext(ctx, `
 		UPDATE ky_ai_executor_device_registration_challenge
 		SET expires_at=transaction_timestamp()-interval '1 second'
@@ -119,6 +137,11 @@ func TestControlDeviceStoreAgainstPostgres(t *testing.T) {
 	}
 	if replay, err := control.RegisterDevice(ctx, registerInput); err != nil || !replay.Replayed || replay.ResponseReference != first.deviceID {
 		t.Fatalf("registration exact replay after challenge expiry=%#v err=%v", replay, err)
+	}
+	crossActorReplay := registerInput
+	crossActorReplay.ActorID = "other_device_owner"
+	if _, err := control.RegisterDevice(ctx, crossActorReplay); !errors.Is(err, ErrDeviceChallengeMismatch) {
+		t.Fatalf("registration replay crossed actor boundary: %v", err)
 	}
 
 	changedRegistration := registerInput
@@ -394,7 +417,8 @@ func prepareDeviceRegistration(
 	return challengeInput, RegisterDeviceInput{
 		ChallengeID: challengeID, ActorID: actorID,
 		WorkspaceType: "platform", WorkspaceID: "platform_root",
-		PublicKey: fixture.publicKey, ChallengeHash: challengeHash, Proof: proof,
+		PublicKey: fixture.publicKey, ChallengeHash: challengeHash,
+		DeviceLabel: challengeInput.DeviceLabel, AppVersion: challengeInput.AppVersion, Proof: proof,
 		LedgerExpiresAt: time.Now().Add(DeviceLedgerAuditRetention + time.Hour),
 	}
 }
