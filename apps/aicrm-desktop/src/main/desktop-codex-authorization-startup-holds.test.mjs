@@ -25,7 +25,7 @@ function command(overrides = {}) {
     semanticKey: "1".repeat(64),
     tokenHash: "2".repeat(64),
     payloadHash: "3".repeat(64),
-    effectRecoveryReference: "4".repeat(64),
+    effectRecoveryReference: null,
     sessionId: "session_1",
     executorId: "executor_1",
     deviceId: DEVICE_ID,
@@ -50,7 +50,8 @@ test("every durable cancel status blocks resume until exact containment releases
       status,
       sessionId: `session_${index + 1}`,
       operationId: `operation_${index + 1}`,
-      semanticKey: (index + 1).toString(16).repeat(64)
+      semanticKey: (index + 1).toString(16).repeat(64),
+      effectRecoveryReference: status === "accepted" ? null : "4".repeat(64)
     });
     const capability = registry.installFromDurableCommand(input);
     assert.equal(registry.installFromDurableCommand(input), capability);
@@ -58,16 +59,11 @@ test("every durable cancel status blocks resume until exact containment releases
       version: 1,
       state: "pending",
       journalStatus: status,
-      semanticKey: input.semanticKey,
-      tokenHash: input.tokenHash,
-      payloadHash: input.payloadHash,
-      effectRecoveryReference: input.effectRecoveryReference,
       sessionId: input.sessionId,
       executorId: input.executorId,
       deviceId: input.deviceId,
       operationId: input.operationId,
-      expectedSessionRevision: input.expectedSessionRevision,
-      containmentEvidenceHash: null
+      expectedSessionRevision: input.expectedSessionRevision
     });
     expectCode("desktop_codex_authorization_startup_hold_resume_blocked", () =>
       registry.assertResumeAllowed({ sessionId: input.sessionId })
@@ -78,15 +74,13 @@ test("every durable cancel status blocks resume until exact containment releases
     );
     const contained = registry.markContained(capability, EVIDENCE_HASH);
     assert.equal(contained.state, "contained");
-    assert.equal(contained.containmentEvidenceHash, EVIDENCE_HASH);
-    assert.equal(
-      registry.markContained(capability, EVIDENCE_HASH).containmentEvidenceHash,
-      EVIDENCE_HASH
-    );
+    assert.equal(registry.markContained(capability, EVIDENCE_HASH).state, "contained");
     registry.release(capability);
     registry.release(capability);
     assert.equal(registry.find(input.sessionId), null);
     registry.assertResumeAllowed({ sessionId: input.sessionId });
+    assert.equal(registry.installFromDurableCommand(input), capability);
+    assert.equal(registry.find(input.sessionId), null);
   }
 });
 
@@ -97,7 +91,7 @@ test("one session and one semantic command can own only one exact hold", () => {
   for (const conflicting of [
     command({ operationId: "operation_2", semanticKey: "5".repeat(64) }),
     command({ sessionId: "session_2" }),
-    command({ status: "effect_started" })
+    command({ status: "effect_started", effectRecoveryReference: "4".repeat(64) })
   ]) {
     expectCode("desktop_codex_authorization_startup_hold_conflict", () =>
       registry.installFromDurableCommand(conflicting)
@@ -113,7 +107,8 @@ test("reopen and malformed cancel projections never install a hold", () => {
     command({ purpose: "authorization_reopen" }),
     command({ status: "unknown" }),
     command({ deviceId: "device_unsafe" }),
-    command({ effectRecoveryReference: null }),
+    command({ effectRecoveryReference: "4".repeat(64) }),
+    command({ status: "effect_started", effectRecoveryReference: null }),
     command({ expectedSessionRevision: 0 }),
     { ...command(), extra: true },
     { ...command(), [Symbol("secret")]: "ticket-canary" },
@@ -196,6 +191,26 @@ test("hostile descriptors are captured once without getters, traps, or secret le
   assert.equal(rawReads, 0);
   const projection = registry.find("session_1");
   assert.equal(projection?.deviceId, DEVICE_ID);
+  assert.deepEqual(capability, { version: 1 });
+  assert.deepEqual(Object.keys(projection).sort(), [
+    "deviceId",
+    "executorId",
+    "expectedSessionRevision",
+    "journalStatus",
+    "operationId",
+    "sessionId",
+    "state",
+    "version"
+  ]);
+  for (const hidden of [
+    "semanticKey",
+    "tokenHash",
+    "payloadHash",
+    "effectRecoveryReference",
+    "containmentEvidenceHash"
+  ]) {
+    assert.equal(Object.hasOwn(projection, hidden), false);
+  }
   assert.equal(JSON.stringify({ capability, projection }).includes(canary), false);
 });
 

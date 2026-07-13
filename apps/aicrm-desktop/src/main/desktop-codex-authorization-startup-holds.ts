@@ -44,7 +44,7 @@ export interface DesktopCodexAuthorizationDurableCancelHoldInput {
   semanticKey: string;
   tokenHash: string;
   payloadHash: string;
-  effectRecoveryReference: string;
+  effectRecoveryReference: string | null;
   sessionId: string;
   executorId: string;
   deviceId: string;
@@ -54,24 +54,17 @@ export interface DesktopCodexAuthorizationDurableCancelHoldInput {
 
 export interface DesktopCodexAuthorizationStartupHoldCapability {
   readonly version: 1;
-  readonly sessionId: string;
-  readonly semanticKey: string;
 }
 
 export interface DesktopCodexAuthorizationStartupHoldProjection {
   version: 1;
   state: DesktopCodexAuthorizationStartupHoldState;
   journalStatus: DesktopCodexAuthorizationDurableCancelHoldInput["status"];
-  semanticKey: string;
-  tokenHash: string;
-  payloadHash: string;
-  effectRecoveryReference: string;
   sessionId: string;
   executorId: string;
   deviceId: string;
   operationId: string;
   expectedSessionRevision: number;
-  containmentEvidenceHash: string | null;
 }
 
 export type DesktopCodexAuthorizationStartupHoldErrorCode =
@@ -116,8 +109,7 @@ export class DesktopCodexAuthorizationStartupHoldRegistry {
     const semanticHold = this.bySemanticKey.get(command.semanticKey);
     if (sessionHold || semanticHold) {
       if (sessionHold && semanticHold === sessionHold &&
-          sameDurableCancel(sessionHold.command, command) &&
-          sessionHold.state !== "released") {
+          sameDurableCancel(sessionHold.command, command)) {
         return sessionHold.capability;
       }
       throw holdError(
@@ -127,9 +119,7 @@ export class DesktopCodexAuthorizationStartupHoldRegistry {
     }
 
     const capability = Object.freeze({
-      version: 1 as const,
-      sessionId: command.sessionId,
-      semanticKey: command.semanticKey
+      version: 1 as const
     });
     const hold: InternalHold = {
       command,
@@ -188,8 +178,6 @@ export class DesktopCodexAuthorizationStartupHoldRegistry {
       throw invalidStateError();
     }
     hold.state = "released";
-    this.bySession.delete(hold.command.sessionId);
-    this.bySemanticKey.delete(hold.command.semanticKey);
   }
 
   assertResumeAllowed(input: Readonly<{ sessionId: string }>): void {
@@ -225,7 +213,10 @@ function validateDurableCancel(
       typeof captured.status !== "string" ||
       !DURABLE_CANCEL_STATUSES.has(captured.status) ||
       !digest(captured.semanticKey) || !digest(captured.tokenHash) ||
-      !digest(captured.payloadHash) || !digest(captured.effectRecoveryReference) ||
+      !digest(captured.payloadHash) || !validEffectRecoveryReference(
+        captured.status,
+        captured.effectRecoveryReference
+      ) ||
       !safeId(captured.sessionId) || !safeId(captured.executorId) ||
       typeof captured.deviceId !== "string" || !DEVICE_ID.test(captured.deviceId) ||
       !safeId(captured.operationId) ||
@@ -255,16 +246,11 @@ function projectHold(
     version: 1,
     state: hold.state,
     journalStatus: hold.command.status,
-    semanticKey: hold.command.semanticKey,
-    tokenHash: hold.command.tokenHash,
-    payloadHash: hold.command.payloadHash,
-    effectRecoveryReference: hold.command.effectRecoveryReference,
     sessionId: hold.command.sessionId,
     executorId: hold.command.executorId,
     deviceId: hold.command.deviceId,
     operationId: hold.command.operationId,
-    expectedSessionRevision: hold.command.expectedSessionRevision,
-    containmentEvidenceHash: hold.containmentEvidenceHash
+    expectedSessionRevision: hold.command.expectedSessionRevision
   });
 }
 
@@ -303,6 +289,10 @@ function safeId(value: unknown): value is string {
 
 function digest(value: unknown): value is string {
   return typeof value === "string" && DIGEST.test(value);
+}
+
+function validEffectRecoveryReference(status: unknown, value: unknown): boolean {
+  return status === "accepted" ? value === null : digest(value);
 }
 
 function positiveSafeInteger(value: unknown): value is number {
