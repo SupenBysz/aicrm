@@ -789,7 +789,13 @@ export class DesktopCodexAuthorizationOrchestrator {
         before.snapshot
       );
     }
-    this.commitTrustedCancelFence(instance, target);
+    if (!this.commitTrustedCancelFence(instance, target)) {
+      return trustedEffectResult(
+        "failed",
+        "desktop_codex_authorization_cancel_failed",
+        before.snapshot
+      );
+    }
 
     try {
       if (before.record.status === "waiting_user") {
@@ -962,16 +968,21 @@ export class DesktopCodexAuthorizationOrchestrator {
   private commitTrustedCancelFence(
     instance: RuntimeInstance,
     target: Readonly<DesktopCodexTrustedAuthorizationTarget>
-  ): void {
+  ): boolean {
     const fence = instance.cancelFence;
     if (fence === null) {
+      if (instance.input.sessionId !== target.sessionId ||
+          instance.input.executorId !== target.executorId ||
+          instance.record?.deviceId !== target.deviceId) return false;
       instance.cancelFence = createTrustedCancellationFence(target, true);
-      return;
+      return true;
     }
+    if (!sameTrustedAuthorizationTarget(fence.target, target)) return false;
     if (fence.state === "pending") {
       fence.state = "committed";
       fence.resolveBarrier();
     }
+    return fence.state === "committed";
   }
 
   private releasePendingCancelFence(
@@ -979,7 +990,8 @@ export class DesktopCodexAuthorizationOrchestrator {
   ): void {
     const instance = this.instances.get(target.sessionId);
     const fence = instance?.cancelFence;
-    if (!instance || !fence || fence.state !== "pending") return;
+    if (!instance || !fence || fence.state !== "pending" ||
+        !sameTrustedAuthorizationTarget(fence.target, target)) return;
     fence.state = "released";
     instance.cancelFence = null;
     fence.resolveBarrier();
@@ -1757,6 +1769,17 @@ function createTrustedCancellationFence(
   };
   if (committed) resolveBarrier();
   return fence;
+}
+
+function sameTrustedAuthorizationTarget(
+  left: Readonly<DesktopCodexTrustedAuthorizationTarget>,
+  right: Readonly<DesktopCodexTrustedAuthorizationTarget>
+): boolean {
+  return left.sessionId === right.sessionId &&
+    left.executorId === right.executorId &&
+    left.deviceId === right.deviceId &&
+    left.operationId === right.operationId &&
+    left.expectedSessionRevision === right.expectedSessionRevision;
 }
 
 function captureTrustedSessionRecord(

@@ -1249,6 +1249,55 @@ test("a synchronously fenced cancel makes an already-running and a queued reopen
   assert.equal(current.transport.cancelCalls, 0);
 });
 
+test("a foreign queued cancel cannot release the exact pending cancel fence", async () => {
+  const waitGate = deferred();
+  const reopenGate = deferred();
+  const exactReadGate = deferred();
+  const exactReadStarted = deferred();
+  const current = fixture({ supervisor: { waitGate, reopenGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+
+  const reopening = current.orchestrator.reopenTrusted(reopenTarget());
+  for (let index = 0; index < 100 && current.supervisor.reopenCalls === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(current.supervisor.reopenCalls, 1);
+
+  const originalRead = current.sessionStore.read.bind(current.sessionStore);
+  let readsAfterReopenStarted = 0;
+  current.sessionStore.read = async (sessionId) => {
+    readsAfterReopenStarted += 1;
+    if (readsAfterReopenStarted === 3) {
+      exactReadStarted.resolve();
+      await exactReadGate.promise;
+    }
+    return originalRead(sessionId);
+  };
+
+  const foreignCancel = current.orchestrator.cancelTrusted(cancelTarget({
+    deviceId: "1".repeat(64),
+    operationId: "operation_foreign_cancel"
+  }));
+  const exactCancel = current.orchestrator.cancelTrusted(cancelTarget());
+  waitGate.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(current.calls.includes("supervisor:read_account:true"), false);
+
+  reopenGate.resolve();
+  assert.equal((await reopening).result, "stale_target");
+  assert.equal((await foreignCancel).result, "stale_target");
+  await exactReadStarted.promise;
+  assert.equal(readsAfterReopenStarted, 3);
+  assert.equal(current.calls.includes("supervisor:read_account:true"), false);
+  assert.equal(current.calls.includes("credential:measure"), false);
+
+  exactReadGate.resolve();
+  assert.equal((await exactCancel).result, "succeeded");
+  assert.equal(current.calls.includes("session:cancelled"), true);
+  assert.equal(current.transport.cancelCalls, 0);
+});
+
 test("an authoritative stale read releases the pending cancel hold and the original flow continues", async () => {
   const waitGate = deferred();
   const current = fixture({ supervisor: { waitGate } });
