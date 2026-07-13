@@ -19,6 +19,7 @@ const OPAQUE_ID = /^[A-Za-z0-9_-]{1,160}$/;
 const KEY_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const BASE64_URL = /^[A-Za-z0-9_-]+$/;
 const CANONICAL_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const SAFE_FAILURE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const rootTails = new Map<string, Promise<void>>();
 
 const TARGET_STRING_FIELDS = [
@@ -69,6 +70,7 @@ export type DesktopTrustedCommandJournalStatus =
   | "indeterminate";
 
 export type DesktopTrustedCommandEffectCompletionMode = "direct" | "recovered";
+export type DesktopTrustedCommandEffectResult = "succeeded" | "failed" | "stale_target";
 
 export interface DesktopTrustedCommandTarget {
   actorId: string | null;
@@ -113,7 +115,10 @@ export interface DesktopTrustedCommandJournalRecord {
   effectDurableAt: string | null;
   effectCompletionMode: DesktopTrustedCommandEffectCompletionMode | null;
   effectRecoveryEvidenceHash: string | null;
+  effectResult: DesktopTrustedCommandEffectResult | null;
+  effectFailureCode: string | null;
   outboundAckReference: string | null;
+  outboundAckRequestHash: string | null;
   ackPreparedAt: string | null;
   acknowledgedAt: string | null;
   indeterminateAt: string | null;
@@ -145,11 +150,15 @@ export interface BeginDesktopTrustedCommandEffectResult {
 export interface CompleteDesktopTrustedCommandEffectInput
   extends BeginDesktopTrustedCommandEffectInput {
   effectAttemptToken: string;
+  result: DesktopTrustedCommandEffectResult;
+  failureCode: string | null;
 }
 
 export interface RecoverDesktopTrustedCommandEffectInput
   extends BeginDesktopTrustedCommandEffectInput {
   recoveryEvidenceHash: string;
+  result: DesktopTrustedCommandEffectResult;
+  failureCode: string | null;
 }
 
 export interface MarkDesktopTrustedCommandIndeterminateInput
@@ -160,6 +169,7 @@ export interface MarkDesktopTrustedCommandIndeterminateInput
 export interface PrepareDesktopTrustedCommandAcknowledgementInput
   extends DesktopTrustedCommandReference {
   outboundAckReference: string;
+  outboundAckRequestHash: string;
 }
 
 export type DesktopTrustedCommandJournalErrorCode =
@@ -272,6 +282,15 @@ export class DesktopTrustedCommandJournalStore {
     });
   }
 
+  /** Startup-only inventory used by the command recovery coordinator. */
+  listForRecovery(): Promise<DesktopTrustedCommandJournalRecord[]> {
+    return this.exclusive(async () => {
+      this.assertSecureStorage();
+      await this.ensureRoot();
+      return (await this.loadAllLocked()).map(cloneRecord);
+    });
+  }
+
   /**
    * Explicit capacity maintenance. Non-terminal and indeterminate records are
    * never removed. Acknowledged tombstones survive through token expiry plus
@@ -343,7 +362,9 @@ export class DesktopTrustedCommandJournalStore {
       assertRecoveryReference(current, candidate.effectRecoveryReference);
       if (
         current.status === "effect_durable" &&
-        current.effectCompletionMode === "direct"
+        current.effectCompletionMode === "direct" &&
+        current.effectResult === candidate.result &&
+        current.effectFailureCode === candidate.failureCode
       ) {
         this.effectAttempts.delete(current.semanticKey);
         return cloneRecord(current);
@@ -364,7 +385,9 @@ export class DesktopTrustedCommandJournalStore {
         status: "effect_durable",
         effectDurableAt: canonicalNow(this.now()),
         effectCompletionMode: "direct",
-        effectRecoveryEvidenceHash: null
+        effectRecoveryEvidenceHash: null,
+        effectResult: candidate.result,
+        effectFailureCode: candidate.failureCode
       };
       await this.writeAtomic(next);
       this.effectAttempts.delete(next.semanticKey);
@@ -382,7 +405,9 @@ export class DesktopTrustedCommandJournalStore {
       if (
         current.status === "effect_durable" &&
         current.effectCompletionMode === "recovered" &&
-        current.effectRecoveryEvidenceHash === candidate.recoveryEvidenceHash
+        current.effectRecoveryEvidenceHash === candidate.recoveryEvidenceHash &&
+        current.effectResult === candidate.result &&
+        current.effectFailureCode === candidate.failureCode
       ) {
         return cloneRecord(current);
       }
@@ -395,7 +420,9 @@ export class DesktopTrustedCommandJournalStore {
         status: "effect_durable",
         effectDurableAt: canonicalNow(this.now()),
         effectCompletionMode: "recovered",
-        effectRecoveryEvidenceHash: candidate.recoveryEvidenceHash
+        effectRecoveryEvidenceHash: candidate.recoveryEvidenceHash,
+        effectResult: candidate.result,
+        effectFailureCode: candidate.failureCode
       };
       await this.writeAtomic(next);
       this.effectAttempts.delete(next.semanticKey);
@@ -441,7 +468,8 @@ export class DesktopTrustedCommandJournalStore {
       const current = await this.loadFencedLocked(candidate);
       if (
         (current.status === "ack_prepared" || current.status === "acknowledged") &&
-        current.outboundAckReference === candidate.outboundAckReference
+        current.outboundAckReference === candidate.outboundAckReference &&
+        current.outboundAckRequestHash === candidate.outboundAckRequestHash
       ) {
         return cloneRecord(current);
       }
@@ -453,6 +481,7 @@ export class DesktopTrustedCommandJournalStore {
         generation: current.generation + 1,
         status: "ack_prepared",
         outboundAckReference: candidate.outboundAckReference,
+        outboundAckRequestHash: candidate.outboundAckRequestHash,
         ackPreparedAt: canonicalNow(this.now())
       };
       await this.writeAtomic(next);
@@ -468,13 +497,15 @@ export class DesktopTrustedCommandJournalStore {
       const current = await this.loadFencedLocked(candidate);
       if (
         current.status === "acknowledged" &&
-        current.outboundAckReference === candidate.outboundAckReference
+        current.outboundAckReference === candidate.outboundAckReference &&
+        current.outboundAckRequestHash === candidate.outboundAckRequestHash
       ) {
         return cloneRecord(current);
       }
       if (
         current.status !== "ack_prepared" ||
-        current.outboundAckReference !== candidate.outboundAckReference
+        current.outboundAckReference !== candidate.outboundAckReference ||
+        current.outboundAckRequestHash !== candidate.outboundAckRequestHash
       ) {
         throw journalError("desktop_trusted_command_state_invalid", "受信命令确认栅栏不匹配");
       }
@@ -885,11 +916,12 @@ function acceptedRecord(
   input: AcceptDesktopTrustedCommandInput,
   now: Date
 ): DesktopTrustedCommandJournalRecord {
-  if (!exactObject(input, ["token", "claims"])) {
+  const captured = captureExactObject(input, ["token", "claims"]);
+  if (!captured || typeof captured.token !== "string") {
     throw journalError("desktop_trusted_command_unsafe", "受信命令接收参数无效");
   }
-  const claims = validateClaims(input.claims);
-  const parsed = parseCompactToken(input.token, claims);
+  const claims = validateClaims(captured.claims);
+  const parsed = parseCompactToken(captured.token, claims);
   const target = targetFromClaims(claims);
   const semanticKey = semanticKeyFor(claims, target);
   return validateRecord({
@@ -897,7 +929,7 @@ function acceptedRecord(
     generation: 1,
     status: "accepted",
     semanticKey,
-    token: input.token,
+    token: captured.token,
     tokenHash: parsed.tokenHash,
     payloadHash: parsed.payloadHash,
     kid: parsed.kid,
@@ -912,7 +944,10 @@ function acceptedRecord(
     effectDurableAt: null,
     effectCompletionMode: null,
     effectRecoveryEvidenceHash: null,
+    effectResult: null,
+    effectFailureCode: null,
     outboundAckReference: null,
+    outboundAckRequestHash: null,
     ackPreparedAt: null,
     acknowledgedAt: null,
     indeterminateAt: null,
@@ -942,7 +977,10 @@ function validateRecord(value: unknown): DesktopTrustedCommandJournalRecord {
       "effectDurableAt",
       "effectCompletionMode",
       "effectRecoveryEvidenceHash",
+      "effectResult",
+      "effectFailureCode",
       "outboundAckReference",
+      "outboundAckRequestHash",
       "ackPreparedAt",
       "acknowledgedAt",
       "indeterminateAt",
@@ -1002,11 +1040,14 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     ((record.effectCompletionMode === "direct" && record.effectRecoveryEvidenceHash === null) ||
       (record.effectCompletionMode === "recovered" &&
         typeof record.effectRecoveryEvidenceHash === "string" &&
-        DIGEST.test(record.effectRecoveryEvidenceHash)));
+        DIGEST.test(record.effectRecoveryEvidenceHash))) &&
+    validEffectOutcome(record.effectResult, record.effectFailureCode);
   const ackPrepared =
     durable &&
     typeof record.outboundAckReference === "string" &&
     DIGEST.test(record.outboundAckReference) &&
+    typeof record.outboundAckRequestHash === "string" &&
+    DIGEST.test(record.outboundAckRequestHash) &&
     canonicalNullableTime(record.ackPreparedAt) &&
     timeAtOrAfter(record.ackPreparedAt, record.effectDurableAt);
   const untouched =
@@ -1015,7 +1056,10 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.effectDurableAt === null &&
     record.effectCompletionMode === null &&
     record.effectRecoveryEvidenceHash === null &&
+    record.effectResult === null &&
+    record.effectFailureCode === null &&
     record.outboundAckReference === null &&
+    record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
     record.indeterminateAt === null &&
@@ -1025,7 +1069,10 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.effectDurableAt === null &&
     record.effectCompletionMode === null &&
     record.effectRecoveryEvidenceHash === null &&
+    record.effectResult === null &&
+    record.effectFailureCode === null &&
     record.outboundAckReference === null &&
+    record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
     record.indeterminateAt === null &&
@@ -1033,6 +1080,7 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
   const durableOnly =
     durable &&
     record.outboundAckReference === null &&
+    record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
     record.indeterminateAt === null &&
@@ -1053,7 +1101,10 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.effectDurableAt === null &&
     record.effectCompletionMode === null &&
     record.effectRecoveryEvidenceHash === null &&
+    record.effectResult === null &&
+    record.effectFailureCode === null &&
     record.outboundAckReference === null &&
+    record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
     canonicalNullableTime(record.indeterminateAt) &&
@@ -1078,11 +1129,19 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
   }
 }
 
+function validEffectOutcome(result: unknown, failureCode: unknown): boolean {
+  if (result === "failed") {
+    return typeof failureCode === "string" && SAFE_FAILURE_CODE.test(failureCode);
+  }
+  return (result === "succeeded" || result === "stale_target") && failureCode === null;
+}
+
 function validateClaims(value: unknown): DesktopTrustedTokenClaims {
-  if (!exactObjectSubset(value, CLAIM_FIELDS)) {
+  const captured = captureObjectSubset(value, CLAIM_FIELDS, 8);
+  if (!captured) {
     throw journalError("desktop_trusted_command_unsafe", "已验证受信声明结构无效");
   }
-  const claims = value as unknown as DesktopTrustedTokenClaims;
+  const claims = captured as unknown as DesktopTrustedTokenClaims;
   if (
     claims.v !== 1 ||
     claims.iss !== "aicrm-agent-executor" ||
@@ -1109,7 +1168,7 @@ function validateClaims(value: unknown): DesktopTrustedTokenClaims {
       throw journalError("desktop_trusted_command_unsafe", "已验证受信版本字段无效");
     }
   }
-  const cloned = JSON.parse(JSON.stringify(claims)) as DesktopTrustedTokenClaims;
+  const cloned = JSON.parse(JSON.stringify(captured)) as DesktopTrustedTokenClaims;
   targetFromClaims(cloned);
   return cloned;
 }
@@ -1419,6 +1478,7 @@ function validSuccessor(
       return (
         sameDurableEffect(current, next) &&
         current.outboundAckReference === next.outboundAckReference &&
+        current.outboundAckRequestHash === next.outboundAckRequestHash &&
         current.ackPreparedAt === next.ackPreparedAt &&
         next.status === "acknowledged"
       );
@@ -1445,7 +1505,9 @@ function sameDurableEffect(
     sameEffectStart(left, right) &&
     left.effectDurableAt === right.effectDurableAt &&
     left.effectCompletionMode === right.effectCompletionMode &&
-    left.effectRecoveryEvidenceHash === right.effectRecoveryEvidenceHash
+    left.effectRecoveryEvidenceHash === right.effectRecoveryEvidenceHash &&
+    left.effectResult === right.effectResult &&
+    left.effectFailureCode === right.effectFailureCode
   );
 }
 
@@ -1498,130 +1560,163 @@ function cloneRecord(record: DesktopTrustedCommandJournalRecord): DesktopTrusted
 }
 
 function sameTarget(left: unknown, right: DesktopTrustedCommandTarget): boolean {
-  if (!exactObject(left, [...TARGET_STRING_FIELDS, ...TARGET_REVISION_FIELDS])) return false;
+  const captured = captureExactObject(left, [
+    ...TARGET_STRING_FIELDS,
+    ...TARGET_REVISION_FIELDS
+  ]);
+  if (!captured) return false;
   return [...TARGET_STRING_FIELDS, ...TARGET_REVISION_FIELDS].every(
-    (field) => left[field] === right[field]
+    (field) => captured[field] === right[field]
   );
 }
 
 function validateReference(
   value: DesktopTrustedCommandReference
 ): DesktopTrustedCommandReference {
+  const captured = captureExactObject(value, ["semanticKey", "tokenHash", "payloadHash"]);
   if (
-    !exactObject(value, ["semanticKey", "tokenHash", "payloadHash"]) ||
-    !DIGEST.test(value.semanticKey) ||
-    !DIGEST.test(value.tokenHash) ||
-    !DIGEST.test(value.payloadHash)
+    !captured ||
+    !isDigest(captured.semanticKey) ||
+    !isDigest(captured.tokenHash) ||
+    !isDigest(captured.payloadHash)
   ) {
     throw journalError("desktop_trusted_command_unsafe", "受信命令日志引用无效");
   }
-  return { ...value };
+  return {
+    semanticKey: captured.semanticKey,
+    tokenHash: captured.tokenHash,
+    payloadHash: captured.payloadHash
+  };
 }
 
 function validateBeginEffectInput(
   value: BeginDesktopTrustedCommandEffectInput
 ): BeginDesktopTrustedCommandEffectInput {
-  if (!exactObject(value, ["semanticKey", "tokenHash", "payloadHash", "effectRecoveryReference"])) {
+  const captured = captureExactObject(value, [
+    "semanticKey", "tokenHash", "payloadHash", "effectRecoveryReference"
+  ]);
+  if (!captured || !isDigest(captured.effectRecoveryReference)) {
     throw journalError("desktop_trusted_command_unsafe", "受信命令副作用参数无效");
   }
-  validateReference({
-    semanticKey: value.semanticKey,
-    tokenHash: value.tokenHash,
-    payloadHash: value.payloadHash
+  const reference = validateReference({
+    semanticKey: captured.semanticKey as string,
+    tokenHash: captured.tokenHash as string,
+    payloadHash: captured.payloadHash as string
   });
-  if (!DIGEST.test(value.effectRecoveryReference)) {
-    throw journalError("desktop_trusted_command_unsafe", "副作用恢复引用无效");
-  }
-  return { ...value };
+  return { ...reference, effectRecoveryReference: captured.effectRecoveryReference };
 }
 
 function validateCompleteEffectInput(
   value: CompleteDesktopTrustedCommandEffectInput
 ): CompleteDesktopTrustedCommandEffectInput {
+  const captured = captureExactObject(value, [
+    "semanticKey",
+    "tokenHash",
+    "payloadHash",
+    "effectRecoveryReference",
+    "effectAttemptToken",
+    "result",
+    "failureCode"
+  ]);
   if (
-    !exactObject(value, [
-      "semanticKey",
-      "tokenHash",
-      "payloadHash",
-      "effectRecoveryReference",
-      "effectAttemptToken"
-    ]) ||
-    !canonicalAttemptToken(value.effectAttemptToken)
+    !captured ||
+    !canonicalAttemptToken(captured.effectAttemptToken) ||
+    !validEffectOutcome(captured.result, captured.failureCode)
   ) {
     throw journalError("desktop_trusted_command_unsafe", "副作用完成参数无效");
   }
-  validateBeginEffectInput({
-    semanticKey: value.semanticKey,
-    tokenHash: value.tokenHash,
-    payloadHash: value.payloadHash,
-    effectRecoveryReference: value.effectRecoveryReference
+  const begin = validateBeginEffectInput({
+    semanticKey: captured.semanticKey as string,
+    tokenHash: captured.tokenHash as string,
+    payloadHash: captured.payloadHash as string,
+    effectRecoveryReference: captured.effectRecoveryReference as string
   });
-  return { ...value };
+  return {
+    ...begin,
+    effectAttemptToken: captured.effectAttemptToken,
+    result: captured.result as DesktopTrustedCommandEffectResult,
+    failureCode: captured.failureCode as string | null
+  };
 }
 
 function validateRecoverEffectInput(
   value: RecoverDesktopTrustedCommandEffectInput
 ): RecoverDesktopTrustedCommandEffectInput {
+  const captured = captureExactObject(value, [
+    "semanticKey",
+    "tokenHash",
+    "payloadHash",
+    "effectRecoveryReference",
+    "recoveryEvidenceHash",
+    "result",
+    "failureCode"
+  ]);
   if (
-    !exactObject(value, [
-      "semanticKey",
-      "tokenHash",
-      "payloadHash",
-      "effectRecoveryReference",
-      "recoveryEvidenceHash"
-    ]) ||
-    !DIGEST.test(value.recoveryEvidenceHash)
+    !captured ||
+    !isDigest(captured.recoveryEvidenceHash) ||
+    !validEffectOutcome(captured.result, captured.failureCode)
   ) {
     throw journalError("desktop_trusted_command_unsafe", "副作用恢复参数无效");
   }
-  validateBeginEffectInput({
-    semanticKey: value.semanticKey,
-    tokenHash: value.tokenHash,
-    payloadHash: value.payloadHash,
-    effectRecoveryReference: value.effectRecoveryReference
+  const begin = validateBeginEffectInput({
+    semanticKey: captured.semanticKey as string,
+    tokenHash: captured.tokenHash as string,
+    payloadHash: captured.payloadHash as string,
+    effectRecoveryReference: captured.effectRecoveryReference as string
   });
-  return { ...value };
+  return {
+    ...begin,
+    recoveryEvidenceHash: captured.recoveryEvidenceHash,
+    result: captured.result as DesktopTrustedCommandEffectResult,
+    failureCode: captured.failureCode as string | null
+  };
 }
 
 function validateIndeterminateInput(
   value: MarkDesktopTrustedCommandIndeterminateInput
 ): MarkDesktopTrustedCommandIndeterminateInput {
+  const captured = captureExactObject(value, [
+    "semanticKey", "tokenHash", "payloadHash", "effectRecoveryReference", "reasonHash"
+  ]);
   if (
-    !exactObject(value, [
-      "semanticKey",
-      "tokenHash",
-      "payloadHash",
-      "effectRecoveryReference",
-      "reasonHash"
-    ]) ||
-    !DIGEST.test(value.reasonHash)
+    !captured ||
+    !isDigest(captured.reasonHash)
   ) {
     throw journalError("desktop_trusted_command_unsafe", "不确定状态参数无效");
   }
-  validateBeginEffectInput({
-    semanticKey: value.semanticKey,
-    tokenHash: value.tokenHash,
-    payloadHash: value.payloadHash,
-    effectRecoveryReference: value.effectRecoveryReference
+  const begin = validateBeginEffectInput({
+    semanticKey: captured.semanticKey as string,
+    tokenHash: captured.tokenHash as string,
+    payloadHash: captured.payloadHash as string,
+    effectRecoveryReference: captured.effectRecoveryReference as string
   });
-  return { ...value };
+  return { ...begin, reasonHash: captured.reasonHash };
 }
 
 function validateAcknowledgementInput(
   value: PrepareDesktopTrustedCommandAcknowledgementInput
 ): PrepareDesktopTrustedCommandAcknowledgementInput {
+  const captured = captureExactObject(value, [
+    "semanticKey", "tokenHash", "payloadHash", "outboundAckReference",
+    "outboundAckRequestHash"
+  ]);
   if (
-    !exactObject(value, ["semanticKey", "tokenHash", "payloadHash", "outboundAckReference"]) ||
-    !DIGEST.test(value.outboundAckReference)
+    !captured ||
+    !isDigest(captured.outboundAckReference) ||
+    !isDigest(captured.outboundAckRequestHash)
   ) {
     throw journalError("desktop_trusted_command_unsafe", "受信命令确认参数无效");
   }
-  validateReference({
-    semanticKey: value.semanticKey,
-    tokenHash: value.tokenHash,
-    payloadHash: value.payloadHash
+  const reference = validateReference({
+    semanticKey: captured.semanticKey as string,
+    tokenHash: captured.tokenHash as string,
+    payloadHash: captured.payloadHash as string
   });
-  return { ...value };
+  return {
+    ...reference,
+    outboundAckReference: captured.outboundAckReference,
+    outboundAckRequestHash: captured.outboundAckRequestHash
+  };
 }
 
 function assertFence(
@@ -1659,7 +1754,7 @@ function assertSafeFile(info: Stats): void {
   }
 }
 
-function canonicalAttemptToken(value: string): boolean {
+function canonicalAttemptToken(value: unknown): value is string {
   if (typeof value !== "string" || !BASE64_URL.test(value)) return false;
   const raw = Buffer.from(value, "base64url");
   return raw.byteLength === 32 && raw.toString("base64url") === value;
@@ -1718,17 +1813,57 @@ function exactObject(
   value: unknown,
   expectedKeys: readonly string[]
 ): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const actual = Object.keys(value).sort();
-  const expected = [...expectedKeys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+  return captureExactObject(value, expectedKeys) !== null;
 }
 
-function exactObjectSubset(value: unknown, allowedKeys: readonly string[]): boolean {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const keys = Object.keys(value);
+function captureExactObject(
+  value: unknown,
+  expectedKeys: readonly string[]
+): Readonly<Record<string, unknown>> | null {
+  const captured = captureOwnDataObject(value);
+  if (!captured) return null;
+  const actual = Object.keys(captured);
+  return actual.length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(captured, key))
+    ? captured
+    : null;
+}
+
+function captureObjectSubset(
+  value: unknown,
+  allowedKeys: readonly string[],
+  minimumKeys: number
+): Readonly<Record<string, unknown>> | null {
+  const captured = captureOwnDataObject(value);
+  if (!captured) return null;
+  const keys = Object.keys(captured);
   const allowed = new Set(allowedKeys);
-  return keys.length >= 8 && keys.every((key) => allowed.has(key));
+  return keys.length >= minimumKeys && keys.every((key) => allowed.has(key))
+    ? captured
+    : null;
+}
+
+function captureOwnDataObject(value: unknown): Readonly<Record<string, unknown>> | null {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const keys = Reflect.ownKeys(value);
+    if (keys.some((key) => typeof key !== "string")) return null;
+    const captured: Record<string, unknown> = Object.create(null);
+    for (const key of keys as string[]) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor) || descriptor.enumerable !== true) return null;
+      captured[key] = descriptor.value;
+    }
+    return Object.freeze(captured);
+  } catch {
+    return null;
+  }
+}
+
+function isDigest(value: unknown): value is string {
+  return typeof value === "string" && DIGEST.test(value);
 }
 
 function sha256Hex(value: Uint8Array): string {

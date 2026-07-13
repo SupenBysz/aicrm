@@ -220,6 +220,49 @@ export interface AcknowledgeDesktopCredentialActivationResponse {
   replayed: boolean;
 }
 
+export type DesktopAuthorizationCommandPurpose =
+  | "authorization_cancel"
+  | "authorization_reopen";
+
+export type DesktopAuthorizationCommandAckResult =
+  | "succeeded"
+  | "failed"
+  | "stale_target";
+
+export interface AcknowledgeDesktopAuthorizationCommandInput {
+  sessionId: string;
+  commandTicket: string;
+  operationId: string;
+  purpose: DesktopAuthorizationCommandPurpose;
+  expectedSessionRevision: number;
+  result: DesktopAuthorizationCommandAckResult;
+  completedAt: string;
+  failureCode?: string;
+}
+
+/** Main-only exact command ACK recovery fence. Ticket and completion time stay journal-only. */
+export interface RecoverDesktopAuthorizationCommandAckInput {
+  sessionId: string;
+  operationId: string;
+  purpose: DesktopAuthorizationCommandPurpose;
+  expectedSessionRevision: number;
+  result: DesktopAuthorizationCommandAckResult;
+  failureCode?: string;
+  expectedRequestReference: string;
+  expectedRequestHash: string;
+}
+
+export interface AcknowledgeDesktopAuthorizationCommandResponse {
+  operationId: string;
+  sessionId: string;
+  purpose: DesktopAuthorizationCommandPurpose;
+  expectedSessionRevision: number;
+  status: DesktopAuthorizationCommandAckResult;
+  failureCode: string;
+  completedAt: string;
+  replayed: boolean;
+}
+
 interface AuthorizationIdentityStore
   extends Pick<DesktopDeviceIdentityStore, "getIdentity" | "signRequest"> {}
 
@@ -260,7 +303,11 @@ interface TrustedRequestDefinition<T> {
   validateResponse: (value: unknown) => T;
 }
 
-type DesktopAuthorizationScheme = "AiCRM-Handoff" | "AiCRM-Claim" | "AiCRM-Activation";
+type DesktopAuthorizationScheme =
+  | "AiCRM-Handoff"
+  | "AiCRM-Claim"
+  | "AiCRM-Activation"
+  | "AiCRM-Command";
 
 interface RecoveredTrustedRequestDefinition<T> {
   kind: DesktopTrustedRequestKind;
@@ -711,6 +758,201 @@ export class DesktopAuthorizationTransportClient {
         },
         validateResponse: (value) =>
           validateActivationResponse(value, activationId, credentialRevision)
+      },
+      hooks
+    );
+  }
+
+  acknowledgeAuthorizationCommand(
+    input: AcknowledgeDesktopAuthorizationCommandInput,
+    hooks?: DesktopTrustedRequestHooks
+  ): Promise<DesktopTrustedTransportResult<AcknowledgeDesktopAuthorizationCommandResponse>> {
+    const captured = captureObjectWithOptionalKey(
+      input,
+      [
+        "sessionId",
+        "commandTicket",
+        "operationId",
+        "purpose",
+        "expectedSessionRevision",
+        "result",
+        "completedAt"
+      ],
+      "failureCode"
+    );
+    if (!captured) {
+      throw contractInvalid("Desktop 授权命令确认参数结构无效");
+    }
+    const sessionId = validOpaqueValue(captured.sessionId, "sessionId");
+    const commandTicket = validTicketValue(captured.commandTicket, "commandTicket");
+    const operationId = validOpaqueValue(captured.operationId, "operationId");
+    const purpose = validAuthorizationCommandPurpose(captured.purpose);
+    const expectedSessionRevision = positiveRevisionValue(
+      captured.expectedSessionRevision,
+      "expectedSessionRevision"
+    );
+    const result = validAuthorizationCommandAckResult(captured.result);
+    const completedAt = validClientTimeValue(
+      captured.completedAt,
+      "completedAt",
+      this.now(),
+      "past_only"
+    );
+    const failureCode = authorizationCommandFailureCode(
+      result,
+      captured.failureCode,
+      Object.hasOwn(captured, "failureCode")
+    );
+    const bodyObject = result === "failed"
+      ? {
+          operationId,
+          purpose,
+          expectedSessionRevision,
+          result,
+          completedAt,
+          failureCode
+        }
+      : { operationId, purpose, expectedSessionRevision, result, completedAt };
+    const expectedBody = encodeJson(bodyObject);
+    const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-commands/${operationId}/ack`;
+    const epoch = this.cancellationEpoch;
+    return this.runTrusted(
+      {
+        kind: "authorization_command_ack",
+        path,
+        authorization: buildAuthorization("AiCRM-Command", commandTicket),
+        authorizationScheme: "AiCRM-Command",
+        createBody: () => expectedBody,
+        validateRecoveredBody: (body) =>
+          requireExactBody(body, expectedBody, "授权命令确认恢复冲突"),
+        validateResponse: (value) =>
+          validateAuthorizationCommandResponse(value, {
+            sessionId,
+            operationId,
+            purpose,
+            expectedSessionRevision,
+            result,
+            failureCode
+          })
+      },
+      epoch,
+      hooks
+    );
+  }
+
+  recoverAuthorizationCommandAck(
+    input: RecoverDesktopAuthorizationCommandAckInput,
+    hooks?: DesktopTrustedRequestHooks
+  ): Promise<DesktopTrustedTransportResult<AcknowledgeDesktopAuthorizationCommandResponse>> {
+    const captured = captureObjectWithOptionalKey(
+      input,
+      [
+        "sessionId",
+        "operationId",
+        "purpose",
+        "expectedSessionRevision",
+        "result",
+        "expectedRequestReference",
+        "expectedRequestHash"
+      ],
+      "failureCode"
+    );
+    if (!captured) {
+      throw contractInvalid("Desktop 授权命令确认恢复参数结构无效");
+    }
+    const sessionId = validOpaqueValue(captured.sessionId, "sessionId");
+    const operationId = validOpaqueValue(captured.operationId, "operationId");
+    const purpose = validAuthorizationCommandPurpose(captured.purpose);
+    const expectedSessionRevision = positiveRevisionValue(
+      captured.expectedSessionRevision,
+      "expectedSessionRevision"
+    );
+    const result = validAuthorizationCommandAckResult(captured.result);
+    const failureCode = authorizationCommandFailureCode(
+      result,
+      captured.failureCode,
+      Object.hasOwn(captured, "failureCode")
+    );
+    const expectedRequestReference = validDigestValue(
+      captured.expectedRequestReference,
+      "expectedRequestReference"
+    );
+    const expectedRequestHash = validDigestValue(
+      captured.expectedRequestHash,
+      "expectedRequestHash"
+    );
+    const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-commands/${operationId}/ack`;
+    const reference = desktopTrustedRequestReference("authorization_command_ack", path);
+    if (reference !== expectedRequestReference) {
+      throw recoveryConflict("Desktop 授权命令确认恢复引用不匹配");
+    }
+    return this.runRecoveredTrusted(
+      {
+        kind: "authorization_command_ack",
+        path,
+        authorizationScheme: "AiCRM-Command",
+        expectedRequestReference,
+        expectedRequestHash,
+        validateRecoveredBody: (body) => {
+          const value = parseJson(body, "授权命令确认恢复 body 无效");
+          const recovered = captureObjectWithOptionalKey(
+            value,
+            [
+              "operationId",
+              "purpose",
+              "expectedSessionRevision",
+              "result",
+              "completedAt"
+            ],
+            "failureCode"
+          );
+          if (!recovered) {
+            throw recoveryConflict("授权命令确认恢复 body 结构不匹配");
+          }
+          const recoveredFailureCode = authorizationCommandFailureCodeForRecovery(
+            result,
+            recovered.failureCode,
+            Object.hasOwn(recovered, "failureCode")
+          );
+          if (
+            recovered.operationId !== operationId ||
+            recovered.purpose !== purpose ||
+            recovered.expectedSessionRevision !== expectedSessionRevision ||
+            recovered.result !== result ||
+            recoveredFailureCode !== failureCode ||
+            !canonicalDeviceTime(recovered.completedAt)
+          ) {
+            throw recoveryConflict("授权命令确认恢复 body 与当前操作不匹配");
+          }
+          requireCanonicalEncoding(
+            body,
+            result === "failed"
+              ? {
+                  operationId,
+                  purpose,
+                  expectedSessionRevision,
+                  result,
+                  completedAt: recovered.completedAt,
+                  failureCode
+                }
+              : {
+                  operationId,
+                  purpose,
+                  expectedSessionRevision,
+                  result,
+                  completedAt: recovered.completedAt
+                }
+          );
+        },
+        validateResponse: (value) =>
+          validateAuthorizationCommandResponse(value, {
+            sessionId,
+            operationId,
+            purpose,
+            expectedSessionRevision,
+            result,
+            failureCode
+          })
       },
       hooks
     );
@@ -1360,6 +1602,61 @@ function validateActivationResponse(
   return { ...response };
 }
 
+function validateAuthorizationCommandResponse(
+  value: unknown,
+  expected: Readonly<{
+    sessionId: string;
+    operationId: string;
+    purpose: DesktopAuthorizationCommandPurpose;
+    expectedSessionRevision: number;
+    result: DesktopAuthorizationCommandAckResult;
+    failureCode: string;
+  }>
+): AcknowledgeDesktopAuthorizationCommandResponse {
+  const response = captureExactObject(value, [
+    "operationId",
+    "sessionId",
+    "purpose",
+    "expectedSessionRevision",
+    "status",
+    "failureCode",
+    "completedAt",
+    "replayed"
+  ]);
+  if (!response) {
+    throw invalidResponse("Desktop 授权命令确认响应不是安全投影");
+  }
+  const status = response.status;
+  const statusMatches =
+    status === expected.result ||
+    (status === "stale_target" && expected.result !== "stale_target");
+  const expectedFailureCode = status === "failed" ? expected.failureCode : "";
+  if (
+    response.operationId !== expected.operationId ||
+    response.sessionId !== expected.sessionId ||
+    response.purpose !== expected.purpose ||
+    response.expectedSessionRevision !== expected.expectedSessionRevision ||
+    !statusMatches ||
+    (status !== "succeeded" && status !== "failed" && status !== "stale_target") ||
+    typeof response.failureCode !== "string" ||
+    response.failureCode !== expectedFailureCode ||
+    !canonicalServerTime(response.completedAt) ||
+    typeof response.replayed !== "boolean"
+  ) {
+    throw invalidResponse("Desktop 授权命令确认响应无效");
+  }
+  return {
+    operationId: expected.operationId,
+    sessionId: expected.sessionId,
+    purpose: expected.purpose,
+    expectedSessionRevision: expected.expectedSessionRevision,
+    status,
+    failureCode: response.failureCode,
+    completedAt: response.completedAt,
+    replayed: response.replayed
+  };
+}
+
 function parseSuccessfulResponse<T>(text: string, validate: (value: unknown) => T): T {
   let envelope: unknown;
   try {
@@ -1493,6 +1790,11 @@ function validOpaque(value: string, name: string): string {
   return value;
 }
 
+function validOpaqueValue(value: unknown, name: string): string {
+  if (!isOpaque(value)) throw contractInvalid(`${name} 无效`);
+  return value;
+}
+
 function isOpaque(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -1503,6 +1805,11 @@ function isOpaque(value: unknown): value is string {
 }
 
 function validTicket(value: string, name: string): string {
+  if (!isTicket(value)) throw contractInvalid(`${name} 无效`);
+  return value;
+}
+
+function validTicketValue(value: unknown, name: string): string {
   if (!isTicket(value)) throw contractInvalid(`${name} 无效`);
   return value;
 }
@@ -1524,12 +1831,24 @@ function validDigest(value: string, name: string): string {
   return value;
 }
 
+function validDigestValue(value: unknown, name: string): string {
+  if (typeof value !== "string" || !DIGEST_PATTERN.test(value)) {
+    throw contractInvalid(`${name} 无效`);
+  }
+  return value;
+}
+
 function emptyString(value: string, name: string): "" {
   if (value !== "") throw contractInvalid(`${name} 必须为空`);
   return "";
 }
 
 function positiveRevision(value: number, name: string): number {
+  if (!isPositiveRevision(value)) throw contractInvalid(`${name} 无效`);
+  return value;
+}
+
+function positiveRevisionValue(value: unknown, name: string): number {
   if (!isPositiveRevision(value)) throw contractInvalid(`${name} 无效`);
   return value;
 }
@@ -1554,6 +1873,51 @@ function validProofResult(value: string): DesktopAuthorizationProofResult {
   return value;
 }
 
+function validAuthorizationCommandPurpose(
+  value: unknown
+): DesktopAuthorizationCommandPurpose {
+  if (value !== "authorization_cancel" && value !== "authorization_reopen") {
+    throw contractInvalid("purpose 无效");
+  }
+  return value;
+}
+
+function validAuthorizationCommandAckResult(
+  value: unknown
+): DesktopAuthorizationCommandAckResult {
+  if (value !== "succeeded" && value !== "failed" && value !== "stale_target") {
+    throw contractInvalid("result 无效");
+  }
+  return value;
+}
+
+function authorizationCommandFailureCode(
+  result: DesktopAuthorizationCommandAckResult,
+  value: unknown,
+  present: boolean
+): string {
+  if (result !== "failed") {
+    if (present) throw contractInvalid("failureCode 只允许用于失败结果");
+    return "";
+  }
+  if (!present || typeof value !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(value)) {
+    throw contractInvalid("failureCode 无效");
+  }
+  return value;
+}
+
+function authorizationCommandFailureCodeForRecovery(
+  result: DesktopAuthorizationCommandAckResult,
+  value: unknown,
+  present: boolean
+): string {
+  try {
+    return authorizationCommandFailureCode(result, value, present);
+  } catch {
+    throw recoveryConflict("授权命令确认恢复 failureCode 无效");
+  }
+}
+
 function validClientTime(
   value: string,
   name: string,
@@ -1570,6 +1934,16 @@ function validClientTime(
     throw contractInvalid(`${name} 超出设备时钟窗口`);
   }
   return value;
+}
+
+function validClientTimeValue(
+  value: unknown,
+  name: string,
+  now: Date,
+  policy: "symmetric" | "past_only"
+): string {
+  if (typeof value !== "string") throw contractInvalid(`${name} 无效`);
+  return validClientTime(value, name, now, policy);
 }
 
 function canonicalDeviceTime(value: unknown): value is string {
@@ -1652,7 +2026,7 @@ function encodeJson(value: object): Uint8Array {
 }
 
 function buildAuthorization(
-  scheme: "AiCRM-Handoff" | "AiCRM-Claim" | "AiCRM-Activation",
+  scheme: "AiCRM-Handoff" | "AiCRM-Claim" | "AiCRM-Activation" | "AiCRM-Command",
   token: string
 ): string {
   const authorization = `${scheme} ${token}`;
@@ -1695,6 +2069,61 @@ function exactObject(value: unknown, keys: readonly string[]): value is Record<s
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function captureExactObject(
+  value: unknown,
+  keys: readonly string[]
+): Readonly<Record<string, unknown>> | null {
+  const captured = captureOwnDataObject(value);
+  if (!captured) return null;
+  const actual = Object.keys(captured);
+  return actual.length === keys.length && keys.every((key) => Object.hasOwn(captured, key))
+    ? captured
+    : null;
+}
+
+function captureOwnDataObject(
+  value: unknown
+): Readonly<Record<string, unknown>> | null {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (Reflect.getPrototypeOf(value) !== Object.prototype) return null;
+    const actual = Reflect.ownKeys(value);
+    if (actual.some((key) => typeof key !== "string")) return null;
+    const captured: Record<string, unknown> = Object.create(null);
+    for (const key of actual as string[]) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      if (
+        !descriptor ||
+        !descriptor.enumerable ||
+        !("value" in descriptor)
+      ) {
+        return null;
+      }
+      captured[key] = descriptor.value;
+    }
+    return Object.freeze(captured);
+  } catch {
+    return null;
+  }
+}
+
+function captureObjectWithOptionalKey(
+  value: unknown,
+  requiredKeys: readonly string[],
+  optionalKey: string
+): Readonly<Record<string, unknown>> | null {
+  const captured = captureOwnDataObject(value);
+  if (!captured) return null;
+  const actual = Object.keys(captured);
+  const validLength = actual.length === requiredKeys.length ||
+    actual.length === requiredKeys.length + 1;
+  if (!validLength || !requiredKeys.every((key) => Object.hasOwn(captured, key))) return null;
+  if (actual.length === requiredKeys.length + 1 && !Object.hasOwn(captured, optionalKey)) {
+    return null;
+  }
+  return captured;
 }
 
 function contractInvalid(message: string): DesktopAuthorizationTransportError {

@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   DesktopTrustedTokenVerificationError,
   verifyDesktopAuthorizationHandoffToken,
+  verifyDesktopAuthorizationSessionCommandToken,
   verifyDesktopTrustedToken
 } from "./desktop-trusted-token-verifier.ts";
 
@@ -325,6 +326,23 @@ function handoffInput(overrides = {}) {
   };
 }
 
+function sessionCommandInput(purpose = "authorization_cancel", overrides = {}) {
+  const current = purposeCases().find((item) => item.claims.purpose === purpose);
+  assert.ok(current);
+  return {
+    token: issue(current.claims),
+    keyring: keyring(),
+    now: NOW,
+    registeredDeviceId: DEVICE_ID,
+    sessionId: current.claims.sessionId,
+    executorId: current.claims.executorId,
+    operationId: current.claims.operationId,
+    expectedSessionRevision: current.claims.expectedSessionRevision,
+    purpose,
+    ...overrides
+  };
+}
+
 test("fixed-seed Ed25519 vectors verify all locked Desktop purposes and six command purposes", () => {
   assert.equal(PUBLIC_KEY_X, "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg");
   const cases = purposeCases();
@@ -574,5 +592,194 @@ test("dedicated handoff verifier rejects non-canonical compact JWS representatio
   );
   expectCode("desktop_trusted_token_claims_invalid", () =>
     verifyDesktopAuthorizationHandoffToken(handoffInput({ token: reorderedPayload }))
+  );
+});
+
+test("dedicated session command verifier accepts cancel and reopen and projects signed facts only", () => {
+  for (const purpose of ["authorization_cancel", "authorization_reopen"]) {
+    const input = sessionCommandInput(purpose);
+    const facts = verifyDesktopAuthorizationSessionCommandToken(input);
+    assert.deepEqual(facts, {
+      actorId: "user_1",
+      sessionId: "session_1",
+      executorId: "executor_1",
+      operationId: "operation_1",
+      expectedSessionRevision: 6,
+      purpose
+    });
+    assert.deepEqual(Object.keys(facts).sort(), [
+      "actorId",
+      "executorId",
+      "expectedSessionRevision",
+      "operationId",
+      "purpose",
+      "sessionId"
+    ]);
+    assert.equal(Object.isFrozen(facts), true);
+    const serialized = JSON.stringify(facts);
+    for (const forbidden of [input.token, NONCE, "server_key_1", PUBLIC_KEY_X, "claims"]) {
+      assert.equal(serialized.includes(forbidden), false);
+    }
+  }
+});
+
+test("session command verifier rejects renderer actor truth and every stale or cross-target tuple", () => {
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken({
+      ...sessionCommandInput(),
+      actorId: "renderer_actor"
+    })
+  );
+
+  for (const override of [
+    { purpose: "authorization_reopen" },
+    { registeredDeviceId: "c".repeat(64) },
+    { expectedSessionRevision: 7 },
+    { sessionId: "session_other" },
+    { executorId: "executor_other" },
+    { operationId: "operation_other" }
+  ]) {
+    const expectedCode = Object.hasOwn(override, "registeredDeviceId")
+      ? "desktop_trusted_token_device_mismatch"
+      : "desktop_trusted_token_target_mismatch";
+    expectCode(expectedCode, () =>
+      verifyDesktopAuthorizationSessionCommandToken(sessionCommandInput(undefined, override))
+    );
+  }
+
+  const input = sessionCommandInput();
+  const parts = input.token.split(".");
+  const forgedClaims = {
+    ...JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")),
+    actorId: "forged_actor"
+  };
+  const forgedPayload = Buffer.from(JSON.stringify(forgedClaims), "utf8").toString("base64url");
+  expectCode("desktop_trusted_token_signature_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken({
+      ...input,
+      token: `${parts[0]}.${forgedPayload}.${parts[2]}`
+    })
+  );
+
+  const handoff = purposeCases()[0];
+  expectCode("desktop_trusted_token_target_mismatch", () =>
+    verifyDesktopAuthorizationSessionCommandToken({
+      ...input,
+      token: issue(handoff.claims)
+    })
+  );
+});
+
+test("session command verifier captures hostile input descriptors once and fails closed", () => {
+  const valid = sessionCommandInput();
+  let accessorReads = 0;
+  const accessor = { ...valid };
+  Object.defineProperty(accessor, "sessionId", {
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      return "session_1";
+    }
+  });
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken(accessor)
+  );
+  assert.equal(accessorReads, 0);
+
+  let descriptorReads = 0;
+  const alternating = new Proxy({ ...valid }, {
+    getOwnPropertyDescriptor(target, property) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      if (property !== "executorId" || !descriptor) return descriptor;
+      descriptorReads += 1;
+      return {
+        ...descriptor,
+        value: descriptorReads === 1 ? "executor_1" : "executor_canary"
+      };
+    }
+  });
+  const facts = verifyDesktopAuthorizationSessionCommandToken(alternating);
+  assert.equal(facts.executorId, "executor_1");
+  assert.equal(descriptorReads, 1);
+
+  let keyringAccessorReads = 0;
+  const accessorKeyring = keyring();
+  Object.defineProperty(accessorKeyring, "issuer", {
+    enumerable: true,
+    get() {
+      keyringAccessorReads += 1;
+      return "aicrm-agent-executor";
+    }
+  });
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken({
+      ...valid,
+      keyring: accessorKeyring
+    })
+  );
+  assert.equal(keyringAccessorReads, 0);
+
+  let keyDescriptorReads = 0;
+  const alternatingKey = new Proxy(verificationKey(), {
+    getOwnPropertyDescriptor(target, property) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      if (property !== "x" || !descriptor) return descriptor;
+      keyDescriptorReads += 1;
+      return {
+        ...descriptor,
+        value: keyDescriptorReads === 1 ? PUBLIC_KEY_X : "canary_key"
+      };
+    }
+  });
+  const stableKeyFacts = verifyDesktopAuthorizationSessionCommandToken({
+    ...valid,
+    keyring: keyring({ keys: [alternatingKey] })
+  });
+  assert.equal(stableKeyFacts.actorId, "user_1");
+  assert.equal(keyDescriptorReads, 1);
+
+  const withSymbol = { ...valid, [Symbol("secret")]: valid.token };
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken(withSymbol)
+  );
+
+  const nonEnumerable = { ...valid };
+  Object.defineProperty(nonEnumerable, "operationId", {
+    enumerable: false,
+    value: "operation_1"
+  });
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken(nonEnumerable)
+  );
+
+  const inherited = Object.assign(Object.create({ inherited: true }), valid);
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken(inherited)
+  );
+
+  const throwing = new Proxy({ ...valid }, {
+    ownKeys() {
+      throw new Error(`canary ${valid.token}`);
+    }
+  });
+  expectCode("desktop_trusted_token_input_invalid", () =>
+    verifyDesktopAuthorizationSessionCommandToken(throwing)
+  );
+});
+
+test("session command verifier preserves unknown-kid for one-refresh recovery", () => {
+  const current = purposeCases().find(
+    (item) => item.claims.purpose === "authorization_cancel"
+  );
+  assert.ok(current);
+  const unknownKidToken = issue(current.claims, {
+    alg: "EdDSA",
+    kid: "server_key_missing",
+    typ: "JWT"
+  });
+  expectCode("desktop_trusted_token_unknown_key", () =>
+    verifyDesktopAuthorizationSessionCommandToken(
+      sessionCommandInput(undefined, { token: unknownKidToken })
+    )
   );
 });

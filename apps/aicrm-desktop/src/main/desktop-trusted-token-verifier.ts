@@ -222,6 +222,31 @@ export interface DesktopAuthorizationHandoffTrustedFacts {
   expectedSessionRevision: number;
 }
 
+export type DesktopAuthorizationSessionCommandPurpose =
+  | "authorization_cancel"
+  | "authorization_reopen";
+
+export interface VerifyDesktopAuthorizationSessionCommandTokenInput {
+  token: string;
+  keyring: DesktopTrustedTokenKeyring;
+  now: Date;
+  registeredDeviceId: string;
+  sessionId: string;
+  executorId: string;
+  operationId: string;
+  expectedSessionRevision: number;
+  purpose: DesktopAuthorizationSessionCommandPurpose;
+}
+
+export interface DesktopAuthorizationSessionCommandTrustedFacts {
+  actorId: string;
+  sessionId: string;
+  executorId: string;
+  operationId: string;
+  expectedSessionRevision: number;
+  purpose: DesktopAuthorizationSessionCommandPurpose;
+}
+
 interface VerifyDesktopTrustedTokenEnvelopeInput {
   token: string;
   keyring: DesktopTrustedTokenKeyring;
@@ -282,6 +307,45 @@ export function verifyDesktopAuthorizationHandoffToken(
   return Object.freeze({
     actorId: claims.actorId,
     expectedSessionRevision: claims.expectedSessionRevision
+  });
+}
+
+/**
+ * Verifies a cancel/reopen command ticket without accepting renderer-supplied
+ * actor identity as truth. The target tuple is only a CAS expectation; every
+ * returned fact is projected from the signed command after exact matching.
+ */
+export function verifyDesktopAuthorizationSessionCommandToken(
+  input: VerifyDesktopAuthorizationSessionCommandTokenInput
+): Readonly<DesktopAuthorizationSessionCommandTrustedFacts> {
+  const expected = validateAuthorizationSessionCommandInput(input);
+  const claims = verifyDesktopTrustedTokenEnvelope(expected);
+  if (
+    claims.aud !== AUDIENCE_COMMAND ||
+    claims.purpose !== expected.purpose ||
+    claims.sessionId !== expected.sessionId ||
+    claims.executorId !== expected.executorId ||
+    claims.operationId !== expected.operationId ||
+    claims.expectedSessionRevision !== expected.expectedSessionRevision
+  ) {
+    throw tokenError(
+      "desktop_trusted_token_target_mismatch",
+      "Desktop 授权会话命令目标状态已变化"
+    );
+  }
+  if (typeof claims.actorId !== "string" || !OPAQUE_ID.test(claims.actorId)) {
+    throw tokenError(
+      "desktop_trusted_token_claims_invalid",
+      "Desktop 授权会话命令受信事实无效"
+    );
+  }
+  return Object.freeze({
+    actorId: claims.actorId,
+    sessionId: claims.sessionId,
+    executorId: claims.executorId,
+    operationId: claims.operationId,
+    expectedSessionRevision: claims.expectedSessionRevision,
+    purpose: claims.purpose
   });
 }
 
@@ -784,6 +848,72 @@ function validateAuthorizationHandoffInput(
   };
 }
 
+function validateAuthorizationSessionCommandInput(
+  value: unknown
+): VerifyDesktopAuthorizationSessionCommandTokenInput {
+  const captured = captureExactDataObject(value, [
+    "token",
+    "keyring",
+    "now",
+    "registeredDeviceId",
+    "sessionId",
+    "executorId",
+    "operationId",
+    "expectedSessionRevision",
+    "purpose"
+  ]);
+  if (!captured) {
+    throw tokenError(
+      "desktop_trusted_token_input_invalid",
+      "Desktop 授权会话命令验签输入结构无效"
+    );
+  }
+
+  let nowMilliseconds: number;
+  try {
+    if (Object.getPrototypeOf(captured.now) !== Date.prototype) throw new Error("invalid date");
+    nowMilliseconds = Date.prototype.getTime.call(captured.now);
+  } catch {
+    throw tokenError(
+      "desktop_trusted_token_input_invalid",
+      "Desktop 授权会话命令验签输入字段无效"
+    );
+  }
+  const keyring = captureDesktopTrustedTokenKeyring(captured.keyring);
+  if (
+    typeof captured.token !== "string" ||
+    !keyring ||
+    !Number.isFinite(nowMilliseconds) ||
+    typeof captured.registeredDeviceId !== "string" ||
+    !LOWER_HEX_256.test(captured.registeredDeviceId) ||
+    typeof captured.sessionId !== "string" ||
+    !OPAQUE_ID.test(captured.sessionId) ||
+    typeof captured.executorId !== "string" ||
+    !OPAQUE_ID.test(captured.executorId) ||
+    typeof captured.operationId !== "string" ||
+    !OPAQUE_ID.test(captured.operationId) ||
+    !positiveSafeInteger(captured.expectedSessionRevision) ||
+    (captured.purpose !== "authorization_cancel" &&
+      captured.purpose !== "authorization_reopen")
+  ) {
+    throw tokenError(
+      "desktop_trusted_token_input_invalid",
+      "Desktop 授权会话命令验签输入字段无效"
+    );
+  }
+  return Object.freeze({
+    token: captured.token,
+    keyring,
+    now: new Date(nowMilliseconds),
+    registeredDeviceId: captured.registeredDeviceId,
+    sessionId: captured.sessionId,
+    executorId: captured.executorId,
+    operationId: captured.operationId,
+    expectedSessionRevision: captured.expectedSessionRevision,
+    purpose: captured.purpose
+  });
+}
+
 function validateExpectedTarget(value: unknown): DesktopTrustedTokenExpectedTarget {
   if (!isRecord(value) || typeof value.audience !== "string" || typeof value.purpose !== "string") {
     throw tokenError("desktop_trusted_token_input_invalid", "受信票据目标无效");
@@ -929,6 +1059,124 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
   const actual = Object.keys(value).sort();
   const canonical = [...expected].sort();
   return actual.length === canonical.length && actual.every((field, index) => field === canonical[index]);
+}
+
+function captureExactDataObject(
+  value: unknown,
+  expected: readonly string[]
+): Readonly<Record<string, unknown>> | null {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const actual = Reflect.ownKeys(value);
+    if (
+      actual.length !== expected.length ||
+      actual.some((key) => typeof key !== "string" || !expected.includes(key))
+    ) {
+      return null;
+    }
+    const captured: Record<string, unknown> = Object.create(null);
+    for (const key of expected) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || descriptor.enumerable !== true || !("value" in descriptor)) {
+        return null;
+      }
+      captured[key] = descriptor.value;
+    }
+    return Object.freeze(captured);
+  } catch {
+    return null;
+  }
+}
+
+function captureDenseDataArray(value: unknown, maximumItems: number): readonly unknown[] | null {
+  try {
+    if (!Array.isArray(value) || Reflect.getPrototypeOf(value) !== Array.prototype) return null;
+    const actual = Reflect.ownKeys(value);
+    if (actual.some((key) => typeof key !== "string")) return null;
+    const lengthDescriptor = Reflect.getOwnPropertyDescriptor(value, "length");
+    if (!lengthDescriptor || !("value" in lengthDescriptor)) return null;
+    const length = lengthDescriptor.value;
+    if (
+      typeof length !== "number" ||
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      length > maximumItems
+    ) return null;
+    const expected = ["length", ...Array.from({ length }, (_, index) => String(index))];
+    if (actual.length !== expected.length || expected.some((key) => !actual.includes(key))) {
+      return null;
+    }
+    const captured: unknown[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || descriptor.enumerable !== true || !("value" in descriptor)) return null;
+      captured.push(descriptor.value);
+    }
+    return Object.freeze(captured);
+  } catch {
+    return null;
+  }
+}
+
+function captureDesktopTrustedTokenKeyring(
+  value: unknown
+): DesktopTrustedTokenKeyring | null {
+  const ring = captureExactDataObject(value, [
+    "schemaVersion",
+    "issuer",
+    "revision",
+    "activeKid",
+    "generatedAt",
+    "refreshAfterSeconds",
+    "maxTokenLifetimeSeconds",
+    "keyringDigest",
+    "desktopAudiences",
+    "keys"
+  ]);
+  if (!ring) return null;
+  const audiences = captureDenseDataArray(ring.desktopAudiences, 4);
+  const keys = captureDenseDataArray(ring.keys, 8);
+  if (!audiences || audiences.length !== 4 || !keys || keys.length < 1) return null;
+  const capturedKeys: DesktopTrustedTokenVerificationKey[] = [];
+  for (const value of keys) {
+    const key = captureExactDataObject(value, [
+      "kid",
+      "kty",
+      "crv",
+      "alg",
+      "use",
+      "x",
+      "signingNotBefore",
+      "signingNotAfter",
+      "verifyUntil"
+    ]);
+    if (!key) return null;
+    capturedKeys.push(Object.freeze({
+      kid: key.kid,
+      kty: key.kty,
+      crv: key.crv,
+      alg: key.alg,
+      use: key.use,
+      x: key.x,
+      signingNotBefore: key.signingNotBefore,
+      signingNotAfter: key.signingNotAfter,
+      verifyUntil: key.verifyUntil
+    }) as unknown as DesktopTrustedTokenVerificationKey);
+  }
+  return Object.freeze({
+    schemaVersion: ring.schemaVersion,
+    issuer: ring.issuer,
+    revision: ring.revision,
+    activeKid: ring.activeKid,
+    generatedAt: ring.generatedAt,
+    refreshAfterSeconds: ring.refreshAfterSeconds,
+    maxTokenLifetimeSeconds: ring.maxTokenLifetimeSeconds,
+    keyringDigest: ring.keyringDigest,
+    desktopAudiences: Object.freeze([...audiences]),
+    keys: Object.freeze(capturedKeys)
+  }) as unknown as DesktopTrustedTokenKeyring;
 }
 
 function validNonce(value: string): boolean {

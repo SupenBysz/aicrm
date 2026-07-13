@@ -15,6 +15,7 @@ const NOW = "2026-07-13T09:00:00.123Z";
 const HANDOFF_TICKET = "handoff.header.signature";
 const CLAIM_TOKEN = "claim.header.signature";
 const ACTIVATION_TOKEN = "activation.header.signature";
+const COMMAND_TICKET = "command.header.signature";
 const LOGIN_HASH = "1".repeat(64);
 const ACCOUNT_FINGERPRINT = "2".repeat(64);
 const BINDING_DIGEST = "3".repeat(64);
@@ -174,6 +175,33 @@ function acknowledgementData(overrides = {}) {
   };
 }
 
+function authorizationCommandInput(overrides = {}) {
+  return {
+    sessionId: "session_1",
+    commandTicket: COMMAND_TICKET,
+    operationId: "command_operation_1",
+    purpose: "authorization_cancel",
+    expectedSessionRevision: 2,
+    result: "succeeded",
+    completedAt: NOW,
+    ...overrides
+  };
+}
+
+function authorizationCommandData(overrides = {}) {
+  return {
+    operationId: "command_operation_1",
+    sessionId: "session_1",
+    purpose: "authorization_cancel",
+    expectedSessionRevision: 2,
+    status: "succeeded",
+    failureCode: "",
+    completedAt: NOW,
+    replayed: false,
+    ...overrides
+  };
+}
+
 function proofRecoveryInput(prepared, overrides = {}) {
   return {
     sessionId: "session_1",
@@ -199,6 +227,19 @@ function acknowledgementRecoveryInput(prepared, overrides = {}) {
     sourceCredentialRevision: 0,
     revocationEpoch: 0,
     bindingDigest: BINDING_DIGEST,
+    expectedRequestReference: prepared.requestReference,
+    expectedRequestHash: prepared.requestHash,
+    ...overrides
+  };
+}
+
+function authorizationCommandRecoveryInput(prepared, overrides = {}) {
+  return {
+    sessionId: "session_1",
+    operationId: "command_operation_1",
+    purpose: "authorization_cancel",
+    expectedSessionRevision: 2,
+    result: "succeeded",
     expectedRequestReference: prepared.requestReference,
     expectedRequestHash: prepared.requestHash,
     ...overrides
@@ -721,6 +762,214 @@ test("activation-token-free ACK recovery replays the exact old barrier body and 
   assert.equal(networkCalls, 0);
   assert.deepEqual(durable.data, acknowledgementData());
   await current.client().completeRequest(prepared.requestReference, prepared.requestHash);
+});
+
+test("authorization command ACK uses the signed shared journal lane and exact device contract", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const requests = [];
+  const client = current.client({
+    fetch: async (url, init) => {
+      requests.push({ url, init });
+      return response(authorizationCommandData());
+    }
+  });
+
+  const acknowledged = await client.acknowledgeAuthorizationCommand(
+    authorizationCommandInput()
+  );
+  assert.deepEqual(acknowledged.data, authorizationCommandData());
+  assert.equal(current.signCount(), 1);
+  assert.equal(requests.length, 1);
+  assert.equal(
+    requests[0].url,
+    "https://aicrm.example.test/api/v1/ai-executor-authorization-sessions/session_1/desktop-commands/command_operation_1/ack"
+  );
+  const headers = { ...requests[0].init.headers };
+  assert.equal(headers.Authorization, `AiCRM-Command ${COMMAND_TICKET}`);
+  assert.equal(Object.keys(headers).filter((name) => name.startsWith("X-AiCRM-")).length, 6);
+  assert.equal("X-KY-Workspace-Type" in headers, false);
+  assert.equal("X-KY-Workspace-Id" in headers, false);
+  assert.equal("Idempotency-Key" in headers, false);
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(requests[0].init.redirect, "error");
+  assert.equal(requests[0].init.credentials, "omit");
+  assert.deepEqual(JSON.parse(requests[0].init.body), {
+    operationId: "command_operation_1",
+    purpose: "authorization_cancel",
+    expectedSessionRevision: 2,
+    result: "succeeded",
+    completedAt: NOW
+  });
+  const durable = await current.journal.load(acknowledged.requestReference);
+  assert.equal(durable.kind, "authorization_command_ack");
+  assert.equal(durable.signed.requestHash, acknowledged.requestHash);
+  await client.completeRequest(acknowledged.requestReference, acknowledged.requestHash);
+
+  const failed = await current.client({
+    fetch: async (_url, init) => {
+      assert.deepEqual(JSON.parse(init.body), {
+        operationId: "command_operation_2",
+        purpose: "authorization_reopen",
+        expectedSessionRevision: 7,
+        result: "failed",
+        completedAt: NOW,
+        failureCode: "app_server_stop_failed"
+      });
+      return response(authorizationCommandData({
+        operationId: "command_operation_2",
+        purpose: "authorization_reopen",
+        expectedSessionRevision: 7,
+        status: "failed",
+        failureCode: "app_server_stop_failed"
+      }));
+    }
+  }).acknowledgeAuthorizationCommand(authorizationCommandInput({
+    operationId: "command_operation_2",
+    purpose: "authorization_reopen",
+    expectedSessionRevision: 7,
+    result: "failed",
+    failureCode: "app_server_stop_failed"
+  }));
+  assert.equal(failed.data.status, "failed");
+  assert.equal(failed.data.failureCode, "app_server_stop_failed");
+  await client.completeRequest(failed.requestReference, failed.requestHash);
+});
+
+test("ticket-free authorization command ACK recovery replays only the exact durable request", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const requests = [];
+  let prepared;
+  await assert.rejects(
+    current.client({
+      fetch: async (url, init) => {
+        requests.push(requestProjection(url, init));
+        throw new Error("offline");
+      }
+    }).acknowledgeAuthorizationCommand(authorizationCommandInput(), {
+      onPrepared: async (value) => {
+        prepared = value;
+      }
+    }),
+    { code: "desktop_authorization_transport_failed" }
+  );
+  assert.ok(prepared);
+  assert.equal(current.signCount(), 1);
+  const exact = authorizationCommandRecoveryInput(prepared);
+  const recovered = await current.client({
+    now: () => new Date("2026-08-13T09:00:00.000Z"),
+    fetch: async (url, init) => {
+      requests.push(requestProjection(url, init));
+      return response(authorizationCommandData({ replayed: true }));
+    }
+  }).recoverAuthorizationCommandAck(exact);
+  assert.equal(current.signCount(), 1);
+  assert.deepEqual(requests[1], requests[0]);
+  assert.equal(recovered.recovered, true);
+  assert.deepEqual(recovered.data, authorizationCommandData({ replayed: true }));
+  assert.equal("commandTicket" in exact, false);
+  assert.equal("completedAt" in exact, false);
+
+  let networkCalls = 0;
+  const durable = await current.client({
+    now: () => new Date("2026-09-13T09:00:00.000Z"),
+    fetch: async () => {
+      networkCalls += 1;
+      throw new Error("must not send durable command ACK");
+    }
+  }).recoverAuthorizationCommandAck(exact);
+  assert.equal(networkCalls, 0);
+  assert.deepEqual(durable.data, authorizationCommandData({ replayed: true }));
+  await current.client().completeRequest(prepared.requestReference, prepared.requestHash);
+});
+
+test("authorization command ACK rejects unsafe inputs, mismatched recovery and response drift", async (t) => {
+  const invalidInputs = [
+    authorizationCommandInput({ extra: true }),
+    authorizationCommandInput({ purpose: "credential_logout" }),
+    authorizationCommandInput({ result: "failed" }),
+    authorizationCommandInput({ failureCode: "not_allowed" }),
+    authorizationCommandInput({ result: "failed", failureCode: "Bad-Code" }),
+    authorizationCommandInput({ completedAt: "2026-07-13T09:00:01.123Z" }),
+    Object.assign(Object.create({}), authorizationCommandInput())
+  ];
+  const getterInput = authorizationCommandInput();
+  Object.defineProperty(getterInput, "sessionId", {
+    enumerable: true,
+    get() {
+      throw new Error("getter canary must not escape");
+    }
+  });
+  invalidInputs.push(getterInput);
+  const revokedInput = Proxy.revocable(authorizationCommandInput(), {});
+  revokedInput.revoke();
+  invalidInputs.push(revokedInput.proxy);
+  for (const input of invalidInputs) {
+    const current = await fixture();
+    t.after(() => rm(current.base, { recursive: true, force: true }));
+    let networkCalls = 0;
+    await assert.rejects(
+      async () => current.client({
+        fetch: async () => {
+          networkCalls += 1;
+          return response(authorizationCommandData());
+        }
+      }).acknowledgeAuthorizationCommand(input),
+      { code: "desktop_authorization_transport_contract_invalid" }
+    );
+    assert.equal(networkCalls, 0);
+    assert.equal(current.signCount(), 0);
+  }
+
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let prepared;
+  let networkCalls = 0;
+  const responses = [
+    authorizationCommandData({ commandTicket: COMMAND_TICKET }),
+    authorizationCommandData({ status: "failed", failureCode: "unexpected_failure" }),
+    authorizationCommandData({ failureCode: "server_path_canary" }),
+    authorizationCommandData()
+  ];
+  const client = current.client({
+    fetch: async () => {
+      networkCalls += 1;
+      return response(responses.shift());
+    }
+  });
+  for (let index = 0; index < 3; index += 1) {
+    await assert.rejects(
+      client.acknowledgeAuthorizationCommand(authorizationCommandInput(), {
+        onPrepared: async (value) => {
+          prepared = value;
+        }
+      }),
+      { code: "desktop_authorization_transport_response_invalid" }
+    );
+  }
+  const accepted = await client.acknowledgeAuthorizationCommand(authorizationCommandInput());
+  assert.deepEqual(accepted.data, authorizationCommandData());
+  assert.equal(networkCalls, 4);
+  assert.equal(current.signCount(), 1);
+
+  const exact = authorizationCommandRecoveryInput(prepared);
+  for (const mismatch of [
+    { sessionId: "session_other" },
+    { operationId: "command_operation_other" },
+    { purpose: "authorization_reopen" },
+    { expectedSessionRevision: 3 },
+    { result: "failed", failureCode: "stop_failed" },
+    { expectedRequestReference: "6".repeat(64) },
+    { expectedRequestHash: "5".repeat(64) },
+    { commandTicket: COMMAND_TICKET },
+    { completedAt: NOW }
+  ]) {
+    await assert.rejects(
+      async () => current.client().recoverAuthorizationCommandAck({ ...exact, ...mismatch })
+    );
+  }
+  await current.client().completeRequest(accepted.requestReference, accepted.requestHash);
 });
 
 test("proof and ACK exact recovery return durable 4xx without network", async (t) => {

@@ -50,6 +50,7 @@ const EFFECT_REFERENCE = "1".repeat(64);
 const RECOVERY_EVIDENCE = "2".repeat(64);
 const ACK_REFERENCE = "3".repeat(64);
 const INDETERMINATE_REASON = "4".repeat(64);
+const ACK_REQUEST_HASH = "6".repeat(64);
 
 class FakeSafeStorage {
   isEncryptionAvailable() {
@@ -265,6 +266,14 @@ async function expectCode(code, operation) {
   });
 }
 
+function expectSyncCode(code, operation) {
+  assert.throws(operation, (error) => {
+    assert.ok(error instanceof DesktopTrustedCommandJournalError);
+    assert.equal(error.code, code);
+    return true;
+  });
+}
+
 async function reachAckPrepared(current, value = command()) {
   const accepted = await current.store.acceptOrLoad(value);
   const fence = reference(accepted);
@@ -275,11 +284,14 @@ async function reachAckPrepared(current, value = command()) {
   await current.store.markEffectDurable({
     ...fence,
     effectRecoveryReference: EFFECT_REFERENCE,
-    effectAttemptToken: begun.effectAttemptToken
+    effectAttemptToken: begun.effectAttemptToken,
+    result: "succeeded",
+    failureCode: null
   });
   const prepared = await current.store.prepareAcknowledgement({
     ...fence,
-    outboundAckReference: ACK_REFERENCE
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
   });
   return { value, fence, prepared };
 }
@@ -352,7 +364,8 @@ test("accepted to acknowledged is monotonic and the tombstone removes the raw to
   await expectCode("desktop_trusted_command_state_invalid", () =>
     current.store.prepareAcknowledgement({
       ...fence,
-      outboundAckReference: ACK_REFERENCE
+      outboundAckReference: ACK_REFERENCE,
+      outboundAckRequestHash: ACK_REQUEST_HASH
     })
   );
 
@@ -373,31 +386,54 @@ test("accepted to acknowledged is monotonic and the tombstone removes the raw to
     current.store.markEffectDurable({
       ...fence,
       effectRecoveryReference: EFFECT_REFERENCE,
-      effectAttemptToken: Buffer.alloc(32, 1).toString("base64url")
+      effectAttemptToken: Buffer.alloc(32, 1).toString("base64url"),
+      result: "succeeded",
+      failureCode: null
     })
   );
 
   const durable = await current.store.markEffectDurable({
     ...fence,
     effectRecoveryReference: EFFECT_REFERENCE,
-    effectAttemptToken: begun.effectAttemptToken
+    effectAttemptToken: begun.effectAttemptToken,
+    result: "succeeded",
+    failureCode: null
   });
   assert.equal(durable.status, "effect_durable");
   assert.equal(durable.effectCompletionMode, "direct");
+  assert.equal(durable.effectResult, "succeeded");
+  assert.equal(durable.effectFailureCode, null);
   const durableReplay = await current.store.markEffectDurable({
     ...fence,
     effectRecoveryReference: EFFECT_REFERENCE,
-    effectAttemptToken: begun.effectAttemptToken
+    effectAttemptToken: begun.effectAttemptToken,
+    result: "succeeded",
+    failureCode: null
   });
   assert.equal(durableReplay.generation, durable.generation);
   const prepared = await current.store.prepareAcknowledgement({
     ...fence,
-    outboundAckReference: ACK_REFERENCE
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
   });
   assert.equal(prepared.status, "ack_prepared");
+  assert.equal(prepared.outboundAckReference, ACK_REFERENCE);
+  assert.equal(prepared.outboundAckRequestHash, ACK_REQUEST_HASH);
+  assert.deepEqual(
+    (await current.store.listForRecovery()).map((record) => record.status),
+    ["ack_prepared"]
+  );
+  await expectCode("desktop_trusted_command_state_invalid", () =>
+    current.store.prepareAcknowledgement({
+      ...fence,
+      outboundAckReference: ACK_REFERENCE,
+      outboundAckRequestHash: "7".repeat(64)
+    })
+  );
   const acknowledged = await current.store.markAcknowledged({
     ...fence,
-    outboundAckReference: ACK_REFERENCE
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
   });
   assert.equal(acknowledged.status, "acknowledged");
   assert.equal(acknowledged.generation, 5);
@@ -440,17 +476,116 @@ test("a crash after durable effect_started can only use explicit recovery", asyn
     restarted.markEffectDurable({
       ...fence,
       effectRecoveryReference: EFFECT_REFERENCE,
-      effectAttemptToken: Buffer.alloc(32, 5).toString("base64url")
+      effectAttemptToken: Buffer.alloc(32, 5).toString("base64url"),
+      result: "succeeded",
+      failureCode: null
     })
   );
   const recovered = await restarted.recoverEffectDurable({
     ...fence,
     effectRecoveryReference: EFFECT_REFERENCE,
-    recoveryEvidenceHash: RECOVERY_EVIDENCE
+    recoveryEvidenceHash: RECOVERY_EVIDENCE,
+    result: "succeeded",
+    failureCode: null
   });
   assert.equal(recovered.status, "effect_durable");
   assert.equal(recovered.effectCompletionMode, "recovered");
   assert.equal(recovered.effectRecoveryEvidenceHash, RECOVERY_EVIDENCE);
+  assert.equal(recovered.effectResult, "succeeded");
+  assert.equal(recovered.effectFailureCode, null);
+});
+
+test("failed effect outcome is durable, exact, and startup-readable", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const accepted = await current.store.acceptOrLoad(command());
+  const fence = reference(accepted);
+  const begun = await current.store.beginEffect({
+    ...fence,
+    effectRecoveryReference: EFFECT_REFERENCE
+  });
+  const durable = await current.store.markEffectDurable({
+    ...fence,
+    effectRecoveryReference: EFFECT_REFERENCE,
+    effectAttemptToken: begun.effectAttemptToken,
+    result: "failed",
+    failureCode: "app_server_stop_failed"
+  });
+  assert.equal(durable.effectResult, "failed");
+  assert.equal(durable.effectFailureCode, "app_server_stop_failed");
+  const [restored] = await current.newStore().listForRecovery();
+  assert.equal(restored.status, "effect_durable");
+  assert.equal(restored.effectResult, "failed");
+  assert.equal(restored.effectFailureCode, "app_server_stop_failed");
+});
+
+test("public journal inputs use one own data-descriptor capture and never invoke accessors", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const value = command();
+  const accepted = await current.store.acceptOrLoad(value);
+  const fence = reference(accepted);
+  let accessorReads = 0;
+  const accessorFence = { ...fence };
+  Object.defineProperty(accessorFence, "semanticKey", {
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      throw new Error(`CANARY_${value.token}`);
+    }
+  });
+  expectSyncCode("desktop_trusted_command_unsafe", () => current.store.read(accessorFence));
+  assert.equal(accessorReads, 0);
+
+  for (const malformed of [
+    { ...fence, [Symbol("secret")]: value.token },
+    Object.assign(Object.create({ inherited: true }), fence),
+    Object.defineProperty({ ...fence }, "payloadHash", {
+      value: fence.payloadHash,
+      enumerable: false
+    }),
+    new Proxy({ ...fence }, {
+      ownKeys() {
+        throw new Error(`CANARY_${value.token}`);
+      }
+    })
+  ]) {
+    expectSyncCode("desktop_trusted_command_unsafe", () => current.store.read(malformed));
+  }
+
+  let descriptorReads = 0;
+  let rawReads = 0;
+  const capturedFence = new Proxy({ ...fence }, {
+    get() {
+      rawReads += 1;
+      throw new Error(`CANARY_${value.token}`);
+    },
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      if (key !== "semanticKey" || !descriptor) return descriptor;
+      descriptorReads += 1;
+      return {
+        ...descriptor,
+        value: descriptorReads === 1 ? fence.semanticKey : "f".repeat(64)
+      };
+    }
+  });
+  assert.equal((await current.store.read(capturedFence))?.semanticKey, fence.semanticKey);
+  assert.equal(descriptorReads, 1);
+  assert.equal(rawReads, 0);
+
+  const hostileClaims = { ...value.claims };
+  Object.defineProperty(hostileClaims, "actorId", {
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      return "CANARY_RAW_ACTOR";
+    }
+  });
+  expectSyncCode("desktop_trusted_command_unsafe", () =>
+    current.store.acceptOrLoad({ token: value.token, claims: hostileClaims })
+  );
+  assert.equal(accessorReads, 0);
 });
 
 test("indeterminate is terminal and removes the raw token", async (t) => {
@@ -471,7 +606,9 @@ test("indeterminate is terminal and removes the raw token", async (t) => {
     current.store.recoverEffectDurable({
       ...fence,
       effectRecoveryReference: EFFECT_REFERENCE,
-      recoveryEvidenceHash: RECOVERY_EVIDENCE
+      recoveryEvidenceHash: RECOVERY_EVIDENCE,
+      result: "succeeded",
+      failureCode: null
     })
   );
   const replayed = await current.store.acceptOrLoad(value);
@@ -507,7 +644,8 @@ test("temporary states recover accepted and acknowledged crash points exactly", 
   await assert.rejects(
     acknowledgementCrash.store.markAcknowledged({
       ...reached.fence,
-      outboundAckReference: ACK_REFERENCE
+      outboundAckReference: ACK_REFERENCE,
+      outboundAckRequestHash: ACK_REQUEST_HASH
     }),
     /crash/
   );
@@ -560,7 +698,8 @@ test("unsupported directory fsync keeps only the latest flushed tombstone shadow
   const reached = await reachAckPrepared(current);
   const acknowledged = await current.store.markAcknowledged({
     ...reached.fence,
-    outboundAckReference: ACK_REFERENCE
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
   });
   assert.equal(acknowledged.token, null);
   const names = (await readdir(current.root)).sort();
@@ -582,7 +721,8 @@ test("explicit prune keeps tombstones through expiry margin and never removes in
   const reached = await reachAckPrepared(current);
   await current.store.markAcknowledged({
     ...reached.fence,
-    outboundAckReference: ACK_REFERENCE
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
   });
 
   const uncertainValue = command({ operationId: "operation_2" });
