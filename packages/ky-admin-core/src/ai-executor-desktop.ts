@@ -55,6 +55,48 @@ export interface CodexCredentialLogoutCommandInput {
   commandTicket: string;
 }
 
+export interface CodexCredentialVerificationResult {
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  accountFingerprint: string;
+  checkedAt: string;
+  authorized: boolean;
+  failureCode?: string;
+}
+
+export type CodexReadinessStatus = "ready" | "degraded" | "unavailable";
+
+export type CodexReadinessReasonCode =
+  | "network_error"
+  | "model_unavailable"
+  | "default_model_missing"
+  | "quota_exceeded"
+  | "runtime_error"
+  | "desktop_offline"
+  | "credential_expired";
+
+export interface CodexReadinessCheckResult {
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  catalogRevision: number;
+  status: CodexReadinessStatus;
+  reasonCode?: CodexReadinessReasonCode;
+  observedAt: string;
+}
+
+export interface CodexCredentialLogoutResult {
+  executorId: string;
+  operationId: string;
+  revocationId: string;
+  credentialRevision: number;
+  revocationEpoch: number;
+  result: "succeeded" | "failed" | "stale_target";
+  completedAt: string;
+  failureCode?: string;
+}
+
 export type CodexAuthorizationStatus =
   | "starting"
   | "waiting_user"
@@ -77,7 +119,6 @@ export interface CodexAuthorizationSnapshot {
 }
 
 export interface CodexModelCatalogItem {
-  catalogItemId?: string;
   modelKey: string;
   displayName: string;
   inputModalities: string[];
@@ -85,8 +126,6 @@ export interface CodexModelCatalogItem {
   hidden: boolean;
   upgradeModelKey?: string;
   status: string;
-  codexVersion?: string;
-  lastSeenAt?: string;
 }
 
 export interface CodexModelCatalogSnapshot {
@@ -114,11 +153,11 @@ export interface CodexAuthorizationDesktopBridgeContract {
   getSnapshot: (sessionId: string) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
   cancel: (input: CodexSessionCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
   reopen: (input: CodexSessionCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
-  verify: (input: CodexVerifyCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
-  checkReadiness: (input: CodexReadinessCheckCommandInput) => Promise<DesktopCommandResult<unknown>>;
+  verify: (input: CodexVerifyCommandInput) => Promise<DesktopCommandResult<CodexCredentialVerificationResult>>;
+  checkReadiness: (input: CodexReadinessCheckCommandInput) => Promise<DesktopCommandResult<CodexReadinessCheckResult>>;
   getModelCatalog: (executorId: string) => Promise<DesktopCommandResult<CodexModelCatalogSnapshot>>;
   refreshModelCatalog: (input: CodexModelCatalogRefreshCommandInput) => Promise<DesktopCommandResult<CodexModelCatalogSnapshot>>;
-  logout: (input: CodexCredentialLogoutCommandInput) => Promise<DesktopCommandResult<unknown>>;
+  logout: (input: CodexCredentialLogoutCommandInput) => Promise<DesktopCommandResult<CodexCredentialLogoutResult>>;
   onChanged: (listener: (event: CodexAuthorizationEventEnvelope) => void) => () => void;
 }
 

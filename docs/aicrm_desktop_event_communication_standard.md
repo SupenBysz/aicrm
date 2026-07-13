@@ -816,7 +816,7 @@ React 是否 cleanup？
 
 - Port/Bridge 新订阅必须返回 `unsubscribe`，Host 保持单一主订阅，React/store cleanup 必须释放 listener、timer、reader 与 AbortController。
 - 非持久事件固定使用“先订阅并缓冲 → 读取带 sequence 的 snapshot → 按 sequence 排空”流程；gap、buffer overflow 或 runtime epoch 变化时重新读取 snapshot。
-- Envelope 必须版本化并携带 `operationId`、runtime session/epoch、单调 `nativeSequence` 和 opaque scope；不得携带业务 `nextActions`、binding decision、receipt、二维码 data URL、DOM、截图、凭据或账号原文。
+- Envelope 必须版本化并携带 `operationId`、runtime session/epoch、单调 `nativeSequence` 和 opaque scope；不得携带业务 `nextActions`、binding decision、receipt、二维码 data URL、DOM、截图、凭据或账号原文。唯一已锁定例外是 `codex.authorization.changed`：它投影 Main 持久 session 而非一次 operation，固定使用 `correlationId=sessionId`、`payload.sequence=durable nativeSequence`，跨进程重启继续单调，不重复增加 operationId 或 runtime epoch。
 - Main 只维护原生 operation journal，不维护 Attempt phase、角色、权限、workspace rollout 或业务绑定决策。
 
 ### 17.4 持久 SSE

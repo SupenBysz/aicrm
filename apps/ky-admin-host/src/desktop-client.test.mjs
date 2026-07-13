@@ -95,3 +95,41 @@ test("Host composes only registration and binding into the Core trust port", asy
     assert.equal(projection.includes(canary), false);
   }
 });
+
+test("Host exposes the exact preload authorization Bridge without widening it", async (t) => {
+  t.after(() => setWindow(undefined));
+  const calls = [];
+  const authorization = {
+    getCapabilities: async () => ({ ok: true, data: { bridgeVersion: 2 } }),
+    start: async (input) => (calls.push(["start", input]), { ok: true }),
+    getSnapshot: async (input) => (calls.push(["snapshot", input]), { ok: true }),
+    cancel: async (input) => (calls.push(["cancel", input]), { ok: true }),
+    reopen: async (input) => (calls.push(["reopen", input]), { ok: true }),
+    verify: async (input) => (calls.push(["verify", input]), { ok: true }),
+    checkReadiness: async (input) => (calls.push(["readiness", input]), { ok: true }),
+    getModelCatalog: async (input) => (calls.push(["catalog", input]), { ok: true }),
+    refreshModelCatalog: async (input) => (calls.push(["refresh", input]), { ok: true }),
+    logout: async (input) => (calls.push(["logout", input]), { ok: true }),
+    onChanged: () => () => undefined
+  };
+  setWindow({
+    aicrm: {
+      app: { getVersion: async () => "0.1.0" },
+      codex: {
+        authorization,
+        commandTicket: "must-not-be-copied"
+      }
+    }
+  });
+  const bridge = aiExecutorDesktopPort.getAuthorizationBridge();
+  assert.equal(bridge, authorization);
+  await bridge.start({ sessionId: "session_1" });
+  await bridge.verify({ executorId: "executor_1" });
+  await bridge.logout({ executorId: "executor_1" });
+  assert.deepEqual(calls, [
+    ["start", { sessionId: "session_1" }],
+    ["verify", { executorId: "executor_1" }],
+    ["logout", { executorId: "executor_1" }]
+  ]);
+  assert.equal("commandTicket" in bridge, false);
+});

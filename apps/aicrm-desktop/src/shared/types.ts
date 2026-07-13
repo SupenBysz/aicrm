@@ -182,6 +182,48 @@ export interface CodexCredentialLogoutCommandInput {
   commandTicket: string;
 }
 
+export interface CodexCredentialVerificationResult {
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  accountFingerprint: string;
+  checkedAt: string;
+  authorized: boolean;
+  failureCode?: string;
+}
+
+export type CodexReadinessStatus = "ready" | "degraded" | "unavailable";
+
+export type CodexReadinessReasonCode =
+  | "network_error"
+  | "model_unavailable"
+  | "default_model_missing"
+  | "quota_exceeded"
+  | "runtime_error"
+  | "desktop_offline"
+  | "credential_expired";
+
+export interface CodexReadinessCheckResult {
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  catalogRevision: number;
+  status: CodexReadinessStatus;
+  reasonCode?: CodexReadinessReasonCode;
+  observedAt: string;
+}
+
+export interface CodexCredentialLogoutResult {
+  executorId: string;
+  operationId: string;
+  revocationId: string;
+  credentialRevision: number;
+  revocationEpoch: number;
+  result: "succeeded" | "failed" | "stale_target";
+  completedAt: string;
+  failureCode?: string;
+}
+
 export type CodexAuthorizationStatus =
   | "starting"
   | "waiting_user"

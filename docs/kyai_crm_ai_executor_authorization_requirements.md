@@ -963,6 +963,7 @@ interface CodexAuthorizationCapabilities {
 interface CodexAuthorizationStartInput {
   sessionId: string;
   executorId: string;
+  sessionRevision: number;
   handoffId: string;
   handoffTicket: string;
 }
@@ -1007,6 +1008,38 @@ interface CodexCredentialLogoutCommandInput {
   commandTicket: string;
 }
 
+interface CodexCredentialVerificationResult {
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  accountFingerprint: string;
+  checkedAt: string;
+  authorized: boolean;
+  failureCode?: string;
+}
+
+interface CodexReadinessCheckResult {
+  executorId: string;
+  operationId: string;
+  credentialRevision: number;
+  catalogRevision: number;
+  status: "ready" | "degraded" | "unavailable";
+  reasonCode?: "network_error" | "model_unavailable" | "default_model_missing" |
+    "quota_exceeded" | "runtime_error" | "desktop_offline" | "credential_expired";
+  observedAt: string;
+}
+
+interface CodexCredentialLogoutResult {
+  executorId: string;
+  operationId: string;
+  revocationId: string;
+  credentialRevision: number;
+  revocationEpoch: number;
+  result: "succeeded" | "failed" | "stale_target";
+  completedAt: string;
+  failureCode?: string;
+}
+
 interface CodexAuthorizationSnapshot {
   sessionId: string;
   executorId: string;
@@ -1035,7 +1068,9 @@ window.aicrm.codex.authorization.logout(logoutCommand)    Command
 window.aicrm.codex.authorization.onChanged(listener)      -> unsubscribe
 ```
 
-除 start 使用 handoff ticket 外，所有 Command 都必须校验服务端 compact JWS command ticket 的 audience、purpose、executor/session、deviceId、operationId、目标 revision、expiry 和单次消费状态；任意 renderer 仅凭 ID 不得触发。Cancel API、reopen API、readiness check、model refresh、credential verify 和 credential revoke 分别签发对应 purpose 的 ticket。事件 payload 为 snapshot 安全子集并带标准 envelope。类型契约放 `packages/ky-admin-core/src/ai-executor-desktop.ts`，运行时 adapter 放 `apps/ky-admin-host/src/desktop-client.ts`，插件只消费 Host 注入接口。能力缺失返回本地 `desktop_client_required`；版本小于 2 返回 `desktop_bridge_upgrade_required`。
+`verify`、`checkReadiness`、`logout` 分别返回上述独立安全结果，禁止借用 authorization session snapshot。成功结果必须由 Main Bridge 按 exact keys、枚举、revision、SHA-256 和 canonical UTC 重新校验并复制；Runtime 返回额外字段、原始错误、路径、票据或其他非合同数据时统一收敛为本地安全错误，不得透传。`getModelCatalog` 与 `refreshModelCatalog` 只返回 `CodexModelCatalogSnapshot` 安全目录字段。
+
+除 start 使用 handoff ticket 外，所有 Command 都必须校验服务端 compact JWS command ticket 的 audience、purpose、executor/session、deviceId、operationId、目标 revision、expiry 和单次消费状态；任意 renderer 仅凭 ID 不得触发。Cancel API、reopen API、readiness check、model refresh、credential verify 和 credential revoke 分别签发对应 purpose 的 ticket。事件 payload 为 snapshot 安全子集并带标准 envelope。`codex.authorization.changed` 是持久本地 session 投影的专用 Native Event：`correlationId=sessionId`，`payload.sequence` 同时承担 durable native sequence；跨重启继续单调，因此不另造 runtime epoch 或 operationId。类型契约放 `packages/ky-admin-core/src/ai-executor-desktop.ts`，运行时 adapter 放 `apps/ky-admin-host/src/desktop-client.ts`，插件只消费 Host 注入接口。能力缺失返回本地 `desktop_client_required`；版本小于 2 返回 `desktop_bridge_upgrade_required`。
 
 ### 20.9 SSE 线协议
 

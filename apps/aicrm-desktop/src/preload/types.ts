@@ -9,11 +9,14 @@ import type {
   CodexAuthorizationChangedEvent,
   CodexAuthorizationSnapshot,
   CodexAuthorizationStartInput,
+  CodexCredentialLogoutResult,
   CodexCredentialLogoutCommandInput,
+  CodexCredentialVerificationResult,
   CodexExecutorAuthStatusProjection,
   CodexModelCatalogRefreshCommandInput,
   CodexModelCatalogSnapshot,
   CodexReadinessCheckCommandInput,
+  CodexReadinessCheckResult,
   CodexSessionCommandInput,
   CodexVerifyCommandInput,
   DesktopConfig,
@@ -101,15 +104,15 @@ export interface AiCrmDesktopBridge {
       getSnapshot: (sessionId: string) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
       cancel: (input: CodexSessionCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
       reopen: (input: CodexSessionCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
-      verify: (input: CodexVerifyCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      verify: (input: CodexVerifyCommandInput) => Promise<DesktopCommandResult<CodexCredentialVerificationResult>>;
       checkReadiness: (
         input: CodexReadinessCheckCommandInput
-      ) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      ) => Promise<DesktopCommandResult<CodexReadinessCheckResult>>;
       getModelCatalog: (executorId: string) => Promise<DesktopCommandResult<CodexModelCatalogSnapshot>>;
       refreshModelCatalog: (
         input: CodexModelCatalogRefreshCommandInput
       ) => Promise<DesktopCommandResult<CodexModelCatalogSnapshot>>;
-      logout: (input: CodexCredentialLogoutCommandInput) => Promise<DesktopCommandResult<CodexAuthorizationSnapshot>>;
+      logout: (input: CodexCredentialLogoutCommandInput) => Promise<DesktopCommandResult<CodexCredentialLogoutResult>>;
       onChanged: (listener: (event: CodexAuthorizationChangedEvent) => void) => () => void;
     };
   };
