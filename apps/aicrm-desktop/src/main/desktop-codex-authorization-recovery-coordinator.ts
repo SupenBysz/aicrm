@@ -92,6 +92,7 @@ export interface DesktopCodexAuthorizationRecoveryCoordinatorOptions {
   bindings: RecoveryBindingStore;
   leases: RecoveryLeaseFenceStore;
   artifacts: DesktopCodexRecoveryArtifactInspector;
+  settlements?: Pick<DesktopCodexAuthorizationRecoveredSettlementService, "settle">;
   resume(record: Readonly<DesktopCodexAuthorizationSessionRecord>): Promise<void>;
 }
 
@@ -124,7 +125,10 @@ export class DesktopCodexAuthorizationRecoveryCoordinator {
   private readonly events: RecoveryEventBroadcaster;
   private readonly credentials: RecoveryCredentialManager;
   private readonly artifacts: DesktopCodexRecoveryArtifactInspector;
-  private readonly settlements: DesktopCodexAuthorizationRecoveredSettlementService;
+  private readonly settlements: Pick<
+    DesktopCodexAuthorizationRecoveredSettlementService,
+    "settle"
+  >;
   private readonly resumeFlow: DesktopCodexAuthorizationRecoveryCoordinatorOptions["resume"];
   private inFlight: Promise<ReadonlyArray<CodexAuthorizationSnapshot>> | null = null;
   private completed = false;
@@ -146,6 +150,8 @@ export class DesktopCodexAuthorizationRecoveryCoordinator {
       typeof options.leases?.inspect !== "function" ||
       typeof options.leases?.remove !== "function" ||
       typeof options.artifacts?.inspect !== "function" ||
+      (options.settlements !== undefined &&
+        typeof options.settlements?.settle !== "function") ||
       typeof options.resume !== "function"
     ) {
       throw coordinatorConflict();
@@ -155,13 +161,14 @@ export class DesktopCodexAuthorizationRecoveryCoordinator {
     this.credentials = options.credentials;
     this.artifacts = options.artifacts;
     this.resumeFlow = options.resume;
-    this.settlements = new DesktopCodexAuthorizationRecoveredSettlementService({
-      sessions: options.sessions,
-      transport: options.transport,
-      credentials: options.credentials,
-      bindings: options.bindings,
-      leases: options.leases
-    });
+    this.settlements = options.settlements ??
+      new DesktopCodexAuthorizationRecoveredSettlementService({
+        sessions: options.sessions,
+        transport: options.transport,
+        credentials: options.credentials,
+        bindings: options.bindings,
+        leases: options.leases
+      });
   }
 
   recoverOnStartup(): Promise<ReadonlyArray<CodexAuthorizationSnapshot>> {

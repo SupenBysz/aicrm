@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import {
   DesktopCodexAuthorizationOrchestrator,
@@ -151,6 +152,20 @@ class FakeSessionStore {
     this.calls.push(`session:${status}`);
     return structuredClone(next);
   }
+
+  async recover(sessionId) {
+    this.calls.push("session:recover");
+    if (this.options.recoverGate) await this.options.recoverGate.promise;
+    if (this.options.recoverError) throw this.options.recoverError;
+    let current = this.records.get(sessionId);
+    if (current && this.options.recoverRecord) {
+      current = typeof this.options.recoverRecord === "function"
+        ? await this.options.recoverRecord(structuredClone(current))
+        : structuredClone(this.options.recoverRecord);
+      this.records.set(sessionId, structuredClone(current));
+    }
+    return current ? structuredClone(current) : null;
+  }
 }
 
 class FakeTransport {
@@ -224,6 +239,8 @@ class FakeTransport {
       responseAvailable: false
     });
     this.calls.push(`${kind}:network`);
+    const gate = this.options.gateByKind?.[kind];
+    if (gate) await gate.promise;
     if (this.options.failAt === kind) throw this.options.error;
     return structuredClone(result);
   }
@@ -306,6 +323,7 @@ class FakeSupervisor {
 
   async readAccount(_receipt, refreshToken) {
     this.calls.push(`supervisor:read_account:${refreshToken}`);
+    if (this.options.readAccountGate) await this.options.readAccountGate.promise;
     return {
       account: { type: "chatgpt", email: "owner@example.com", planType: "plus" },
       requiresOpenaiAuth: false
@@ -317,6 +335,8 @@ class FakeSupervisor {
     if (this.options.failAt === "stop") throw new Error("stop failed");
     await this.options.onStop?.();
     this.states.set(receipt.sessionId, "stopped");
+    const gate = this.options.waitGateBySession?.[receipt.sessionId] ?? this.options.waitGate;
+    gate?.reject(new Error("supervisor stopped"));
     return this.snapshot(receipt, "stopped");
   }
 
@@ -372,6 +392,10 @@ class FakeCredentialTree {
 
   async promoteStaging(input) {
     this.calls.push("credential:promote");
+    if (this.options.promoteGate) await this.options.promoteGate.promise;
+    if (this.options.failAt === "promote_after_effect") {
+      throw new Error("promotion response lost after durable effect");
+    }
     return {
       executorId: input.executorId,
       revision: input.revision,
@@ -394,6 +418,11 @@ class FakeCredentialTree {
 
   async quarantineStaging() {
     this.calls.push("credential:quarantine_staging");
+  }
+
+  async quarantineStagingIfPresent() {
+    this.calls.push("credential:quarantine_staging_if_present");
+    return null;
   }
 
   async quarantinePromotion() {
@@ -461,11 +490,21 @@ function leaseResponse(target) {
 }
 
 function leaseFence(target, generation) {
+  const semanticKey = createHash("sha256")
+    .update(`AICRM-ACTIVATION-LEASE-FENCE-V1\n${target.sessionId}\n${target.activationId}`)
+    .digest("hex");
+  const requestReference = createHash("sha256")
+    .update(
+      "AICRM-TRUSTED-REQUEST-V1\ncredential_activation_lease_renewal\n" +
+        `/api/v1/ai-executor-authorization-sessions/${target.sessionId}` +
+        `/desktop-activations/${target.activationId}/lease-renewals`
+    )
+    .digest("hex");
   return {
     version: 1,
     generation,
     status: "fresh",
-    semanticKey: "7".repeat(64),
+    semanticKey,
     sessionId: target.sessionId,
     executorId: "executor_1",
     operationId: target.operationId,
@@ -475,8 +514,8 @@ function leaseFence(target, generation) {
     sourceCredentialRevision: target.sourceCredentialRevision,
     revocationEpoch: target.revocationEpoch,
     bindingDigest: target.bindingDigest,
-    tokenHash: "8".repeat(64),
-    requestReference: "9".repeat(64),
+    tokenHash: createHash("sha256").update(target.activationToken).digest("hex"),
+    requestReference,
     requestHash: "a".repeat(64),
     renewedAt: "2026-07-13T00:00:00Z",
     leaseExpiresAt: "2026-07-13T00:00:30Z",
@@ -497,6 +536,59 @@ function fixture(options = {}) {
   const leaseRuntimes = [];
   let registerCalls = 0;
   let verifyCalls = 0;
+  const recoveredSettlement = {
+    async settle(record, input) {
+      calls.push("settlement:settle");
+      if (options.settlement?.gate) await options.settlement.gate.promise;
+      if (options.settlement?.error) throw options.settlement.error;
+      const transitioned = typeof options.settlement?.transitionedRecord === "function"
+        ? await options.settlement.transitionedRecord(record)
+        : options.settlement?.transitionedRecord;
+      if (transitioned) {
+        sessionStore.records.set(transitioned.sessionId, structuredClone(transitioned));
+      }
+      if (transitioned) await input.onTransition(structuredClone(transitioned));
+      const result = {
+        record: structuredClone(transitioned ?? record),
+        resumeRequested: false
+      };
+      return typeof options.settlement?.rawResult === "function"
+        ? options.settlement.rawResult(result)
+        : options.settlement?.rawResult ?? result;
+    }
+  };
+  const leaseFences = {
+    async inspect(activationId) {
+      calls.push("lease:fence_inspect");
+      if (options.leaseFences?.inspectError) throw options.leaseFences.inspectError;
+      if (options.leaseFences?.rawRecord !== undefined) {
+        return options.leaseFences.rawRecord;
+      }
+      if (options.leaseFences?.record !== undefined) {
+        return structuredClone(options.leaseFences.record);
+      }
+      const runtime = leaseRuntimes.findLast(
+        (candidate) => candidate.fence?.activationId === activationId
+      );
+      return runtime?.fence ? structuredClone(runtime.fence) : null;
+    },
+    async remove(fence) {
+      calls.push("lease:fence_remove");
+      if (options.leaseFences?.removeError) throw options.leaseFences.removeError;
+      const runtime = leaseRuntimes.findLast(
+        (candidate) => candidate.fence?.activationId === fence.activationId
+      );
+      if (runtime?.fence) {
+        runtime.fence = {
+          ...runtime.fence,
+          generation: runtime.fence.generation + 1,
+          status: "removed",
+          updatedAt: "2026-07-13T00:00:01.000Z",
+          removedAt: "2026-07-13T00:00:01.000Z"
+        };
+      }
+    }
+  };
   const orchestrator = new DesktopCodexAuthorizationOrchestrator({
     identityRegistration: {
       async register() {
@@ -531,6 +623,8 @@ function fixture(options = {}) {
         return {};
       }
     },
+    recoveredSettlement,
+    leaseFences,
     createLeaseRuntime() {
       calls.push("lease:create");
       const lease = new FakeLeaseRuntime(calls);
@@ -813,6 +907,16 @@ function reopenTarget(overrides = {}) {
   };
 }
 
+function cancelTarget(overrides = {}) {
+  return {
+    sessionId: "session_1",
+    executorId: "executor_1",
+    operationId: "operation_cancel_1",
+    expectedSessionRevision: 2,
+    ...overrides
+  };
+}
+
 test("trusted reopen target and recovery reference are exact, descriptor-safe, and deterministic", async () => {
   const expected = desktopCodexTrustedEffectRecoveryReference(
     "authorization_reopen",
@@ -1043,6 +1147,499 @@ test("trusted reopen returns safe stale and runtime failure results without leak
   assert.equal(JSON.stringify(result).includes(canary), false);
   waitGate.resolve();
   await failed.orchestrator.waitForIdle("session_1");
+});
+
+test("twenty trusted cancels share one exact stop, never use global transport cancel, and serialize competitors", async () => {
+  const waitGate = deferred();
+  const current = fixture({ supervisor: { waitGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+
+  const cancellations = Array.from(
+    { length: 20 },
+    () => current.orchestrator.cancelTrusted(cancelTarget())
+  );
+  assert.ok(cancellations.every((operation) => operation === cancellations[0]));
+  const competing = current.orchestrator.cancelTrusted(cancelTarget({
+    operationId: "operation_cancel_2"
+  }));
+  const results = await Promise.all(cancellations);
+  for (const result of results) assert.equal(result, results[0]);
+  assert.deepEqual(results[0], {
+    result: "succeeded",
+    failureCode: null,
+    snapshot: {
+      sessionId: "session_1",
+      executorId: "executor_1",
+      sequence: 8,
+      status: "cancelled",
+      canReopen: false,
+      canCancel: false
+    }
+  });
+  assert.equal((await competing).result, "stale_target");
+  assert.equal(current.transport.cancelCalls, 0);
+  assert.equal(current.calls.filter((value) => value === "supervisor:stop").length, 1);
+  const stopped = current.calls.indexOf("supervisor:stop");
+  const recovered = current.calls.indexOf("session:recover");
+  const settled = current.calls.indexOf("settlement:settle");
+  const quarantined = current.calls.indexOf("credential:quarantine_staging");
+  const terminal = current.calls.indexOf("session:cancelled");
+  assert.ok(recovered > stopped, current.calls.join(" -> "));
+  assert.ok(settled > recovered, current.calls.join(" -> "));
+  assert.ok(quarantined > settled, current.calls.join(" -> "));
+  assert.ok(terminal > quarantined, current.calls.join(" -> "));
+});
+
+test("a synchronously fenced cancel makes an already-running and a queued reopen stale", async () => {
+  const waitGate = deferred();
+  const reopenGate = deferred();
+  const current = fixture({ supervisor: { waitGate, reopenGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+
+  const reopening = current.orchestrator.reopenTrusted(reopenTarget());
+  for (let index = 0; index < 100 && current.supervisor.reopenCalls === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget());
+  const queuedReopen = current.orchestrator.reopenTrusted(reopenTarget({
+    operationId: "operation_reopen_after_cancel"
+  }));
+  reopenGate.resolve();
+
+  assert.equal((await reopening).result, "stale_target");
+  assert.equal((await cancelling).result, "succeeded");
+  assert.equal((await queuedReopen).result, "stale_target");
+  assert.equal(current.supervisor.reopenCalls, 1);
+  assert.equal(current.transport.cancelCalls, 0);
+});
+
+test("an authoritative stale read releases the pending cancel hold and the original flow continues", async () => {
+  const waitGate = deferred();
+  const current = fixture({ supervisor: { waitGate } });
+  await current.orchestrator.start(startInput());
+  const waiting = await waitForStatus(current, "waiting_user");
+  const originalRead = current.sessionStore.read.bind(current.sessionStore);
+  let reads = 0;
+  current.sessionStore.read = async (sessionId) => {
+    reads += 1;
+    if (reads === 1) return { ...waiting, sessionRevision: 3 };
+    return originalRead(sessionId);
+  };
+
+  const result = await current.orchestrator.cancelTrusted(cancelTarget());
+  assert.equal(result.result, "stale_target");
+  waitGate.resolve();
+  assert.equal((await current.orchestrator.waitForIdle("session_1")).status, "succeeded");
+  assert.equal(current.calls.includes("proof:network"), true);
+  assert.equal(current.calls.includes("session:cancelled"), false);
+});
+
+test("shutdown releases a queued pending cancel hold and converges without deadlock", async () => {
+  const waitGate = deferred();
+  const reopenGate = deferred();
+  const current = fixture({ supervisor: { waitGate, reopenGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+  const reopening = current.orchestrator.reopenTrusted(reopenTarget());
+  for (let index = 0; index < 100 && current.supervisor.reopenCalls === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget());
+  const shutdown = current.orchestrator.shutdown();
+  reopenGate.resolve();
+
+  assert.equal((await reopening).result, "stale_target");
+  await assert.rejects(cancelling, {
+    code: "desktop_codex_authorization_orchestrator_stopped"
+  });
+  await shutdown;
+  assert.equal((await current.sessionStore.read("session_1")).status, "interrupted");
+});
+
+test("cancel fences an in-flight claim but lets its exact response persist before recovery", async () => {
+  const claimGate = deferred();
+  const current = fixture({ transport: { gateByKind: { claim: claimGate } } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "handoff_claim_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 1
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(current.transport.cancelCalls, 0);
+  claimGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "succeeded");
+  assert.equal(result.snapshot.status, "cancelled");
+  assert.equal(current.calls.includes("complete:claim"), true);
+  assert.equal(current.calls.includes("supervisor:start"), false);
+  assert.ok(
+    current.calls.indexOf("session:recover") > current.calls.indexOf("complete:claim"),
+    current.calls.join(" -> ")
+  );
+});
+
+test("cancel during account read prevents a second stop, measurement, and login completion", async () => {
+  const readAccountGate = deferred();
+  const current = fixture({ supervisor: { readAccountGate } });
+  await current.orchestrator.start(startInput());
+  for (let index = 0; index < 100; index += 1) {
+    if (current.calls.includes("supervisor:read_account:true")) break;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(current.calls.includes("supervisor:read_account:true"), true);
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget());
+  await new Promise((resolve) => setImmediate(resolve));
+  readAccountGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "succeeded");
+  assert.equal(current.calls.filter((value) => value === "supervisor:stop").length, 1);
+  assert.equal(current.calls.includes("credential:measure"), false);
+  assert.equal(current.calls.includes("session:login_completed"), false);
+});
+
+test("cancel waits for an in-flight promotion and quarantines the promoted revision before terminalizing", async () => {
+  const promoteGate = deferred();
+  const current = fixture({ credentialTree: { promoteGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "credential_promotion_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 3
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  promoteGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "succeeded");
+  assert.equal(result.snapshot.status, "cancelled");
+  assert.equal(current.calls.includes("ack:network"), false);
+  const durable = current.calls.indexOf("session:credential_durable");
+  const recovered = current.calls.indexOf("session:recover");
+  const quarantined = current.calls.indexOf("credential:quarantine_promotion");
+  const fenceRemoved = current.calls.indexOf("lease:fence_remove");
+  const leaseCleared = current.calls.indexOf("lease:clear");
+  const terminal = current.calls.indexOf("session:cancelled");
+  assert.ok(recovered > durable, current.calls.join(" -> "));
+  assert.ok(quarantined > recovered, current.calls.join(" -> "));
+  assert.ok(fenceRemoved > quarantined, current.calls.join(" -> "));
+  assert.ok(leaseCleared > fenceRemoved, current.calls.join(" -> "));
+  assert.ok(terminal > leaseCleared, current.calls.join(" -> "));
+});
+
+test("an ambiguous promotion attempt is quarantined as promotion and never mistaken for staging", async () => {
+  const promoteGate = deferred();
+  const current = fixture({ credentialTree: {
+    promoteGate,
+    failAt: "promote_after_effect"
+  } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "credential_promotion_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 3
+  }));
+  promoteGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "failed");
+  assert.equal(result.failureCode, "desktop_codex_authorization_cancel_failed");
+  assert.equal(current.calls.includes("credential:quarantine_promotion"), true);
+  assert.equal(current.calls.includes("credential:quarantine_staging"), false);
+  assert.equal(current.calls.includes("credential:quarantine_staging_if_present"), false);
+  assert.equal(current.calls.includes("lease:fence_remove"), true);
+  assert.equal(current.calls.includes("session:cancelled"), false);
+});
+
+test("a state that guarantees a lease refuses cancellation when exact lease evidence is absent", async () => {
+  const promoteGate = deferred();
+  const current = fixture({
+    credentialTree: { promoteGate },
+    leaseFences: { record: null }
+  });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "credential_promotion_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 3
+  }));
+  promoteGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "failed");
+  assert.equal(result.failureCode, "desktop_codex_authorization_cancel_cleanup_failed");
+  assert.equal(current.calls.includes("session:cancelled"), false);
+  assert.equal(current.calls.includes("lease:clear"), false);
+});
+
+test("lease cleanup captures hostile descriptors once before full invariant validation", async () => {
+  const promoteGate = deferred();
+  const leaseFences = {};
+  const current = fixture({
+    credentialTree: { promoteGate },
+    leaseFences
+  });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "credential_promotion_starting");
+  const fence = current.leaseRuntimes[0].fence;
+  let descriptorReads = 0;
+  leaseFences.rawRecord = new Proxy(fence, {
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      if (key !== "bindingDigest" || !descriptor || !("value" in descriptor)) return descriptor;
+      descriptorReads += 1;
+      return {
+        ...descriptor,
+        value: descriptorReads === 1 ? BINDING_DIGEST : "f".repeat(64)
+      };
+    }
+  });
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 3
+  }));
+  promoteGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "succeeded");
+  assert.equal(descriptorReads, 1);
+  assert.equal(current.calls.includes("lease:fence_remove"), true);
+});
+
+test("an activation ACK response wins cancellation and settles to safe stale_target", async () => {
+  const ackGate = deferred();
+  const current = fixture({
+    transport: { gateByKind: { ack: ackGate } },
+    settlement: {
+      transitionedRecord(record) {
+        assert.equal(record.status, "activation_ack_response_received");
+        return {
+          ...record,
+          generation: record.generation + 1,
+          status: "activation_acked",
+          lastProgressStatus: "activation_acked",
+          claimToken: null,
+          activationToken: null,
+          updatedAt: "2026-07-13T00:00:01.000Z"
+        };
+      }
+    }
+  });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "activation_ack_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 3
+  }));
+  ackGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "stale_target");
+  assert.equal(result.failureCode, null);
+  assert.equal(result.snapshot.status, "succeeded");
+  assert.equal(current.calls.includes("session:cancelled"), false);
+  assert.equal(current.transport.cancelCalls, 0);
+  assert.equal(current.calls.includes("lease:clear"), true);
+  const next = await current.orchestrator.start(startInput({
+    sessionId: "session_2",
+    handoffId: "handoff_2"
+  }));
+  assert.equal(next.sessionId, "session_2");
+  assert.equal((await current.orchestrator.waitForIdle("session_2")).status, "succeeded");
+});
+
+test("a proof recovered as cancelled is a successful cancel after exact local cleanup", async () => {
+  const proofGate = deferred();
+  const current = fixture({
+    transport: {
+      gateByKind: { proof: proofGate },
+      failAt: "proof",
+      error: new Error("ambiguous proof transport")
+    },
+    sessionStore: {
+      recoverRecord(record) {
+        assert.equal(record.status, "proof_submit_starting");
+        return {
+          ...record,
+          generation: record.generation + 1,
+          status: "cancelled",
+          claimToken: null,
+          activationToken: null,
+          localFailureCode: null,
+          updatedAt: "2026-07-13T00:00:01.000Z"
+        };
+      }
+    }
+  });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "proof_submit_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 2
+  }));
+  proofGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "succeeded");
+  assert.equal(result.snapshot.status, "cancelled");
+  assert.equal(current.calls.includes("credential:quarantine_staging"), true);
+  assert.equal(current.calls.includes("session:cancelled"), false);
+  assert.equal(current.transport.cancelCalls, 0);
+});
+
+test("recovery rejects a structurally valid terminal that advances lastProgress and artifacts", async () => {
+  const proofGate = deferred();
+  const current = fixture({
+    transport: {
+      gateByKind: { proof: proofGate },
+      failAt: "proof",
+      error: new Error("ambiguous proof transport")
+    },
+    sessionStore: {
+      recoverRecord(record) {
+        assert.equal(record.status, "proof_submit_starting");
+        return {
+          ...record,
+          generation: record.generation + 1,
+          status: "failed",
+          lastProgressStatus: "credential_durable",
+          claimToken: null,
+          activationToken: null,
+          localFailureCode: "forged_recovery_failure",
+          proofId: "proof_forged",
+          activationOperationId: "operation_forged",
+          activationId: "activation_forged",
+          activationExpiresAt: "2026-07-13T00:30:00Z",
+          credentialRevision: 3,
+          leaseEpoch: 2,
+          sourceCredentialRevision: 1,
+          revocationEpoch: 4,
+          bindingDigest: BINDING_DIGEST,
+          promotionReceipt: {
+            executorId: "executor_1",
+            revision: 3,
+            operationId: "operation_forged",
+            digestAlgorithm: "aicrm-credential-tree-rfc8785-nfc-v1",
+            digest: BINDING_DIGEST,
+            fileCount: 2,
+            totalBytes: 128
+          },
+          updatedAt: "2026-07-13T00:00:01.000Z"
+        };
+      }
+    }
+  });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "proof_submit_starting");
+  const cancelling = current.orchestrator.cancelTrusted(cancelTarget({
+    expectedSessionRevision: 2
+  }));
+  proofGate.resolve();
+
+  const result = await cancelling;
+  assert.equal(result.result, "failed");
+  assert.equal(result.failureCode, "desktop_codex_authorization_cancel_failed");
+  assert.equal(current.calls.includes("settlement:settle"), false);
+  assert.equal(current.calls.some((value) => value.includes("quarantine")), false);
+  assert.equal(current.calls.includes("lease:fence_inspect"), false);
+  assert.equal(current.calls.includes("session:cancelled"), false);
+});
+
+test("trusted cancel returns fixed safe failures for missing runtime and unresolved recovery", async () => {
+  const missing = fixture();
+  const waiting = await seedResumableRecord(missing, "waiting_user");
+  missing.calls.length = 0;
+  assert.deepEqual(await missing.orchestrator.cancelTrusted(cancelTarget()), {
+    result: "failed",
+    failureCode: "desktop_codex_authorization_runtime_missing",
+    snapshot: projectDesktopCodexAuthorizationSnapshot(waiting)
+  });
+
+  const waitGate = deferred();
+  const failed = fixture({
+    supervisor: { waitGate },
+    sessionStore: { recoverError: new Error("private recovery canary") }
+  });
+  await failed.orchestrator.start(startInput());
+  await waitForStatus(failed, "waiting_user");
+  const result = await failed.orchestrator.cancelTrusted(cancelTarget());
+  assert.equal(result.result, "failed");
+  assert.equal(result.failureCode, "desktop_codex_authorization_cancel_failed");
+  assert.equal(JSON.stringify(result).includes("canary"), false);
+  assert.equal(failed.calls.includes("session:cancelled"), false);
+});
+
+test("trusted cancel descriptor-captures recovery and rejects hostile settlement output safely", async () => {
+  const waitGate = deferred();
+  const current = fixture({
+    supervisor: { waitGate },
+    settlement: {
+      rawResult(result) {
+        let getterReads = 0;
+        Object.defineProperty(result, "resumeRequested", {
+          enumerable: true,
+          get() {
+            getterReads += 1;
+            throw new Error("settlement getter canary");
+          }
+        });
+        current.settlementGetterReads = () => getterReads;
+        return result;
+      }
+    }
+  });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+
+  const originalRecover = current.sessionStore.recover.bind(current.sessionStore);
+  let descriptorReads = 0;
+  current.sessionStore.recover = async (sessionId) => {
+    const record = await originalRecover(sessionId);
+    return new Proxy(record, {
+      getOwnPropertyDescriptor(target, key) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+        if (key !== "executorId" || !descriptor || !("value" in descriptor)) return descriptor;
+        descriptorReads += 1;
+        return {
+          ...descriptor,
+          value: descriptorReads === 1 ? "executor_1" : "executor_private_canary"
+        };
+      }
+    });
+  };
+
+  const result = await current.orchestrator.cancelTrusted(cancelTarget());
+  assert.equal(result.result, "failed");
+  assert.equal(result.failureCode, "desktop_codex_authorization_cancel_failed");
+  assert.equal(JSON.stringify(result).includes("canary"), false);
+  assert.equal(descriptorReads, 1);
+  assert.equal(current.settlementGetterReads(), 0);
+  assert.equal(current.calls.includes("session:cancelled"), false);
+});
+
+test("flow refresh rejects hostile session output before publication while cancel still recovers", async () => {
+  const waitGate = deferred();
+  const current = fixture({ supervisor: { waitGate } });
+  await current.orchestrator.start(startInput());
+  const waiting = await waitForStatus(current, "waiting_user");
+  const originalRead = current.sessionStore.read.bind(current.sessionStore);
+  let reads = 0;
+  let getterReads = 0;
+  current.sessionStore.read = async (sessionId) => {
+    reads += 1;
+    if (reads !== 2) return originalRead(sessionId);
+    const hostile = { ...waiting };
+    Object.defineProperty(hostile, "executorId", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        throw new Error("refresh getter canary");
+      }
+    });
+    return hostile;
+  };
+
+  const result = await current.orchestrator.cancelTrusted(cancelTarget());
+  assert.equal(result.result, "succeeded");
+  assert.equal(getterReads, 0);
+  assert.equal(JSON.stringify(result).includes("canary"), false);
 });
 
 test("a converged executor admits a different session while the original session stays idempotent", async () => {

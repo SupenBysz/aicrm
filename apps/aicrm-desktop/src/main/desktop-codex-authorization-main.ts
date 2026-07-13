@@ -15,6 +15,7 @@ import {
 import { DesktopCodexAuthorizationOrchestrator } from "./desktop-codex-authorization-orchestrator.ts";
 import { DesktopCodexAuthorizationReconciler } from "./desktop-codex-authorization-reconciler.ts";
 import { DesktopCodexAuthorizationRecoveryCoordinator } from "./desktop-codex-authorization-recovery-coordinator.ts";
+import { DesktopCodexAuthorizationRecoveredSettlementService } from "./desktop-codex-authorization-recovered-settlement.ts";
 import {
   DesktopCodexAuthorizationSessionStore,
   type DesktopCodexAuthorizationSessionRecord
@@ -110,6 +111,13 @@ export function getDesktopCodexAuthorizationMainServices(): DesktopCodexAuthoriz
     requests: trust.requestJournal,
     credentials
   });
+  const recoveredSettlement = new DesktopCodexAuthorizationRecoveredSettlementService({
+    sessions,
+    transport,
+    credentials,
+    bindings,
+    leases
+  });
   const orchestrator = new DesktopCodexAuthorizationOrchestrator({
     identityRegistration: {
       async register() {
@@ -132,6 +140,8 @@ export function getDesktopCodexAuthorizationMainServices(): DesktopCodexAuthoriz
     supervisor,
     credentialTree: credentials,
     bindingState: bindings,
+    recoveredSettlement,
+    leaseFences: leases,
     createLeaseRuntime: () => {
       const controller = new DesktopActivationLeaseController({ transport, fenceStore: leases });
       return {
@@ -165,6 +175,7 @@ export function getDesktopCodexAuthorizationMainServices(): DesktopCodexAuthoriz
     bindings,
     leases,
     artifacts,
+    settlements: recoveredSettlement,
     resume: (record) => orchestrator.resume(record)
   });
   const lifecycle = new DesktopCodexAuthorizationMainLifecycle({

@@ -5,8 +5,10 @@ import type {
 } from "../shared/types.ts";
 import type { CodexAccountReadResult, CodexChatGPTAccount } from "./codex-app-server-auth-client.ts";
 import { codexAccountFingerprint } from "./codex-account-fingerprint.ts";
-import type {
-  DesktopActivationLeaseFenceRecord
+import {
+  validateDesktopActivationLeaseFenceRecord,
+  type DesktopActivationLeaseFenceRecord,
+  type DesktopActivationLeaseFenceStore
 } from "./desktop-activation-lease-fence-store.ts";
 import type {
   AcknowledgeDesktopCredentialActivationInput,
@@ -38,6 +40,9 @@ import {
   type DesktopCodexAuthorizationTerminalStatus
 } from "./desktop-codex-authorization-session-store.ts";
 import type {
+  DesktopCodexAuthorizationRecoveredSettlementService
+} from "./desktop-codex-authorization-recovered-settlement.ts";
+import type {
   DesktopCredentialRevisionProjection,
   DesktopCredentialStagingCreationResult,
   DesktopCredentialTreeManager
@@ -56,6 +61,35 @@ const CANONICAL_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const DETERMINISTIC_REJECTIONS = new Set([400, 401, 403, 409, 410, 422, 426]);
 const TRUSTED_EFFECT_RECOVERY_REFERENCE_DOMAIN =
   "AICRM-DESKTOP-CODEX-TRUSTED-EFFECT-RECOVERY-V1\n";
+const SESSION_RECORD_KEYS = [
+  "version", "generation", "status", "lastProgressStatus", "sessionId", "executorId",
+  "deviceId", "handoffId", "sessionRevision", "claimRequestReference",
+  "claimRequestHash", "claimToken", "claimExpiresAt", "loginIdHash",
+  "accountFingerprint", "candidateBindingDigest", "proofRequestReference",
+  "proofRequestHash", "proofId", "activationOperationId", "activationId",
+  "activationToken", "activationExpiresAt", "credentialRevision", "leaseEpoch",
+  "sourceCredentialRevision", "revocationEpoch", "bindingDigest", "promotionReceipt",
+  "ackRequestReference", "ackRequestHash", "localFailureCode", "createdAt", "updatedAt"
+] as const;
+const PROMOTION_RECEIPT_KEYS = [
+  "executorId", "revision", "operationId", "digestAlgorithm", "digest", "fileCount",
+  "totalBytes"
+] as const;
+const LEASE_FENCE_RECORD_KEYS = [
+  "version", "generation", "status", "semanticKey", "sessionId", "executorId",
+  "operationId", "activationId", "credentialRevision", "leaseEpoch",
+  "sourceCredentialRevision", "revocationEpoch", "bindingDigest", "tokenHash",
+  "requestReference", "requestHash", "renewedAt", "leaseExpiresAt", "replayed",
+  "recovered", "createdAt", "updatedAt", "removedAt"
+] as const;
+const RECOVERABLE_EFFECT_STARTING = new Set([
+  "handoff_claim_starting",
+  "app_server_starting",
+  "login_starting",
+  "proof_submit_starting",
+  "credential_promotion_starting",
+  "activation_ack_starting"
+]);
 
 export type DesktopCodexAuthorizationOrchestratorErrorCode =
   | "desktop_codex_authorization_orchestrator_conflict"
@@ -132,7 +166,17 @@ export interface DesktopCodexAuthorizationLeaseRuntime {
 
 interface AuthorizationSessionStore extends Pick<
   DesktopCodexAuthorizationSessionStore,
-  "create" | "read" | "transition" | "terminalize"
+  "create" | "read" | "transition" | "terminalize" | "recover"
+> {}
+
+interface AuthorizationRecoveredSettlement extends Pick<
+  DesktopCodexAuthorizationRecoveredSettlementService,
+  "settle"
+> {}
+
+interface AuthorizationLeaseFences extends Pick<
+  DesktopActivationLeaseFenceStore,
+  "inspect" | "remove"
 > {}
 
 interface AuthorizationTransport extends Pick<
@@ -164,6 +208,7 @@ interface AuthorizationCredentialTree extends Pick<
   | "completeAfterAcknowledgement"
   | "removeAcknowledged"
   | "quarantineStaging"
+  | "quarantineStagingIfPresent"
   | "quarantinePromotion"
 > {}
 
@@ -183,6 +228,8 @@ export interface DesktopCodexAuthorizationOrchestratorOptions {
   supervisor: AuthorizationSupervisor;
   credentialTree: AuthorizationCredentialTree;
   bindingState: AuthorizationBindingState;
+  recoveredSettlement: AuthorizationRecoveredSettlement;
+  leaseFences: AuthorizationLeaseFences;
   createLeaseRuntime(
     input: Readonly<{ sessionId: string; executorId: string }>
   ): DesktopCodexAuthorizationLeaseRuntime;
@@ -220,9 +267,18 @@ interface RuntimeInstance {
   lease: DesktopCodexAuthorizationLeaseRuntime | null;
   leaseFence: DesktopActivationLeaseFenceRecord | null;
   promotion: DesktopCredentialRevisionProjection | null;
+  promotionAttempted: boolean;
   pendingRequest: PendingRequest | null;
   stagingQuarantined: boolean;
   promotionQuarantined: boolean;
+  cancelFence: TrustedCancellationFence | null;
+}
+
+interface TrustedCancellationFence {
+  readonly target: Readonly<DesktopCodexTrustedAuthorizationTarget>;
+  state: "pending" | "committed" | "released";
+  readonly barrier: Promise<void>;
+  readonly resolveBarrier: () => void;
 }
 
 interface ResumeOperation {
@@ -239,6 +295,7 @@ interface TrustedSessionOperationLane {
 }
 
 class ShutdownSignal extends Error {}
+class TrustedCancellationSignal extends Error {}
 
 /**
  * Main-only P2A happy-path owner. It deliberately exposes no IPC or feature
@@ -253,6 +310,8 @@ export class DesktopCodexAuthorizationOrchestrator {
   private readonly supervisor: AuthorizationSupervisor;
   private readonly credentialTree: AuthorizationCredentialTree;
   private readonly bindingState: AuthorizationBindingState;
+  private readonly recoveredSettlement: AuthorizationRecoveredSettlement;
+  private readonly leaseFences: AuthorizationLeaseFences;
   private readonly createLeaseRuntime: DesktopCodexAuthorizationOrchestratorOptions["createLeaseRuntime"];
   private readonly requireFreshSession: DesktopCodexAuthorizationOrchestratorOptions["requireFreshSession"];
   private readonly now: () => Date;
@@ -273,6 +332,8 @@ export class DesktopCodexAuthorizationOrchestrator {
     this.supervisor = options.supervisor;
     this.credentialTree = options.credentialTree;
     this.bindingState = options.bindingState;
+    this.recoveredSettlement = options.recoveredSettlement;
+    this.leaseFences = options.leaseFences;
     this.createLeaseRuntime = options.createLeaseRuntime;
     this.requireFreshSession = options.requireFreshSession;
     this.now = options.now ?? (() => new Date());
@@ -328,9 +389,11 @@ export class DesktopCodexAuthorizationOrchestrator {
       lease: null,
       leaseFence: null,
       promotion: null,
+      promotionAttempted: false,
       pendingRequest: null,
       stagingQuarantined: false,
-      promotionQuarantined: false
+      promotionQuarantined: false,
+      cancelFence: null
     };
     this.instances.set(value.sessionId, instance);
     this.activeSessionByExecutor.set(value.executorId, value.sessionId);
@@ -404,7 +467,6 @@ export class DesktopCodexAuthorizationOrchestrator {
         "Codex 授权编排器已停止"
       ));
     }
-
     const operationKey = desktopCodexTrustedEffectRecoveryReference(
       "authorization_reopen",
       target
@@ -423,6 +485,59 @@ export class DesktopCodexAuthorizationOrchestrator {
     const operation = lane.tail
       .catch(() => undefined)
       .then(() => this.performTrustedReopen(target));
+    lane.operations.set(operationKey, operation);
+    const settled = operation.then(() => undefined, () => undefined);
+    lane.tail = settled;
+    void settled.then(() => {
+      if (lane?.operations.get(operationKey) === operation) {
+        lane.operations.delete(operationKey);
+      }
+      if (lane?.tail === settled && lane.operations.size === 0 &&
+          this.trustedOperationLanes.get(target.sessionId) === lane) {
+        this.trustedOperationLanes.delete(target.sessionId);
+      }
+    });
+    return operation;
+  }
+
+  /**
+   * Executes one already-verified, session-scoped cancellation. It fences new
+   * effects without touching the transport-wide cancel switch, waits for any
+   * already-started response to become durable, then recovers and settles the
+   * exact record before terminalizing it.
+   */
+  cancelTrusted(
+    input: DesktopCodexTrustedAuthorizationTarget
+  ): Promise<Readonly<DesktopCodexTrustedAuthorizationEffectResult>> {
+    let target: Readonly<DesktopCodexTrustedAuthorizationTarget>;
+    try {
+      target = validateTrustedAuthorizationTarget(input);
+    } catch {
+      return Promise.reject(invalidInputError());
+    }
+    if (this.shuttingDown) {
+      return Promise.reject(orchestratorError(
+        "desktop_codex_authorization_orchestrator_stopped",
+        "Codex 授权编排器已停止"
+      ));
+    }
+    this.installTrustedCancelFence(target);
+
+    const operationKey = desktopCodexTrustedEffectRecoveryReference(
+      "authorization_cancel",
+      target
+    );
+    let lane = this.trustedOperationLanes.get(target.sessionId);
+    if (!lane) {
+      lane = { tail: Promise.resolve(), operations: new Map() };
+      this.trustedOperationLanes.set(target.sessionId, lane);
+    }
+    const existing = lane.operations.get(operationKey);
+    if (existing) return existing;
+
+    const operation = lane.tail
+      .catch(() => undefined)
+      .then(() => this.performTrustedCancel(target));
     lane.operations.set(operationKey, operation);
     const settled = operation.then(() => undefined, () => undefined);
     lane.tail = settled;
@@ -579,9 +694,11 @@ export class DesktopCodexAuthorizationOrchestrator {
       lease: null,
       leaseFence: null,
       promotion: null,
+      promotionAttempted: false,
       pendingRequest: null,
       stagingQuarantined: false,
-      promotionQuarantined: false
+      promotionQuarantined: false,
+      cancelFence: null
     };
     this.instances.set(current.sessionId, instance);
     this.activeSessionByExecutor.set(current.executorId, current.sessionId);
@@ -603,6 +720,9 @@ export class DesktopCodexAuthorizationOrchestrator {
     if (!before.matches) return trustedEffectResult("stale_target", null, before.snapshot);
 
     const instance = this.instances.get(target.sessionId);
+    if (instance && instance.cancelFence !== null) {
+      return trustedEffectResult("stale_target", null, before.snapshot);
+    }
     const receipt = exactReopenReceipt(instance, target);
     if (!instance || !receipt) {
       return trustedEffectResult(
@@ -629,10 +749,250 @@ export class DesktopCodexAuthorizationOrchestrator {
 
     const latest = await this.readTrustedTargetSnapshot(target);
     if (!latest.matches || this.instances.get(target.sessionId) !== instance ||
+        instance.cancelFence !== null ||
         !sameAppServerReceipt(instance.appServerReceipt, receipt)) {
       return trustedEffectResult("stale_target", null, latest.snapshot);
     }
     return trustedEffectResult("succeeded", null, latest.snapshot);
+  }
+
+  private async performTrustedCancel(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): Promise<Readonly<DesktopCodexTrustedAuthorizationEffectResult>> {
+    if (this.shuttingDown) {
+      this.releasePendingCancelFence(target);
+      throw orchestratorError(
+        "desktop_codex_authorization_orchestrator_stopped",
+        "Codex 授权编排器已停止"
+      );
+    }
+    this.installTrustedCancelFence(target);
+    let before: Awaited<ReturnType<typeof this.readTrustedCancelTarget>>;
+    try {
+      before = await this.readTrustedCancelTarget(target);
+    } catch (error) {
+      this.releasePendingCancelFence(target);
+      throw error;
+    }
+    if (!before.matches) {
+      this.releasePendingCancelFence(target);
+      return trustedEffectResult("stale_target", null, before.snapshot);
+    }
+
+    const instance = this.instances.get(target.sessionId);
+    if (!instance || instance.input.executorId !== target.executorId) {
+      return trustedEffectResult(
+        "failed",
+        "desktop_codex_authorization_runtime_missing",
+        before.snapshot
+      );
+    }
+    this.commitTrustedCancelFence(instance, target);
+
+    try {
+      if (before.record.status === "waiting_user") {
+        const receipt = exactReopenReceipt(instance, target);
+        if (!receipt) {
+          return trustedEffectResult(
+            "failed",
+            "desktop_codex_authorization_runtime_missing",
+            before.snapshot
+          );
+        }
+        const stopped = await this.supervisor.stop(receipt);
+        requireSupervisorState(stopped, "stopped", receipt);
+        instance.appServerStopped = true;
+      }
+
+      await instance.startPromise.catch(() => undefined);
+      await instance.flow?.catch(() => undefined);
+
+      const beforeRecoveryRaw = await this.sessionStore.read(target.sessionId);
+      if (beforeRecoveryRaw === null) throw conflictError();
+      const beforeRecovery = captureTrustedSessionRecord(beforeRecoveryRaw);
+      if (beforeRecovery.sessionId !== target.sessionId ||
+          beforeRecovery.executorId !== target.executorId) {
+        throw conflictError();
+      }
+      let record: DesktopCodexAuthorizationSessionRecord;
+      try {
+        const recoveredRaw = await this.sessionStore.recover(target.sessionId);
+        if (recoveredRaw === null) throw conflictError();
+        record = validateTrustedRecoverySuccessor(beforeRecovery, recoveredRaw);
+      } catch (error) {
+        if (instance.promotionAttempted ||
+            beforeRecovery.lastProgressStatus === "credential_promotion_starting") {
+          await this.finishTrustedCancellationCleanup(instance, beforeRecovery);
+        }
+        throw error;
+      }
+      instance.record = record;
+      await this.publish(instance, record);
+
+      const beforeSettlement = record;
+      let publishedSettlementTransition: DesktopCodexAuthorizationSessionRecord | null = null;
+      const settlementRaw = await this.recoveredSettlement.settle(record, {
+        resume: false,
+        onTransition: async (transitioned) => {
+          const exact = validateTrustedSettlementSuccessor(beforeSettlement, transitioned);
+          if (publishedSettlementTransition !== null &&
+              !sameTrustedSessionRecord(publishedSettlementTransition, exact)) {
+            throw conflictError();
+          }
+          publishedSettlementTransition = exact;
+          instance.record = exact;
+          await this.publish(instance, exact);
+        }
+      });
+      const settlement = captureTrustedSettlementResult(
+        settlementRaw,
+        beforeSettlement
+      );
+      record = settlement.record;
+      const settlementChanged = !sameTrustedSessionRecord(beforeSettlement, record);
+      if (settlementChanged !== (publishedSettlementTransition !== null)) {
+        throw conflictError();
+      }
+      if (publishedSettlementTransition !== null &&
+          !sameTrustedSessionRecord(publishedSettlementTransition, record)) {
+        throw conflictError();
+      }
+      instance.record = record;
+      if (record.status === "cancelled") {
+        if (!await this.finishTrustedCancellationCleanup(instance, record)) {
+          return trustedEffectResult(
+            "failed",
+            "desktop_codex_authorization_cancel_cleanup_failed",
+            safeSnapshot(record)
+          );
+        }
+        this.releaseExecutor(instance);
+        return trustedEffectResult("succeeded", null, safeSnapshot(record));
+      }
+      if (isTerminal(record.status) || record.status === "activation_acked") {
+        if (record.status === "activation_acked") {
+          if (!await this.removeTrustedLeaseArtifacts(instance, record)) {
+            return trustedEffectResult(
+              "failed",
+              "desktop_codex_authorization_cancel_cleanup_failed",
+              safeSnapshot(record)
+            );
+          }
+        } else if (!await this.finishTrustedCancellationCleanup(instance, record)) {
+          return trustedEffectResult(
+            "failed",
+            "desktop_codex_authorization_cancel_cleanup_failed",
+            safeSnapshot(record)
+          );
+        }
+        this.releaseExecutor(instance);
+        return trustedEffectResult("stale_target", null, safeSnapshot(record));
+      }
+
+      if (!await this.finishTrustedCancellationCleanup(instance, record)) {
+        return trustedEffectResult(
+          "failed",
+          "desktop_codex_authorization_cancel_cleanup_failed",
+          safeSnapshot(record)
+        );
+      }
+      const cancelled = validateTrustedCancelledSuccessor(
+        record,
+        await this.sessionStore.terminalize(record, "cancelled", null)
+      );
+      instance.record = cancelled;
+      await this.publish(instance, cancelled);
+      this.releaseExecutor(instance);
+      return trustedEffectResult("succeeded", null, safeSnapshot(cancelled));
+    } catch {
+      const snapshot = await this.readLatestTrustedSnapshot(target, before.snapshot);
+      return trustedEffectResult(
+        "failed",
+        "desktop_codex_authorization_cancel_failed",
+        snapshot
+      );
+    }
+  }
+
+  private async readTrustedCancelTarget(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): Promise<Readonly<{
+    matches: boolean;
+    record: Readonly<DesktopCodexAuthorizationSessionRecord>;
+    snapshot: Readonly<CodexAuthorizationSnapshot>;
+  }>> {
+    let current: DesktopCodexAuthorizationSessionRecord | null;
+    try {
+      const raw = await this.sessionStore.read(target.sessionId);
+      current = raw === null ? null : captureTrustedSessionRecord(raw);
+    } catch {
+      throw operationFailedError();
+    }
+    if (!current) throw conflictError();
+    try {
+      const snapshot = safeSnapshot(current);
+      return Object.freeze({
+        matches: current.sessionId === target.sessionId &&
+          current.executorId === target.executorId &&
+          current.sessionRevision === target.expectedSessionRevision &&
+          !isTerminal(current.status) && current.status !== "activation_acked",
+        record: current,
+        snapshot
+      });
+    } catch {
+      throw operationFailedError();
+    }
+  }
+
+  private installTrustedCancelFence(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): void {
+    const instance = this.instances.get(target.sessionId);
+    if (!instance || instance.cancelFence !== null ||
+        instance.input.sessionId !== target.sessionId ||
+        instance.input.executorId !== target.executorId) return;
+    instance.cancelFence = createTrustedCancellationFence(target, false);
+  }
+
+  private commitTrustedCancelFence(
+    instance: RuntimeInstance,
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): void {
+    const fence = instance.cancelFence;
+    if (fence === null) {
+      instance.cancelFence = createTrustedCancellationFence(target, true);
+      return;
+    }
+    if (fence.state === "pending") {
+      fence.state = "committed";
+      fence.resolveBarrier();
+    }
+  }
+
+  private releasePendingCancelFence(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): void {
+    const instance = this.instances.get(target.sessionId);
+    const fence = instance?.cancelFence;
+    if (!instance || !fence || fence.state !== "pending") return;
+    fence.state = "released";
+    instance.cancelFence = null;
+    fence.resolveBarrier();
+  }
+
+  private async readLatestTrustedSnapshot(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>,
+    fallback: Readonly<CodexAuthorizationSnapshot>
+  ): Promise<Readonly<CodexAuthorizationSnapshot>> {
+    try {
+      const raw = await this.sessionStore.read(target.sessionId);
+      const current = raw === null ? null : captureTrustedSessionRecord(raw);
+      if (!current || current.sessionId !== target.sessionId ||
+          current.executorId !== target.executorId) return fallback;
+      return safeSnapshot(current);
+    } catch {
+      return fallback;
+    }
   }
 
   private async readTrustedTargetSnapshot(
@@ -643,7 +1003,8 @@ export class DesktopCodexAuthorizationOrchestrator {
   }>> {
     let current: DesktopCodexAuthorizationSessionRecord | null;
     try {
-      current = await this.sessionStore.read(target.sessionId);
+      const raw = await this.sessionStore.read(target.sessionId);
+      current = raw === null ? null : captureTrustedSessionRecord(raw);
     } catch {
       throw operationFailedError();
     }
@@ -699,6 +1060,7 @@ export class DesktopCodexAuthorizationOrchestrator {
   }
 
   private async claim(instance: RuntimeInstance): Promise<void> {
+    await this.assertEffectOpen(instance);
     let record = this.requireRecord(instance);
     const result = validateClaimResult(await this.transport.claimDesktopHandoff(
       {
@@ -727,17 +1089,18 @@ export class DesktopCodexAuthorizationOrchestrator {
   }
 
   private async login(instance: RuntimeInstance): Promise<void> {
+    await this.assertEffectOpen(instance);
     let record = await this.advance(
       instance,
       this.requireRecord(instance),
       "app_server_starting"
     );
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     instance.staging = validateStaging(await this.credentialTree.createOrRecoverStaging(
       record.executorId,
       record.sessionId
     ));
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     instance.appServerStartAttempted = true;
     const receipt = await this.supervisor.start({
       executorId: record.executorId,
@@ -747,13 +1110,15 @@ export class DesktopCodexAuthorizationOrchestrator {
     instance.appServerReceipt = receipt;
     record = await this.advance(instance, record, "app_server_started");
     record = await this.advance(instance, record, "login_starting");
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     const waiting = await this.supervisor.startBrowserLogin(receipt);
     requireSupervisorState(waiting, "waiting_user", receipt);
     record = await this.advance(instance, record, "waiting_user");
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     const completion = validateLoginCompletion(await this.supervisor.waitForLogin(receipt), receipt);
+    await this.assertEffectOpen(instance);
     const accountResult = validateAccountResult(await this.supervisor.readAccount(receipt, true));
+    await this.assertEffectOpen(instance);
     if (accountResult.account === null || accountResult.requiresOpenaiAuth) {
       throw operationFailedError();
     }
@@ -761,7 +1126,9 @@ export class DesktopCodexAuthorizationOrchestrator {
     const stopped = await this.supervisor.stop(receipt);
     requireSupervisorState(stopped, "stopped", receipt);
     instance.appServerStopped = true;
+    await this.assertEffectOpen(instance);
     const measured = validateMeasurement(await this.credentialTree.measure(instance.staging.ref));
+    await this.assertEffectOpen(instance);
     record = await this.advance(instance, record, "login_completed", {
       loginIdHash: completion.loginIdHash,
       accountFingerprint,
@@ -771,6 +1138,7 @@ export class DesktopCodexAuthorizationOrchestrator {
   }
 
   private async proveAndLease(instance: RuntimeInstance): Promise<void> {
+    await this.assertEffectOpen(instance);
     let record = this.requireRecord(instance);
     const result = validateProofResult(await this.transport.submitAuthorizationProof(
       {
@@ -813,7 +1181,7 @@ export class DesktopCodexAuthorizationOrchestrator {
   private async recoverStaging(instance: RuntimeInstance): Promise<void> {
     if (instance.staging !== null) return;
     const record = this.requireRecord(instance);
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     instance.staging = validateStaging(await this.credentialTree.createOrRecoverStaging(
       record.executorId,
       record.sessionId
@@ -824,8 +1192,9 @@ export class DesktopCodexAuthorizationOrchestrator {
     instance: RuntimeInstance,
     advanceToActivationPending: boolean
   ): Promise<void> {
+    await this.assertEffectOpen(instance);
     let record = this.requireRecord(instance);
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     if (instance.lease !== null) throw conflictError();
     const lease = this.createLeaseRuntime(Object.freeze({
       sessionId: record.sessionId,
@@ -844,6 +1213,7 @@ export class DesktopCodexAuthorizationOrchestrator {
   }
 
   private async promote(instance: RuntimeInstance): Promise<void> {
+    await this.assertEffectOpen(instance);
     let record = this.requireRecord(instance);
     await this.requireFreshSession(Object.freeze({
       sessionId: record.sessionId,
@@ -851,8 +1221,9 @@ export class DesktopCodexAuthorizationOrchestrator {
       sessionRevision: record.sessionRevision,
       generation: record.generation
     }));
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     record = await this.advance(instance, record, "credential_promotion_starting");
+    instance.promotionAttempted = true;
     const promotion = await this.credentialTree.promoteStaging({
       executorId: record.executorId,
       sessionId: record.sessionId,
@@ -877,13 +1248,14 @@ export class DesktopCodexAuthorizationOrchestrator {
   }
 
   private async acknowledge(instance: RuntimeInstance): Promise<void> {
+    await this.assertEffectOpen(instance);
     let record = this.requireRecord(instance);
     const lease = requireLease(instance);
     await lease.stopAndRenewFresh();
     const latest = await lease.readFence(requireString(record.activationId));
     if (!latest) throw operationFailedError();
     instance.leaseFence = await lease.requireFresh(latest);
-    this.assertOpen();
+    await this.assertEffectOpen(instance);
     const result = validateAckResult(await this.transport.acknowledgeCredentialActivation(
       {
         ...activationTarget(record),
@@ -904,6 +1276,7 @@ export class DesktopCodexAuthorizationOrchestrator {
     record = await this.advance(instance, record, "activation_ack_response_received", {
       sessionRevision: result.data.sessionRevision
     });
+    await this.assertEffectOpen(instance);
     const acknowledgement = {
       executorId: record.executorId,
       operationId: requireString(record.activationOperationId),
@@ -1016,6 +1389,9 @@ export class DesktopCodexAuthorizationOrchestrator {
     await this.refresh(instance);
     const current = instance.record;
     if (!current || isTerminal(current.status) || current.status === "activation_acked") return;
+    const cancellation = instance.cancelFence;
+    if (cancellation?.state === "pending") await cancellation.barrier;
+    if (instance.cancelFence === cancellation && cancellation?.state === "committed") return;
     const deterministic = deterministicRejection(error) && instance.pendingRequest !== null;
     const shutdown = error instanceof ShutdownSignal || this.shuttingDown;
     if (!deterministic && unresolvedTransportFailure(error)) return;
@@ -1063,7 +1439,8 @@ export class DesktopCodexAuthorizationOrchestrator {
         requireSupervisorBindingState(stopped, "stopped", binding);
         instance.appServerStopped = true;
       }
-      if (instance.promotion || record.promotionReceipt) {
+      if (instance.promotionAttempted || instance.promotion || record.promotionReceipt ||
+          record.lastProgressStatus === "credential_promotion_starting") {
         if (!instance.promotionQuarantined) {
           await this.credentialTree.quarantinePromotion({
             executorId: record.executorId,
@@ -1073,8 +1450,15 @@ export class DesktopCodexAuthorizationOrchestrator {
           });
           instance.promotionQuarantined = true;
         }
-      } else if (instance.staging && !instance.stagingQuarantined) {
-        await this.credentialTree.quarantineStaging(record.executorId, record.sessionId);
+      } else if (!instance.stagingQuarantined) {
+        if (instance.staging) {
+          await this.credentialTree.quarantineStaging(record.executorId, record.sessionId);
+        } else {
+          await this.credentialTree.quarantineStagingIfPresent(
+            record.executorId,
+            record.sessionId
+          );
+        }
         instance.stagingQuarantined = true;
       }
       return true;
@@ -1083,10 +1467,45 @@ export class DesktopCodexAuthorizationOrchestrator {
     }
   }
 
+  private async finishTrustedCancellationCleanup(
+    instance: RuntimeInstance,
+    record: DesktopCodexAuthorizationSessionRecord
+  ): Promise<boolean> {
+    if (!await this.reconcileLocalFailure(instance, record)) return false;
+    return this.removeTrustedLeaseArtifacts(instance, record);
+  }
+
+  private async removeTrustedLeaseArtifacts(
+    instance: RuntimeInstance,
+    record: DesktopCodexAuthorizationSessionRecord
+  ): Promise<boolean> {
+    try {
+      if (record.activationId !== null) {
+        const observed = await this.leaseFences.inspect(record.activationId);
+        if (observed === null) {
+          if (cancellationLeaseFenceRequired(record)) return false;
+        } else {
+          const fence = captureTrustedLeaseFence(observed);
+          if (!exactCancellationLeaseFence(fence, record)) return false;
+          if (fence.status !== "removed") await this.leaseFences.remove(fence);
+        }
+      }
+      if (instance.lease) instance.lease.clear();
+      instance.lease = null;
+      instance.leaseFence = null;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async refresh(instance: RuntimeInstance): Promise<void> {
     try {
-      const current = await this.sessionStore.read(instance.input.sessionId);
-      if (current) {
+      const raw = await this.sessionStore.read(instance.input.sessionId);
+      if (raw) {
+        const current = captureTrustedSessionRecord(raw);
+        if (current.sessionId !== instance.input.sessionId ||
+            current.executorId !== instance.input.executorId) return;
         instance.record = current;
         await this.publish(instance, current);
       }
@@ -1133,6 +1552,17 @@ export class DesktopCodexAuthorizationOrchestrator {
     if (this.shuttingDown) throw new ShutdownSignal();
   }
 
+  private async assertEffectOpen(instance: RuntimeInstance): Promise<void> {
+    this.assertOpen();
+    const fence = instance.cancelFence;
+    if (fence === null) return;
+    if (fence.state === "pending") await fence.barrier;
+    this.assertOpen();
+    if (instance.cancelFence === fence && fence.state === "committed") {
+      throw new TrustedCancellationSignal();
+    }
+  }
+
   private assertOpenUnlessTerminal(status: DesktopCodexAuthorizationSessionData["status"]): void {
     if (this.shuttingDown && !isTerminal(status)) throw new ShutdownSignal();
   }
@@ -1152,6 +1582,7 @@ function validateOptions(options: DesktopCodexAuthorizationOrchestratorOptions):
       typeof options.sessionStore?.read !== "function" ||
       typeof options.sessionStore?.transition !== "function" ||
       typeof options.sessionStore?.terminalize !== "function" ||
+      typeof options.sessionStore?.recover !== "function" ||
       typeof options.publishSnapshot !== "function" ||
       typeof options.transport?.claimDesktopHandoff !== "function" ||
       typeof options.transport?.submitAuthorizationProof !== "function" ||
@@ -1172,8 +1603,12 @@ function validateOptions(options: DesktopCodexAuthorizationOrchestratorOptions):
       typeof options.credentialTree?.completeAfterAcknowledgement !== "function" ||
       typeof options.credentialTree?.removeAcknowledged !== "function" ||
       typeof options.credentialTree?.quarantineStaging !== "function" ||
+      typeof options.credentialTree?.quarantineStagingIfPresent !== "function" ||
       typeof options.credentialTree?.quarantinePromotion !== "function" ||
       typeof options.bindingState?.activate !== "function" ||
+      typeof options.recoveredSettlement?.settle !== "function" ||
+      typeof options.leaseFences?.inspect !== "function" ||
+      typeof options.leaseFences?.remove !== "function" ||
       typeof options.createLeaseRuntime !== "function" ||
       typeof options.requireFreshSession !== "function" ||
       (options.now !== undefined && typeof options.now !== "function")) {
@@ -1293,6 +1728,188 @@ function trustedEffectResult(
   snapshot: Readonly<CodexAuthorizationSnapshot>
 ): Readonly<DesktopCodexTrustedAuthorizationEffectResult> {
   return Object.freeze({ result, failureCode, snapshot });
+}
+
+function createTrustedCancellationFence(
+  target: Readonly<DesktopCodexTrustedAuthorizationTarget>,
+  committed: boolean
+): TrustedCancellationFence {
+  let resolveBarrier!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    resolveBarrier = resolve;
+  });
+  const fence: TrustedCancellationFence = {
+    target,
+    state: committed ? "committed" : "pending",
+    barrier,
+    resolveBarrier
+  };
+  if (committed) resolveBarrier();
+  return fence;
+}
+
+function captureTrustedSessionRecord(
+  value: unknown
+): DesktopCodexAuthorizationSessionRecord {
+  const captured = captureExact(value, SESSION_RECORD_KEYS);
+  let promotionReceipt = captured.promotionReceipt;
+  if (promotionReceipt !== null) {
+    promotionReceipt = Object.freeze({
+      ...captureExact(promotionReceipt, PROMOTION_RECEIPT_KEYS)
+    });
+  }
+  const candidate = {
+    ...captured,
+    promotionReceipt
+  } as unknown as DesktopCodexAuthorizationSessionRecord;
+  const data = desktopCodexAuthorizationSessionData(candidate);
+  const exact: DesktopCodexAuthorizationSessionRecord = {
+    version: 1,
+    generation: candidate.generation,
+    ...data,
+    promotionReceipt: data.promotionReceipt
+      ? Object.freeze({ ...data.promotionReceipt })
+      : null,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt
+  };
+  safeSnapshot(exact);
+  return Object.freeze(exact);
+}
+
+function validateTrustedRecoverySuccessor(
+  expected: Readonly<DesktopCodexAuthorizationSessionRecord>,
+  value: unknown
+): DesktopCodexAuthorizationSessionRecord {
+  const actual = captureTrustedSessionRecord(value);
+  if (sameTrustedSessionRecord(expected, actual)) {
+    if (RECOVERABLE_EFFECT_STARTING.has(expected.status)) throw conflictError();
+    return actual;
+  }
+  const allowedProgress = new Map<string, string>([
+    ["handoff_claim_starting", "handoff_claimed"],
+    ["app_server_starting", "app_server_started"],
+    ["login_starting", "waiting_user"],
+    ["proof_submit_starting", "proof_prepared"],
+    ["credential_promotion_starting", "credential_durable"],
+    ["activation_ack_starting", "activation_ack_response_received"]
+  ]);
+  const allowedTerminal = new Map<string, ReadonlySet<string>>([
+    ["handoff_claim_starting", new Set(["failed"])],
+    ["app_server_starting", new Set(["interrupted"])],
+    ["login_starting", new Set(["interrupted"])],
+    ["proof_submit_starting", new Set(["failed", "cancelled"])],
+    ["activation_ack_starting", new Set(["failed"])]
+  ]);
+  const terminal = isTerminal(actual.status);
+  const statusAllowed = terminal
+    ? allowedTerminal.get(expected.status)?.has(actual.status) === true
+    : allowedProgress.get(expected.status) === actual.status;
+  const revisionAdvances = [
+    "handoff_claimed", "proof_prepared", "activation_ack_response_received"
+  ].includes(actual.status);
+  const expectedData = desktopCodexAuthorizationSessionData(expected) as unknown as
+    Record<string, unknown>;
+  const actualData = desktopCodexAuthorizationSessionData(actual) as unknown as
+    Record<string, unknown>;
+  const monotonic = Object.keys(expectedData).every((key) => {
+    if (["status", "lastProgressStatus", "sessionRevision", "claimToken",
+      "activationToken", "localFailureCode"].includes(key)) return true;
+    const prior = expectedData[key];
+    if (prior === null) return true;
+    if (key !== "promotionReceipt") return actualData[key] === prior;
+    return JSON.stringify(actualData[key]) === JSON.stringify(prior);
+  });
+  if (
+    !statusAllowed ||
+    actual.version !== expected.version ||
+    actual.generation !== expected.generation + 1 ||
+    actual.sessionId !== expected.sessionId ||
+    actual.executorId !== expected.executorId ||
+    actual.deviceId !== expected.deviceId ||
+    actual.handoffId !== expected.handoffId ||
+    actual.createdAt !== expected.createdAt ||
+    Date.parse(actual.updatedAt) < Date.parse(expected.updatedAt) ||
+    actual.sessionRevision !== expected.sessionRevision + (revisionAdvances ? 1 : 0) ||
+    (terminal && actual.lastProgressStatus !== expected.lastProgressStatus) ||
+    !monotonic
+  ) {
+    throw conflictError();
+  }
+  return actual;
+}
+
+function validateTrustedSettlementSuccessor(
+  expected: Readonly<DesktopCodexAuthorizationSessionRecord>,
+  value: unknown
+): DesktopCodexAuthorizationSessionRecord {
+  const actual = captureTrustedSessionRecord(value);
+  if (sameTrustedSessionRecord(expected, actual)) return actual;
+  const desired = {
+    ...desktopCodexAuthorizationSessionData(expected),
+    status: "activation_acked",
+    lastProgressStatus: "activation_acked",
+    claimToken: null,
+    activationToken: null,
+    localFailureCode: null
+  };
+  if (
+    expected.status !== "activation_ack_response_received" ||
+    actual.version !== expected.version ||
+    actual.generation !== expected.generation + 1 ||
+    actual.createdAt !== expected.createdAt ||
+    Date.parse(actual.updatedAt) < Date.parse(expected.updatedAt) ||
+    JSON.stringify(desktopCodexAuthorizationSessionData(actual)) !== JSON.stringify(desired)
+  ) {
+    throw conflictError();
+  }
+  return actual;
+}
+
+function captureTrustedSettlementResult(
+  value: unknown,
+  expected: Readonly<DesktopCodexAuthorizationSessionRecord>
+): Readonly<{
+  record: DesktopCodexAuthorizationSessionRecord;
+  resumeRequested: false;
+}> {
+  const captured = captureExact(value, ["record", "resumeRequested"]);
+  if (captured.resumeRequested !== false) throw conflictError();
+  return Object.freeze({
+    record: validateTrustedSettlementSuccessor(expected, captured.record),
+    resumeRequested: false
+  });
+}
+
+function validateTrustedCancelledSuccessor(
+  expected: Readonly<DesktopCodexAuthorizationSessionRecord>,
+  value: unknown
+): DesktopCodexAuthorizationSessionRecord {
+  const actual = captureTrustedSessionRecord(value);
+  const desired = {
+    ...desktopCodexAuthorizationSessionData(expected),
+    status: "cancelled",
+    claimToken: null,
+    activationToken: null,
+    localFailureCode: null
+  };
+  if (
+    actual.version !== expected.version ||
+    actual.generation !== expected.generation + 1 ||
+    actual.createdAt !== expected.createdAt ||
+    Date.parse(actual.updatedAt) < Date.parse(expected.updatedAt) ||
+    JSON.stringify(desktopCodexAuthorizationSessionData(actual)) !== JSON.stringify(desired)
+  ) {
+    throw conflictError();
+  }
+  return actual;
+}
+
+function sameTrustedSessionRecord(
+  left: Readonly<DesktopCodexAuthorizationSessionRecord>,
+  right: Readonly<DesktopCodexAuthorizationSessionRecord>
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function validateStartInput(value: unknown): Readonly<CodexAuthorizationStartInput> {
@@ -1537,6 +2154,52 @@ function requireSupervisorBindingState(
   ) {
     throw operationFailedError();
   }
+}
+
+function captureTrustedLeaseFence(
+  value: unknown
+): Readonly<DesktopActivationLeaseFenceRecord> {
+  const captured = captureExact(value, LEASE_FENCE_RECORD_KEYS);
+  return Object.freeze(
+    validateDesktopActivationLeaseFenceRecord(
+      captured as unknown as DesktopActivationLeaseFenceRecord
+    )
+  );
+}
+
+function cancellationLeaseFenceRequired(
+  record: Readonly<DesktopCodexAuthorizationSessionRecord>
+): boolean {
+  return [
+    "activation_pending",
+    "credential_promotion_starting",
+    "credential_durable",
+    "activation_ack_starting",
+    "activation_ack_response_received",
+    "activation_acked"
+  ].includes(record.lastProgressStatus);
+}
+
+function exactCancellationLeaseFence(
+  fence: Readonly<DesktopActivationLeaseFenceRecord>,
+  record: Readonly<DesktopCodexAuthorizationSessionRecord>
+): boolean {
+  return record.activationOperationId !== null && record.activationId !== null &&
+    record.credentialRevision !== null && record.leaseEpoch !== null &&
+    record.sourceCredentialRevision !== null && record.revocationEpoch !== null &&
+    record.bindingDigest !== null &&
+    fence.sessionId === record.sessionId && fence.executorId === record.executorId &&
+    fence.operationId === record.activationOperationId &&
+    fence.activationId === record.activationId &&
+    fence.credentialRevision === record.credentialRevision &&
+    fence.leaseEpoch === record.leaseEpoch &&
+    fence.sourceCredentialRevision === record.sourceCredentialRevision &&
+    fence.revocationEpoch === record.revocationEpoch &&
+    fence.bindingDigest === record.bindingDigest &&
+    (record.activationToken === null ||
+      fence.tokenHash === createHash("sha256")
+        .update(record.activationToken, "utf8")
+        .digest("hex"));
 }
 
 function activationTarget(
