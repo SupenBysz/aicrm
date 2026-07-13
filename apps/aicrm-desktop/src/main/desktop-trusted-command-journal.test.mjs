@@ -448,6 +448,245 @@ test("accepted to acknowledged is monotonic and the tombstone removes the raw to
   assert.equal(JSON.parse(plaintext).token, null);
 });
 
+test("a deterministic ACK rejection becomes a replay-safe token-free tombstone", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const value = command();
+  const accepted = await current.store.acceptOrLoad(value);
+  const fence = reference(accepted);
+  const begun = await current.store.beginEffect({
+    ...fence,
+    effectRecoveryReference: EFFECT_REFERENCE
+  });
+  await current.store.markEffectDurable({
+    ...fence,
+    effectRecoveryReference: EFFECT_REFERENCE,
+    effectAttemptToken: begun.effectAttemptToken,
+    result: "succeeded",
+    failureCode: null
+  });
+  await current.store.prepareAcknowledgement({
+    ...fence,
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
+  });
+  const rejection = {
+    ...fence,
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH,
+    rejectionStatus: 409,
+    rejectionResponseHash: RECOVERY_EVIDENCE
+  };
+  const preparedRaw = await readFile(path.join(current.root, `${fence.semanticKey}.sec`));
+  for (const field of Object.keys(rejection)) {
+    let accessorReads = 0;
+    const hostile = { ...rejection };
+    Object.defineProperty(hostile, field, {
+      enumerable: true,
+      get() {
+        accessorReads += 1;
+        throw new Error(`CANARY_ACK_REJECTION_${field}_${value.token}`);
+      }
+    });
+    let captured;
+    assert.throws(
+      () => current.store.markAcknowledgementRejected(hostile),
+      (error) => {
+        captured = error;
+        assert.ok(error instanceof DesktopTrustedCommandJournalError);
+        assert.equal(error.code, "desktop_trusted_command_unsafe");
+        return true;
+      }
+    );
+    assert.equal(accessorReads, 0);
+    assert.equal(`${captured}\n${captured.stack ?? ""}`.includes(value.token), false);
+  }
+
+  const malformed = [
+    { ...rejection, extra: value.token },
+    { ...rejection, [Symbol("secret")]: value.token },
+    Object.assign(Object.create({ inherited: true }), rejection),
+    Object.defineProperty({ ...rejection }, "rejectionStatus", {
+      value: 409,
+      enumerable: false
+    }),
+    new Proxy({ ...rejection }, {
+      ownKeys() {
+        throw new Error(`CANARY_ACK_OWN_KEYS_${value.token}`);
+      }
+    }),
+    new Proxy({ ...rejection }, {
+      getOwnPropertyDescriptor(target, key) {
+        if (key === "rejectionStatus") {
+          throw new Error(`CANARY_ACK_DESCRIPTOR_${value.token}`);
+        }
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      }
+    })
+  ];
+  for (const hostile of malformed) {
+    let captured;
+    assert.throws(
+      () => current.store.markAcknowledgementRejected(hostile),
+      (error) => {
+        captured = error;
+        assert.ok(error instanceof DesktopTrustedCommandJournalError);
+        assert.equal(error.code, "desktop_trusted_command_unsafe");
+        return true;
+      }
+    );
+    assert.equal(`${captured}\n${captured.stack ?? ""}`.includes(value.token), false);
+  }
+  assert.deepEqual(
+    await readFile(path.join(current.root, `${fence.semanticKey}.sec`)),
+    preparedRaw
+  );
+
+  let descriptorReads = 0;
+  let rawReads = 0;
+  const capturedOnce = new Proxy({ ...rejection }, {
+    get() {
+      rawReads += 1;
+      throw new Error(`CANARY_ACK_RAW_GET_${value.token}`);
+    },
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      if (key !== "rejectionStatus" || !descriptor) return descriptor;
+      descriptorReads += 1;
+      return {
+        ...descriptor,
+        value: descriptorReads === 1 ? 409 : 410
+      };
+    }
+  });
+  const rejected = await current.store.markAcknowledgementRejected(capturedOnce);
+  assert.equal(descriptorReads, 1);
+  assert.equal(rawReads, 0);
+  assert.equal(rejected.status, "ack_rejected");
+  assert.equal(rejected.generation, 5);
+  assert.equal(rejected.token, null);
+  assert.equal(rejected.acknowledgedAt, null);
+  assert.match(rejected.ackRejectedAt, /^2026-07-13T00:00:\d{2}\.\d{3}Z$/);
+  assert.ok(Date.parse(rejected.ackRejectedAt) >= Date.parse(rejected.ackPreparedAt));
+  assert.equal(rejected.ackRejectionStatus, 409);
+  assert.equal(rejected.ackRejectionResponseHash, RECOVERY_EVIDENCE);
+  assert.equal(rejected.indeterminateReasonHash, null);
+  const replayed = await current.store.markAcknowledgementRejected({
+    ...fence,
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH,
+    rejectionStatus: 409,
+    rejectionResponseHash: RECOVERY_EVIDENCE
+  });
+  assert.equal(replayed.generation, rejected.generation);
+  const preparedReplay = await current.store.prepareAcknowledgement({
+    ...fence,
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH
+  });
+  assert.equal(preparedReplay.status, "ack_rejected");
+  assert.equal(preparedReplay.generation, rejected.generation);
+  const stableTombstone = await readFile(
+    path.join(current.root, `${fence.semanticKey}.sec`)
+  );
+  await expectCode("desktop_trusted_command_state_invalid", () =>
+    current.store.markAcknowledgementRejected({
+      ...rejection,
+      rejectionStatus: 410
+    })
+  );
+  await expectCode("desktop_trusted_command_state_invalid", () =>
+    current.store.markAcknowledgementRejected({
+      ...rejection,
+      rejectionResponseHash: "5".repeat(64)
+    })
+  );
+  assert.deepEqual(
+    await readFile(path.join(current.root, `${fence.semanticKey}.sec`)),
+    stableTombstone
+  );
+  await expectCode("desktop_trusted_command_state_invalid", () =>
+    current.store.markAcknowledged({
+      ...fence,
+      outboundAckReference: ACK_REFERENCE,
+      outboundAckRequestHash: ACK_REQUEST_HASH
+    })
+  );
+  assert.equal(
+    (await current.newStore().listForRecovery())[0].status,
+    "ack_rejected"
+  );
+  const commandReplay = await current.store.acceptOrLoad(value);
+  assert.equal(commandReplay.status, "ack_rejected");
+  assert.equal(commandReplay.generation, rejected.generation);
+  assert.equal(commandReplay.token, null);
+  const raw = await readFile(path.join(current.root, `${fence.semanticKey}.sec`));
+  const plaintext = current.safeStorage.decryptString(raw.subarray(JOURNAL_MAGIC.length));
+  assert.equal(plaintext.includes(value.token), false);
+  assert.equal(JSON.parse(plaintext).token, null);
+});
+
+test("ACK rejection status classification is exact and keeps invalid input effect-free", async (t) => {
+  const validStatuses = [400, 401, 403, 409, 410, 422, 426];
+  for (const rejectionStatus of validStatuses) {
+    await t.test(`accepts durable ${rejectionStatus}`, async (st) => {
+      const current = await fixture();
+      st.after(() => rm(current.base, { recursive: true, force: true }));
+      const reached = await reachAckPrepared(
+        current,
+        command({ operationId: `operation_valid_${rejectionStatus}` })
+      );
+      const rejected = await current.store.markAcknowledgementRejected({
+        ...reached.fence,
+        outboundAckReference: ACK_REFERENCE,
+        outboundAckRequestHash: ACK_REQUEST_HASH,
+        rejectionStatus,
+        rejectionResponseHash: RECOVERY_EVIDENCE
+      });
+      assert.equal(rejected.status, "ack_rejected");
+      assert.equal(rejected.ackRejectionStatus, rejectionStatus);
+    });
+  }
+
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const reached = await reachAckPrepared(
+    current,
+    command({ operationId: "operation_invalid_status" })
+  );
+  const preparedRaw = await readFile(
+    path.join(current.root, `${reached.fence.semanticKey}.sec`)
+  );
+  for (const rejectionStatus of [
+    404,
+    408,
+    425,
+    429,
+    499,
+    500,
+    503,
+    409.5,
+    "409",
+    null,
+    Number.NaN
+  ]) {
+    expectSyncCode("desktop_trusted_command_unsafe", () =>
+      current.store.markAcknowledgementRejected({
+        ...reached.fence,
+        outboundAckReference: ACK_REFERENCE,
+        outboundAckRequestHash: ACK_REQUEST_HASH,
+        rejectionStatus,
+        rejectionResponseHash: RECOVERY_EVIDENCE
+      })
+    );
+  }
+  assert.deepEqual(
+    await readFile(path.join(current.root, `${reached.fence.semanticKey}.sec`)),
+    preparedRaw
+  );
+  assert.equal((await current.store.read(reached.fence))?.status, "ack_prepared");
+});
+
 test("a crash after durable effect_started can only use explicit recovery", async (t) => {
   let failAt = null;
   const current = await fixture({
@@ -657,6 +896,42 @@ test("temporary states recover accepted and acknowledged crash points exactly", 
   assert.equal(restored.token, null);
 });
 
+for (const faultPoint of [
+  "after_temporary_fsync",
+  "after_rename",
+  "before_directory_fsync"
+]) {
+  test(`${faultPoint} restores an exact token-free ack_rejected tombstone`, async (t) => {
+    let failAt = null;
+    const current = await fixture({
+      faultInjector(point) {
+        if (point === failAt) throw new Error(`crash:${point}`);
+      }
+    });
+    t.after(() => rm(current.base, { recursive: true, force: true }));
+    const reached = await reachAckPrepared(current);
+    failAt = faultPoint;
+    await assert.rejects(
+      current.store.markAcknowledgementRejected({
+        ...reached.fence,
+        outboundAckReference: ACK_REFERENCE,
+        outboundAckRequestHash: ACK_REQUEST_HASH,
+        rejectionStatus: 409,
+        rejectionResponseHash: RECOVERY_EVIDENCE
+      }),
+      new RegExp(`crash:${faultPoint}`)
+    );
+    failAt = null;
+    const [restored] = await current
+      .newStore({ faultInjector: undefined })
+      .listForRecovery();
+    assert.equal(restored.status, "ack_rejected");
+    assert.equal(restored.token, null);
+    assert.equal(restored.ackRejectionStatus, 409);
+    assert.equal(restored.ackRejectionResponseHash, RECOVERY_EVIDENCE);
+  });
+}
+
 for (const faultPoint of ["after_rename", "before_directory_fsync"]) {
   test(`${faultPoint} retains a generation shadow and restores effect_started`, async (t) => {
     let failAt = null;
@@ -725,6 +1000,18 @@ test("explicit prune keeps tombstones through expiry margin and never removes in
     outboundAckRequestHash: ACK_REQUEST_HASH
   });
 
+  const rejected = await reachAckPrepared(
+    current,
+    command({ operationId: "operation_3" })
+  );
+  await current.store.markAcknowledgementRejected({
+    ...rejected.fence,
+    outboundAckReference: ACK_REFERENCE,
+    outboundAckRequestHash: ACK_REQUEST_HASH,
+    rejectionStatus: 409,
+    rejectionResponseHash: RECOVERY_EVIDENCE
+  });
+
   const uncertainValue = command({ operationId: "operation_2" });
   const uncertainAccepted = await current.store.acceptOrLoad(uncertainValue);
   const uncertainFence = reference(uncertainAccepted);
@@ -742,10 +1029,11 @@ test("explicit prune keeps tombstones through expiry margin and never removes in
   const beforeBoundary = current.newStore({
     now: () => new Date((pruneAt - 1) * 1000)
   });
-  assert.deepEqual(await beforeBoundary.pruneAcknowledged(), { removed: 0, retained: 2 });
+  assert.deepEqual(await beforeBoundary.pruneAcknowledged(), { removed: 0, retained: 3 });
   const atBoundary = current.newStore({ now: () => new Date(pruneAt * 1000) });
-  assert.deepEqual(await atBoundary.pruneAcknowledged(), { removed: 1, retained: 1 });
+  assert.deepEqual(await atBoundary.pruneAcknowledged(), { removed: 2, retained: 1 });
   assert.equal(await atBoundary.read(reached.fence), null);
+  assert.equal(await atBoundary.read(rejected.fence), null);
   const retained = await atBoundary.read(uncertainFence);
   assert.equal(retained?.status, "indeterminate");
   assert.equal(retained?.token, null);

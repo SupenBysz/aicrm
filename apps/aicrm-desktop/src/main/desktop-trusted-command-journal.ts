@@ -67,10 +67,19 @@ export type DesktopTrustedCommandJournalStatus =
   | "effect_durable"
   | "ack_prepared"
   | "acknowledged"
+  | "ack_rejected"
   | "indeterminate";
 
 export type DesktopTrustedCommandEffectCompletionMode = "direct" | "recovered";
 export type DesktopTrustedCommandEffectResult = "succeeded" | "failed" | "stale_target";
+export type DesktopTrustedCommandAckRejectionStatus =
+  | 400
+  | 401
+  | 403
+  | 409
+  | 410
+  | 422
+  | 426;
 
 export interface DesktopTrustedCommandTarget {
   actorId: string | null;
@@ -121,6 +130,9 @@ export interface DesktopTrustedCommandJournalRecord {
   outboundAckRequestHash: string | null;
   ackPreparedAt: string | null;
   acknowledgedAt: string | null;
+  ackRejectedAt: string | null;
+  ackRejectionStatus: DesktopTrustedCommandAckRejectionStatus | null;
+  ackRejectionResponseHash: string | null;
   indeterminateAt: string | null;
   indeterminateReasonHash: string | null;
 }
@@ -170,6 +182,12 @@ export interface PrepareDesktopTrustedCommandAcknowledgementInput
   extends DesktopTrustedCommandReference {
   outboundAckReference: string;
   outboundAckRequestHash: string;
+}
+
+export interface RejectDesktopTrustedCommandAcknowledgementInput
+  extends PrepareDesktopTrustedCommandAcknowledgementInput {
+  rejectionStatus: DesktopTrustedCommandAckRejectionStatus;
+  rejectionResponseHash: string;
 }
 
 export type DesktopTrustedCommandJournalErrorCode =
@@ -293,7 +311,7 @@ export class DesktopTrustedCommandJournalStore {
 
   /**
    * Explicit capacity maintenance. Non-terminal and indeterminate records are
-   * never removed. Acknowledged tombstones survive through token expiry plus
+   * never removed. ACK terminal tombstones survive through token expiry plus
    * a full-day rollback/replay safety margin.
    */
   pruneAcknowledged(): Promise<DesktopTrustedCommandPruneResult> {
@@ -307,7 +325,7 @@ export class DesktopTrustedCommandJournalStore {
         const pruneAfter =
           record.claims.exp + DESKTOP_TRUSTED_COMMAND_TOMBSTONE_SAFETY_SECONDS;
         if (
-          record.status !== "acknowledged" ||
+          (record.status !== "acknowledged" && record.status !== "ack_rejected") ||
           !Number.isSafeInteger(pruneAfter) ||
           currentSecond < pruneAfter
         ) {
@@ -467,7 +485,9 @@ export class DesktopTrustedCommandJournalStore {
     return this.exclusive(async () => {
       const current = await this.loadFencedLocked(candidate);
       if (
-        (current.status === "ack_prepared" || current.status === "acknowledged") &&
+        (current.status === "ack_prepared" ||
+          current.status === "acknowledged" ||
+          current.status === "ack_rejected") &&
         current.outboundAckReference === candidate.outboundAckReference &&
         current.outboundAckRequestHash === candidate.outboundAckRequestHash
       ) {
@@ -515,6 +535,50 @@ export class DesktopTrustedCommandJournalStore {
         status: "acknowledged",
         token: null,
         acknowledgedAt: canonicalNow(this.now())
+      };
+      await this.writeAtomic(next);
+      return cloneRecord(next);
+    });
+  }
+
+  /**
+   * Terminalizes an exact ACK after the device request journal has durably
+   * recorded a deterministic rejection. Ambiguous transport failures must
+   * remain ack_prepared and keep the global request lane pinned.
+   */
+  markAcknowledgementRejected(
+    input: RejectDesktopTrustedCommandAcknowledgementInput
+  ): Promise<DesktopTrustedCommandJournalRecord> {
+    const candidate = validateRejectedAcknowledgementInput(input);
+    return this.exclusive(async () => {
+      const current = await this.loadFencedLocked(candidate);
+      if (
+        current.status === "ack_rejected" &&
+        current.outboundAckReference === candidate.outboundAckReference &&
+        current.outboundAckRequestHash === candidate.outboundAckRequestHash &&
+        current.ackRejectionStatus === candidate.rejectionStatus &&
+        current.ackRejectionResponseHash === candidate.rejectionResponseHash
+      ) {
+        return cloneRecord(current);
+      }
+      if (
+        current.status !== "ack_prepared" ||
+        current.outboundAckReference !== candidate.outboundAckReference ||
+        current.outboundAckRequestHash !== candidate.outboundAckRequestHash
+      ) {
+        throw journalError(
+          "desktop_trusted_command_state_invalid",
+          "受信命令拒绝确认栅栏不匹配"
+        );
+      }
+      const next: DesktopTrustedCommandJournalRecord = {
+        ...current,
+        generation: current.generation + 1,
+        status: "ack_rejected",
+        token: null,
+        ackRejectedAt: canonicalNow(this.now()),
+        ackRejectionStatus: candidate.rejectionStatus,
+        ackRejectionResponseHash: candidate.rejectionResponseHash
       };
       await this.writeAtomic(next);
       return cloneRecord(next);
@@ -950,6 +1014,9 @@ function acceptedRecord(
     outboundAckRequestHash: null,
     ackPreparedAt: null,
     acknowledgedAt: null,
+    ackRejectedAt: null,
+    ackRejectionStatus: null,
+    ackRejectionResponseHash: null,
     indeterminateAt: null,
     indeterminateReasonHash: null
   });
@@ -983,6 +1050,9 @@ function validateRecord(value: unknown): DesktopTrustedCommandJournalRecord {
       "outboundAckRequestHash",
       "ackPreparedAt",
       "acknowledgedAt",
+      "ackRejectedAt",
+      "ackRejectionStatus",
+      "ackRejectionResponseHash",
       "indeterminateAt",
       "indeterminateReasonHash"
     ])
@@ -1050,6 +1120,10 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     DIGEST.test(record.outboundAckRequestHash) &&
     canonicalNullableTime(record.ackPreparedAt) &&
     timeAtOrAfter(record.ackPreparedAt, record.effectDurableAt);
+  const ackRejectionEmpty =
+    record.ackRejectedAt === null &&
+    record.ackRejectionStatus === null &&
+    record.ackRejectionResponseHash === null;
   const untouched =
     record.effectStartedAt === null &&
     record.effectRecoveryReference === null &&
@@ -1062,6 +1136,7 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
+    ackRejectionEmpty &&
     record.indeterminateAt === null &&
     record.indeterminateReasonHash === null;
   const startedOnly =
@@ -1075,6 +1150,7 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
+    ackRejectionEmpty &&
     record.indeterminateAt === null &&
     record.indeterminateReasonHash === null;
   const durableOnly =
@@ -1083,17 +1159,30 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
+    ackRejectionEmpty &&
     record.indeterminateAt === null &&
     record.indeterminateReasonHash === null;
   const ackPreparedOnly =
     ackPrepared &&
     record.acknowledgedAt === null &&
+    ackRejectionEmpty &&
     record.indeterminateAt === null &&
     record.indeterminateReasonHash === null;
   const acknowledged =
     ackPrepared &&
     canonicalNullableTime(record.acknowledgedAt) &&
     timeAtOrAfter(record.acknowledgedAt, record.ackPreparedAt) &&
+    ackRejectionEmpty &&
+    record.indeterminateAt === null &&
+    record.indeterminateReasonHash === null;
+  const acknowledgementRejected =
+    ackPrepared &&
+    record.acknowledgedAt === null &&
+    canonicalNullableTime(record.ackRejectedAt) &&
+    timeAtOrAfter(record.ackRejectedAt, record.ackPreparedAt) &&
+    validAckRejectionStatus(record.ackRejectionStatus) &&
+    typeof record.ackRejectionResponseHash === "string" &&
+    DIGEST.test(record.ackRejectionResponseHash) &&
     record.indeterminateAt === null &&
     record.indeterminateReasonHash === null;
   const indeterminate =
@@ -1107,6 +1196,7 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
     record.outboundAckRequestHash === null &&
     record.ackPreparedAt === null &&
     record.acknowledgedAt === null &&
+    ackRejectionEmpty &&
     canonicalNullableTime(record.indeterminateAt) &&
     timeAtOrAfter(record.indeterminateAt, record.effectStartedAt) &&
     typeof record.indeterminateReasonHash === "string" &&
@@ -1122,6 +1212,8 @@ function validStateShape(record: DesktopTrustedCommandJournalRecord): boolean {
       return record.generation === 4 && record.token !== null && ackPreparedOnly;
     case "acknowledged":
       return record.generation === 5 && record.token === null && acknowledged;
+    case "ack_rejected":
+      return record.generation === 5 && record.token === null && acknowledgementRejected;
     case "indeterminate":
       return record.generation === 3 && record.token === null && indeterminate;
     default:
@@ -1134,6 +1226,12 @@ function validEffectOutcome(result: unknown, failureCode: unknown): boolean {
     return typeof failureCode === "string" && SAFE_FAILURE_CODE.test(failureCode);
   }
   return (result === "succeeded" || result === "stale_target") && failureCode === null;
+}
+
+function validAckRejectionStatus(
+  value: unknown
+): value is DesktopTrustedCommandAckRejectionStatus {
+  return [400, 401, 403, 409, 410, 422, 426].includes(value as number);
 }
 
 function validateClaims(value: unknown): DesktopTrustedTokenClaims {
@@ -1480,7 +1578,7 @@ function validSuccessor(
         current.outboundAckReference === next.outboundAckReference &&
         current.outboundAckRequestHash === next.outboundAckRequestHash &&
         current.ackPreparedAt === next.ackPreparedAt &&
-        next.status === "acknowledged"
+        (next.status === "acknowledged" || next.status === "ack_rejected")
       );
     default:
       return false;
@@ -1528,7 +1626,8 @@ function sameImmutableFields(
     JSON.stringify(left.claims) === JSON.stringify(right.claims) &&
     sameTarget(left.target, right.target) &&
     (right.token === left.token ||
-      ((right.status === "acknowledged" || right.status === "indeterminate") &&
+      ((right.status === "acknowledged" || right.status === "ack_rejected" ||
+        right.status === "indeterminate") &&
         right.token === null))
   );
 }
@@ -1716,6 +1815,39 @@ function validateAcknowledgementInput(
     ...reference,
     outboundAckReference: captured.outboundAckReference,
     outboundAckRequestHash: captured.outboundAckRequestHash
+  };
+}
+
+function validateRejectedAcknowledgementInput(
+  value: RejectDesktopTrustedCommandAcknowledgementInput
+): RejectDesktopTrustedCommandAcknowledgementInput {
+  const captured = captureExactObject(value, [
+    "semanticKey",
+    "tokenHash",
+    "payloadHash",
+    "outboundAckReference",
+    "outboundAckRequestHash",
+    "rejectionStatus",
+    "rejectionResponseHash"
+  ]);
+  if (
+    !captured ||
+    !validAckRejectionStatus(captured.rejectionStatus) ||
+    !isDigest(captured.rejectionResponseHash)
+  ) {
+    throw journalError("desktop_trusted_command_unsafe", "受信命令拒绝确认参数无效");
+  }
+  const acknowledgement = validateAcknowledgementInput({
+    semanticKey: captured.semanticKey as string,
+    tokenHash: captured.tokenHash as string,
+    payloadHash: captured.payloadHash as string,
+    outboundAckReference: captured.outboundAckReference as string,
+    outboundAckRequestHash: captured.outboundAckRequestHash as string
+  });
+  return {
+    ...acknowledgement,
+    rejectionStatus: captured.rejectionStatus,
+    rejectionResponseHash: captured.rejectionResponseHash
   };
 }
 
