@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
 import type { CodexAuthorizationSnapshot } from "../shared/types.ts";
-import type { DesktopActivationLeaseFenceRecord } from "./desktop-activation-lease-fence-store.ts";
 import type { DesktopAuthorizationTransportClient } from "./desktop-authorization-transport-client.ts";
 import type { DesktopCodexAuthorizationEventBroadcaster } from "./desktop-codex-authorization-events.ts";
 import {
@@ -13,6 +11,10 @@ import {
 import type { DesktopCredentialTreeManager } from "./desktop-credential-tree-manager.ts";
 import type { DesktopExecutorBindingStateStore } from "./desktop-executor-binding-state.ts";
 import type { DesktopActivationLeaseFenceStore } from "./desktop-activation-lease-fence-store.ts";
+import {
+  DesktopCodexAuthorizationRecoveredSettlementError,
+  DesktopCodexAuthorizationRecoveredSettlementService
+} from "./desktop-codex-authorization-recovered-settlement.ts";
 
 const DIGEST = /^[0-9a-f]{64}$/;
 
@@ -120,11 +122,9 @@ export class DesktopCodexAuthorizationRecoveryCoordinatorError extends Error {
 export class DesktopCodexAuthorizationRecoveryCoordinator {
   private readonly sessions: RecoverySessionStore;
   private readonly events: RecoveryEventBroadcaster;
-  private readonly transport: RecoveryTransport;
   private readonly credentials: RecoveryCredentialManager;
-  private readonly bindings: RecoveryBindingStore;
-  private readonly leases: RecoveryLeaseFenceStore;
   private readonly artifacts: DesktopCodexRecoveryArtifactInspector;
+  private readonly settlements: DesktopCodexAuthorizationRecoveredSettlementService;
   private readonly resumeFlow: DesktopCodexAuthorizationRecoveryCoordinatorOptions["resume"];
   private inFlight: Promise<ReadonlyArray<CodexAuthorizationSnapshot>> | null = null;
   private completed = false;
@@ -152,12 +152,16 @@ export class DesktopCodexAuthorizationRecoveryCoordinator {
     }
     this.sessions = options.sessions;
     this.events = options.events;
-    this.transport = options.transport;
     this.credentials = options.credentials;
-    this.bindings = options.bindings;
-    this.leases = options.leases;
     this.artifacts = options.artifacts;
     this.resumeFlow = options.resume;
+    this.settlements = new DesktopCodexAuthorizationRecoveredSettlementService({
+      sessions: options.sessions,
+      transport: options.transport,
+      credentials: options.credentials,
+      bindings: options.bindings,
+      leases: options.leases
+    });
   }
 
   recoverOnStartup(): Promise<ReadonlyArray<CodexAuthorizationSnapshot>> {
@@ -199,6 +203,12 @@ export class DesktopCodexAuthorizationRecoveryCoordinator {
       return settled.map((record) => projectDesktopCodexAuthorizationSnapshot(record));
     } catch (error) {
       if (error instanceof DesktopCodexAuthorizationRecoveryCoordinatorError) throw error;
+      if (
+        error instanceof DesktopCodexAuthorizationRecoveredSettlementError &&
+        error.code === "desktop_codex_authorization_recovered_settlement_conflict"
+      ) {
+        throw coordinatorConflict();
+      }
       throw coordinatorFailed();
     }
   }
@@ -268,126 +278,22 @@ export class DesktopCodexAuthorizationRecoveryCoordinator {
         "desktop_codex_app_server_restarted"
       );
       await this.publish(record);
-    } else if (record.status === "activation_ack_response_received") {
-      record = await this.settleActivationAck(record);
-    } else if (record.status === "activation_acked") {
-      await this.settleAckArtifacts(record);
     } else {
-      await this.completeReconciledOutbound(record);
+      const settlement = await this.settlements.settle(record, {
+        resume: true,
+        onTransition: async (transitioned) => {
+          await this.publish(transitioned);
+        }
+      });
+      record = settlement.record;
+      if (settlement.resumeRequested) await this.resumeFlow(record);
     }
-
-    if (isResumable(record.status)) await this.resumeFlow(record);
     return record;
-  }
-
-  private async completeReconciledOutbound(
-    record: Readonly<DesktopCodexAuthorizationSessionRecord>
-  ): Promise<void> {
-    if (
-      record.status === "handoff_claimed" ||
-      (isTerminal(record.status) && record.lastProgressStatus === "handoff_claim_starting")
-    ) {
-      await completePair(this.transport, record.claimRequestReference, record.claimRequestHash);
-      return;
-    }
-    if (
-      record.status === "proof_prepared" ||
-      (isTerminal(record.status) && record.lastProgressStatus === "proof_submit_starting")
-    ) {
-      await completePair(this.transport, record.proofRequestReference, record.proofRequestHash);
-      return;
-    }
-    if (isTerminal(record.status) && record.lastProgressStatus === "activation_ack_starting") {
-      await completePair(this.transport, record.ackRequestReference, record.ackRequestHash);
-    }
-  }
-
-  private async settleActivationAck(
-    record: DesktopCodexAuthorizationSessionRecord
-  ): Promise<DesktopCodexAuthorizationSessionRecord> {
-    const acknowledgement = acknowledgementInput(record);
-    const fence = await this.loadExactLease(record, true);
-    await this.bindings.activate({
-      executorId: record.executorId,
-      deviceId: record.deviceId,
-      operationId: acknowledgement.operationId,
-      activationId: requireId(record.activationId),
-      authorizationSessionId: record.sessionId,
-      activationAckRequestReference: acknowledgement.activationAckRequestReference,
-      activationAckRequestHash: acknowledgement.activationAckRequestHash,
-      credentialRevision: acknowledgement.revision,
-      sourceCredentialRevision: requireNonNegative(record.sourceCredentialRevision),
-      revocationEpoch: requireNonNegative(record.revocationEpoch),
-      bindingDigest: acknowledgement.expectedDigest,
-      accountFingerprint: requireDigest(record.accountFingerprint)
-    });
-    await this.credentials.completeAfterAcknowledgement(acknowledgement);
-    const activated = await this.sessions.transition(record, {
-      ...desktopCodexAuthorizationSessionData(record),
-      status: "activation_acked",
-      lastProgressStatus: "activation_acked",
-      claimToken: null,
-      activationToken: null,
-      localFailureCode: null
-    });
-    await this.publish(activated);
-    await completePair(this.transport, record.ackRequestReference, record.ackRequestHash);
-    await this.credentials.removeAcknowledged(acknowledgement);
-    if (fence.status !== "removed") await this.leases.remove(fence);
-    return activated;
-  }
-
-  private async settleAckArtifacts(
-    record: Readonly<DesktopCodexAuthorizationSessionRecord>
-  ): Promise<void> {
-    const acknowledgement = acknowledgementInput(record);
-    const fence = await this.loadExactLease(record, false);
-    await completePair(this.transport, record.ackRequestReference, record.ackRequestHash);
-    await this.credentials.removeAcknowledged(acknowledgement);
-    if (fence.status !== "removed") await this.leases.remove(fence);
-  }
-
-  private async loadExactLease(
-    record: Readonly<DesktopCodexAuthorizationSessionRecord>,
-    requireTokenHash: boolean
-  ): Promise<DesktopActivationLeaseFenceRecord> {
-    const activationId = requireId(record.activationId);
-    const fence = await this.leases.inspect(activationId);
-    if (
-      fence === null ||
-      fence.sessionId !== record.sessionId ||
-      fence.executorId !== record.executorId ||
-      fence.operationId !== record.activationOperationId ||
-      fence.activationId !== activationId ||
-      fence.credentialRevision !== record.credentialRevision ||
-      fence.leaseEpoch !== record.leaseEpoch ||
-      fence.sourceCredentialRevision !== record.sourceCredentialRevision ||
-      fence.revocationEpoch !== record.revocationEpoch ||
-      fence.bindingDigest !== record.bindingDigest ||
-      (requireTokenHash && fence.status === "removed") ||
-      (requireTokenHash &&
-        fence.tokenHash !== sha256(requireTicket(record.activationToken)))
-    ) {
-      throw coordinatorConflict();
-    }
-    return fence;
   }
 
   private publish(record: DesktopCodexAuthorizationSessionRecord): Promise<unknown> {
     return this.events.broadcast(projectDesktopCodexAuthorizationSnapshot(record));
   }
-}
-
-function acknowledgementInput(record: Readonly<DesktopCodexAuthorizationSessionRecord>) {
-  return {
-    executorId: record.executorId,
-    operationId: requireId(record.activationOperationId),
-    revision: requirePositive(record.credentialRevision),
-    expectedDigest: requireDigest(record.bindingDigest),
-    authorizationSessionId: record.sessionId,
-    activationAckRequestReference: requireDigest(record.ackRequestReference),
-    activationAckRequestHash: requireDigest(record.ackRequestHash)
-  };
 }
 
 function progress(
@@ -402,17 +308,6 @@ function progress(
     lastProgressStatus: status,
     localFailureCode: null
   };
-}
-
-async function completePair(
-  transport: RecoveryTransport,
-  requestReference: string | null,
-  requestHash: string | null
-): Promise<void> {
-  await transport.completeRequestIfPresent(
-    requireDigest(requestReference),
-    requireDigest(requestHash)
-  );
 }
 
 function alreadyAdoptedArtifact(
@@ -475,42 +370,8 @@ function requireDigest(value: string | null): string {
   return value;
 }
 
-function requireId(value: string | null): string {
-  if (value === null || !/^[A-Za-z0-9_-]{1,160}$/.test(value)) throw coordinatorConflict();
-  return value;
-}
-
-function requireTicket(value: string | null): string {
-  if (value === null || value.length < 1 || value.length > 8192) throw coordinatorConflict();
-  return value;
-}
-
-function requirePositive(value: number | null): number {
-  if (value === null || !Number.isSafeInteger(value) || value < 1) throw coordinatorConflict();
-  return value;
-}
-
-function requireNonNegative(value: number | null): number {
-  if (value === null || !Number.isSafeInteger(value) || value < 0) throw coordinatorConflict();
-  return value;
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
 function isTerminal(status: DesktopCodexAuthorizationSessionRecord["status"]): boolean {
   return ["failed", "cancelled", "expired", "interrupted", "superseded", "indeterminate"].includes(status);
-}
-
-function isResumable(status: DesktopCodexAuthorizationSessionRecord["status"]): boolean {
-  return [
-    "handoff_claimed",
-    "login_completed",
-    "proof_prepared",
-    "activation_pending",
-    "credential_durable"
-  ].includes(status);
 }
 
 function coordinatorConflict(): DesktopCodexAuthorizationRecoveryCoordinatorError {

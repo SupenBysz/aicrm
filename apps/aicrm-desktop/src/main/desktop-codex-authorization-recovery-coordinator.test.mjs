@@ -81,11 +81,21 @@ function record(status, generation = PROGRESS.indexOf(status) + 1) {
 }
 
 function lease(status = "fresh") {
+  const semanticKey = createHash("sha256")
+    .update("AICRM-ACTIVATION-LEASE-FENCE-V1\nsession_1\nactivation_1")
+    .digest("hex");
+  const requestReference = createHash("sha256")
+    .update(
+      "AICRM-TRUSTED-REQUEST-V1\ncredential_activation_lease_renewal\n" +
+        "/api/v1/ai-executor-authorization-sessions/session_1" +
+        "/desktop-activations/activation_1/lease-renewals"
+    )
+    .digest("hex");
   return {
     version: 1,
     generation: status === "removed" ? 2 : 1,
     status,
-    semanticKey: A,
+    semanticKey,
     sessionId: "session_1",
     executorId: "executor_1",
     operationId: "operation_1",
@@ -96,14 +106,16 @@ function lease(status = "fresh") {
     revocationEpoch: 0,
     bindingDigest: C,
     tokenHash: createHash("sha256").update(TOKEN).digest("hex"),
-    requestReference: A,
+    requestReference,
     requestHash: B,
     renewedAt: "2026-07-13T01:00:00Z",
     leaseExpiresAt: "2026-07-13T01:00:30Z",
-    replayed: false,
+    replayed: status === "recovery_required",
     recovered: false,
     createdAt: "2026-07-13T01:00:00.000Z",
-    updatedAt: "2026-07-13T01:00:00.000Z",
+    updatedAt: status === "removed"
+      ? "2026-07-13T01:00:01.000Z"
+      : "2026-07-13T01:00:00.000Z",
     removedAt: status === "removed" ? "2026-07-13T01:00:01.000Z" : null
   };
 }

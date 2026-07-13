@@ -52,6 +52,17 @@ export interface DesktopActivationLeaseFenceRecord {
   removedAt: string | null;
 }
 
+/**
+ * Reuses the durable store's complete record invariants for Main-only
+ * consumers that receive an already descriptor-captured record from a
+ * dependency boundary.
+ */
+export function validateDesktopActivationLeaseFenceRecord(
+  value: unknown
+): DesktopActivationLeaseFenceRecord {
+  return validateRecord(value);
+}
+
 interface DesktopActivationLeaseFenceData {
   semanticKey: string;
   sessionId: string;
