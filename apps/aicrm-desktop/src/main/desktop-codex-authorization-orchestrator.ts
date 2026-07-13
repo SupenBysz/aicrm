@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   CodexAuthorizationSnapshot,
   CodexAuthorizationStartInput
@@ -53,6 +54,8 @@ const DIGEST = /^[0-9a-f]{64}$/;
 const COMPACT_JWS = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 const CANONICAL_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const DETERMINISTIC_REJECTIONS = new Set([400, 401, 403, 409, 410, 422, 426]);
+const TRUSTED_EFFECT_RECOVERY_REFERENCE_DOMAIN =
+  "AICRM-DESKTOP-CODEX-TRUSTED-EFFECT-RECOVERY-V1\n";
 
 export type DesktopCodexAuthorizationOrchestratorErrorCode =
   | "desktop_codex_authorization_orchestrator_conflict"
@@ -96,6 +99,23 @@ export interface DesktopCodexAuthorizationFreshSessionInput {
   generation: number;
 }
 
+export type DesktopCodexTrustedAuthorizationPurpose =
+  | "authorization_cancel"
+  | "authorization_reopen";
+
+export interface DesktopCodexTrustedAuthorizationTarget {
+  sessionId: string;
+  executorId: string;
+  operationId: string;
+  expectedSessionRevision: number;
+}
+
+export interface DesktopCodexTrustedAuthorizationEffectResult {
+  result: "succeeded" | "failed" | "stale_target";
+  failureCode: string | null;
+  snapshot: Readonly<CodexAuthorizationSnapshot>;
+}
+
 export interface DesktopCodexAuthorizationLeaseRuntime {
   start(
     target: RenewDesktopCredentialActivationLeaseInput
@@ -128,6 +148,7 @@ interface AuthorizationSupervisor extends Pick<
   DesktopCodexAppServerSupervisor,
   | "start"
   | "startBrowserLogin"
+  | "reopenBrowserLogin"
   | "waitForLogin"
   | "readAccount"
   | "stop"
@@ -209,6 +230,14 @@ interface ResumeOperation {
   readonly promise: Promise<void>;
 }
 
+interface TrustedSessionOperationLane {
+  tail: Promise<void>;
+  readonly operations: Map<
+    string,
+    Promise<Readonly<DesktopCodexTrustedAuthorizationEffectResult>>
+  >;
+}
+
 class ShutdownSignal extends Error {}
 
 /**
@@ -230,6 +259,7 @@ export class DesktopCodexAuthorizationOrchestrator {
   private readonly instances = new Map<string, RuntimeInstance>();
   private readonly activeSessionByExecutor = new Map<string, string>();
   private readonly resumeOperations = new Map<string, ResumeOperation>();
+  private readonly trustedOperationLanes = new Map<string, TrustedSessionOperationLane>();
   private shuttingDown = false;
   private shutdownPromise: Promise<void> | null = null;
 
@@ -351,6 +381,60 @@ export class DesktopCodexAuthorizationOrchestrator {
         }
       })
       .catch(() => undefined);
+    return operation;
+  }
+
+  /**
+   * Executes the already-verified authorization reopen effect against the
+   * exact in-memory App Server instance. Ticket verification, durable command
+   * journaling and ACK transport deliberately remain outside this class.
+   */
+  reopenTrusted(
+    input: DesktopCodexTrustedAuthorizationTarget
+  ): Promise<Readonly<DesktopCodexTrustedAuthorizationEffectResult>> {
+    let target: Readonly<DesktopCodexTrustedAuthorizationTarget>;
+    try {
+      target = validateTrustedAuthorizationTarget(input);
+    } catch {
+      return Promise.reject(invalidInputError());
+    }
+    if (this.shuttingDown) {
+      return Promise.reject(orchestratorError(
+        "desktop_codex_authorization_orchestrator_stopped",
+        "Codex 授权编排器已停止"
+      ));
+    }
+
+    const operationKey = desktopCodexTrustedEffectRecoveryReference(
+      "authorization_reopen",
+      target
+    );
+    let lane = this.trustedOperationLanes.get(target.sessionId);
+    if (!lane) {
+      lane = {
+        tail: Promise.resolve(),
+        operations: new Map()
+      };
+      this.trustedOperationLanes.set(target.sessionId, lane);
+    }
+    const existing = lane.operations.get(operationKey);
+    if (existing) return existing;
+
+    const operation = lane.tail
+      .catch(() => undefined)
+      .then(() => this.performTrustedReopen(target));
+    lane.operations.set(operationKey, operation);
+    const settled = operation.then(() => undefined, () => undefined);
+    lane.tail = settled;
+    void settled.then(() => {
+      if (lane?.operations.get(operationKey) === operation) {
+        lane.operations.delete(operationKey);
+      }
+      if (lane?.tail === settled && lane.operations.size === 0 &&
+          this.trustedOperationLanes.get(target.sessionId) === lane) {
+        this.trustedOperationLanes.delete(target.sessionId);
+      }
+    });
     return operation;
   }
 
@@ -504,6 +588,78 @@ export class DesktopCodexAuthorizationOrchestrator {
     const flow = Promise.resolve().then(() => this.runResumed(instance));
     instance.flow = flow;
     void flow.catch(() => undefined);
+  }
+
+  private async performTrustedReopen(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): Promise<Readonly<DesktopCodexTrustedAuthorizationEffectResult>> {
+    if (this.shuttingDown) {
+      throw orchestratorError(
+        "desktop_codex_authorization_orchestrator_stopped",
+        "Codex 授权编排器已停止"
+      );
+    }
+    const before = await this.readTrustedTargetSnapshot(target);
+    if (!before.matches) return trustedEffectResult("stale_target", null, before.snapshot);
+
+    const instance = this.instances.get(target.sessionId);
+    const receipt = exactReopenReceipt(instance, target);
+    if (!instance || !receipt) {
+      return trustedEffectResult(
+        "failed",
+        "desktop_codex_authorization_runtime_missing",
+        before.snapshot
+      );
+    }
+
+    try {
+      const reopened = await this.supervisor.reopenBrowserLogin(receipt);
+      requireSupervisorState(reopened, "waiting_user", receipt);
+    } catch (error) {
+      const latest = await this.readTrustedTargetSnapshot(target);
+      if (!latest.matches || supervisorTargetMoved(error)) {
+        return trustedEffectResult("stale_target", null, latest.snapshot);
+      }
+      return trustedEffectResult(
+        "failed",
+        "desktop_codex_authorization_reopen_failed",
+        latest.snapshot
+      );
+    }
+
+    const latest = await this.readTrustedTargetSnapshot(target);
+    if (!latest.matches || this.instances.get(target.sessionId) !== instance ||
+        !sameAppServerReceipt(instance.appServerReceipt, receipt)) {
+      return trustedEffectResult("stale_target", null, latest.snapshot);
+    }
+    return trustedEffectResult("succeeded", null, latest.snapshot);
+  }
+
+  private async readTrustedTargetSnapshot(
+    target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+  ): Promise<Readonly<{
+    matches: boolean;
+    snapshot: Readonly<CodexAuthorizationSnapshot>;
+  }>> {
+    let current: DesktopCodexAuthorizationSessionRecord | null;
+    try {
+      current = await this.sessionStore.read(target.sessionId);
+    } catch {
+      throw operationFailedError();
+    }
+    if (!current) throw conflictError();
+    try {
+      const snapshot = safeSnapshot(current);
+      return Object.freeze({
+        matches: current.sessionId === target.sessionId &&
+          current.executorId === target.executorId &&
+          current.sessionRevision === target.expectedSessionRevision &&
+          current.status === "waiting_user",
+        snapshot
+      });
+    } catch {
+      throw operationFailedError();
+    }
   }
 
   private async runResumed(instance: RuntimeInstance): Promise<void> {
@@ -942,7 +1098,9 @@ export class DesktopCodexAuthorizationOrchestrator {
   private async performShutdown(): Promise<void> {
     const resumePromises = [...this.resumeOperations.values()]
       .map((operation) => operation.promise);
-    await Promise.allSettled(resumePromises);
+    const trustedOperationTails = [...this.trustedOperationLanes.values()]
+      .map((lane) => lane.tail);
+    await Promise.allSettled([...resumePromises, ...trustedOperationTails]);
     const startPromises = [...this.instances.values()].map((instance) => instance.startPromise);
     const stopResults = await Promise.allSettled([
       this.supervisor.shutdownAll(),
@@ -1002,6 +1160,7 @@ function validateOptions(options: DesktopCodexAuthorizationOrchestratorOptions):
       typeof options.transport?.cancel !== "function" ||
       typeof options.supervisor?.start !== "function" ||
       typeof options.supervisor?.startBrowserLogin !== "function" ||
+      typeof options.supervisor?.reopenBrowserLogin !== "function" ||
       typeof options.supervisor?.waitForLogin !== "function" ||
       typeof options.supervisor?.readAccount !== "function" ||
       typeof options.supervisor?.stop !== "function" ||
@@ -1020,6 +1179,120 @@ function validateOptions(options: DesktopCodexAuthorizationOrchestratorOptions):
       (options.now !== undefined && typeof options.now !== "function")) {
     throw invalidInputError();
   }
+}
+
+export function desktopCodexTrustedEffectRecoveryReference(
+  purpose: DesktopCodexTrustedAuthorizationPurpose,
+  input: DesktopCodexTrustedAuthorizationTarget
+): string {
+  if (purpose !== "authorization_cancel" && purpose !== "authorization_reopen") {
+    throw invalidInputError();
+  }
+  const target = validateTrustedAuthorizationTarget(input);
+  return createHash("sha256")
+    .update(TRUSTED_EFFECT_RECOVERY_REFERENCE_DOMAIN, "utf8")
+    .update(JSON.stringify({
+      purpose,
+      sessionId: target.sessionId,
+      executorId: target.executorId,
+      operationId: target.operationId,
+      expectedSessionRevision: target.expectedSessionRevision
+    }), "utf8")
+    .digest("hex");
+}
+
+function validateTrustedAuthorizationTarget(
+  value: unknown
+): Readonly<DesktopCodexTrustedAuthorizationTarget> {
+  let captured: Record<string, any>;
+  try {
+    captured = captureExact(value, [
+      "sessionId", "executorId", "operationId", "expectedSessionRevision"
+    ]);
+  } catch {
+    throw invalidInputError();
+  }
+  if (!safeId(captured.sessionId) || !safeId(captured.executorId) ||
+      !safeId(captured.operationId) || !positiveInteger(captured.expectedSessionRevision)) {
+    throw invalidInputError();
+  }
+  return Object.freeze({
+    sessionId: captured.sessionId,
+    executorId: captured.executorId,
+    operationId: captured.operationId,
+    expectedSessionRevision: captured.expectedSessionRevision
+  });
+}
+
+function exactReopenReceipt(
+  instance: RuntimeInstance | undefined,
+  target: Readonly<DesktopCodexTrustedAuthorizationTarget>
+): Readonly<DesktopCodexAppServerReceipt> | null {
+  if (!instance || instance.appServerStopped || instance.input.sessionId !== target.sessionId ||
+      instance.input.executorId !== target.executorId || !instance.appServerReceipt) return null;
+  const captured = captureAppServerReceipt(instance.appServerReceipt);
+  if (!captured || captured.executorId !== target.executorId ||
+      captured.sessionId !== target.sessionId) return null;
+  return captured;
+}
+
+function captureAppServerReceipt(
+  value: unknown
+): Readonly<DesktopCodexAppServerReceipt> | null {
+  try {
+    const captured = captureExact(value, [
+      "version", "bootIdHash", "instanceIdHash", "executorId", "sessionId",
+      "stagingOwnershipDigest"
+    ]);
+    if (captured.version !== 1 || !digest(captured.bootIdHash) ||
+        !digest(captured.instanceIdHash) || !safeId(captured.executorId) ||
+        !safeId(captured.sessionId) || !digest(captured.stagingOwnershipDigest)) {
+      return null;
+    }
+    return Object.freeze({
+      version: 1,
+      bootIdHash: captured.bootIdHash,
+      instanceIdHash: captured.instanceIdHash,
+      executorId: captured.executorId,
+      sessionId: captured.sessionId,
+      stagingOwnershipDigest: captured.stagingOwnershipDigest
+    });
+  } catch {
+    return null;
+  }
+}
+
+function sameAppServerReceipt(
+  current: Readonly<DesktopCodexAppServerReceipt> | null,
+  expected: Readonly<DesktopCodexAppServerReceipt>
+): boolean {
+  const captured = captureAppServerReceipt(current);
+  return captured !== null && captured.version === expected.version &&
+    captured.bootIdHash === expected.bootIdHash &&
+    captured.instanceIdHash === expected.instanceIdHash &&
+    captured.executorId === expected.executorId && captured.sessionId === expected.sessionId &&
+    captured.stagingOwnershipDigest === expected.stagingOwnershipDigest;
+}
+
+function supervisorTargetMoved(error: unknown): boolean {
+  try {
+    if (!error || typeof error !== "object") return false;
+    const descriptor = Reflect.getOwnPropertyDescriptor(error, "code");
+    if (!descriptor || !("value" in descriptor)) return false;
+    return descriptor.value === "desktop_codex_app_server_stopped" ||
+      descriptor.value === "desktop_codex_app_server_stale_receipt" ||
+      descriptor.value === "desktop_codex_app_server_conflict";
+  } catch {
+    return false;
+  }
+}
+
+function trustedEffectResult(
+  result: DesktopCodexTrustedAuthorizationEffectResult["result"],
+  failureCode: string | null,
+  snapshot: Readonly<CodexAuthorizationSnapshot>
+): Readonly<DesktopCodexTrustedAuthorizationEffectResult> {
+  return Object.freeze({ result, failureCode, snapshot });
 }
 
 function validateStartInput(value: unknown): Readonly<CodexAuthorizationStartInput> {

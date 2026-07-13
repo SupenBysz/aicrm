@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  DesktopCodexAuthorizationOrchestrator
+  DesktopCodexAuthorizationOrchestrator,
+  desktopCodexTrustedEffectRecoveryReference
 } from "./desktop-codex-authorization-orchestrator.ts";
 import {
   desktopCodexAuthorizationSessionData,
@@ -167,7 +168,7 @@ class FakeTransport {
       recovered: false,
       data: {
         handoffId: input.handoffId,
-        executorId: "executor_1",
+        executorId: this.options.executorByHandoff?.[input.handoffId] ?? "executor_1",
         claimToken: CLAIM_TOKEN,
         expiresAt: "2026-07-13T00:30:00Z",
         sessionRevision: this.options.claimSessionRevision ?? 2,
@@ -244,6 +245,8 @@ class FakeSupervisor {
     this.calls = calls;
     this.options = options;
     this.receipt = null;
+    this.states = new Map();
+    this.reopenCalls = 0;
   }
 
   async start(binding) {
@@ -254,6 +257,7 @@ class FakeSupervisor {
       instanceIdHash: INSTANCE_HASH,
       ...binding
     });
+    this.states.set(binding.sessionId, "ready");
     if (this.options.failAt === "start") throw new Error("start failed");
     return this.receipt;
   }
@@ -261,12 +265,38 @@ class FakeSupervisor {
   async startBrowserLogin(receipt) {
     this.calls.push("supervisor:start_login");
     if (this.options.failAt === "start_login") throw new Error("login effect failed");
+    this.states.set(receipt.sessionId, "waiting_user");
+    return this.snapshot(receipt, "waiting_user");
+  }
+
+  async reopenBrowserLogin(receipt) {
+    this.reopenCalls += 1;
+    this.calls.push(`supervisor:reopen_login:${receipt.sessionId}:begin`);
+    if (this.states.get(receipt.sessionId) !== "waiting_user") {
+      throw Object.assign(new Error("runtime target moved"), {
+        code: "desktop_codex_app_server_stopped"
+      });
+    }
+    const gate = this.options.reopenGateBySession?.[receipt.sessionId] ??
+      this.options.reopenGate;
+    if (gate) await gate.promise;
+    if (this.states.get(receipt.sessionId) !== "waiting_user") {
+      throw Object.assign(new Error("runtime target moved"), {
+        code: "desktop_codex_app_server_stopped"
+      });
+    }
+    if (this.options.failAt === "reopen_login") {
+      throw new Error(this.options.reopenFailureCanary ?? "reopen failed");
+    }
+    this.calls.push(`supervisor:reopen_login:${receipt.sessionId}:opened`);
     return this.snapshot(receipt, "waiting_user");
   }
 
   async waitForLogin(receipt) {
     this.calls.push("supervisor:wait_login");
-    if (this.options.waitGate) await this.options.waitGate.promise;
+    const gate = this.options.waitGateBySession?.[receipt.sessionId] ?? this.options.waitGate;
+    if (gate) await gate.promise;
+    this.states.set(receipt.sessionId, "login_completed");
     return {
       ...this.snapshot(receipt, "login_completed"),
       errorCode: null,
@@ -286,12 +316,14 @@ class FakeSupervisor {
     this.calls.push("supervisor:stop");
     if (this.options.failAt === "stop") throw new Error("stop failed");
     await this.options.onStop?.();
+    this.states.set(receipt.sessionId, "stopped");
     return this.snapshot(receipt, "stopped");
   }
 
   async stopByBinding(value) {
     this.calls.push("supervisor:stop_by_binding");
     if (this.options.failAt === "stop_by_binding") throw new Error("stop unconfirmed");
+    this.states.set(value.sessionId, "stopped");
     return this.snapshot({
       version: 1,
       bootIdHash: BOOT_HASH,
@@ -303,6 +335,9 @@ class FakeSupervisor {
   async shutdownAll() {
     this.calls.push("supervisor:shutdown_all");
     this.options.waitGate?.reject(new Error("supervisor shutdown"));
+    for (const gate of Object.values(this.options.waitGateBySession ?? {})) {
+      gate.reject(new Error("supervisor shutdown"));
+    }
   }
 
   snapshot(receipt, state) {
@@ -549,6 +584,7 @@ async function seedResumableRecord(current, targetStatus) {
   await advance("app_server_started");
   await advance("login_starting");
   await advance("waiting_user");
+  if (targetStatus === "waiting_user") return record;
   await advance("login_completed", {
     loginIdHash: LOGIN_HASH,
     accountFingerprint: BINDING_DIGEST,
@@ -591,9 +627,9 @@ async function seedResumableRecord(current, targetStatus) {
   return record;
 }
 
-async function waitForStatus(current, status) {
+async function waitForStatus(current, status, sessionId = "session_1") {
   for (let index = 0; index < 100; index += 1) {
-    const record = await current.sessionStore.read("session_1");
+    const record = await current.sessionStore.read(sessionId);
     if (record?.status === status) return record;
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -765,6 +801,248 @@ test("shutdown waits for a pending resume read and prevents any late instance ad
   assert.equal(current.calls.includes("supervisor:start"), false);
   assert.equal(current.calls.includes("session:app_server_starting"), false);
   assert.equal((await current.sessionStore.read("session_1")).status, "handoff_claimed");
+});
+
+function reopenTarget(overrides = {}) {
+  return {
+    sessionId: "session_1",
+    executorId: "executor_1",
+    operationId: "operation_reopen_1",
+    expectedSessionRevision: 2,
+    ...overrides
+  };
+}
+
+test("trusted reopen target and recovery reference are exact, descriptor-safe, and deterministic", async () => {
+  const expected = desktopCodexTrustedEffectRecoveryReference(
+    "authorization_reopen",
+    reopenTarget()
+  );
+  assert.match(expected, /^[0-9a-f]{64}$/);
+  assert.equal(
+    desktopCodexTrustedEffectRecoveryReference("authorization_reopen", reopenTarget()),
+    expected
+  );
+  assert.notEqual(
+    desktopCodexTrustedEffectRecoveryReference("authorization_cancel", reopenTarget()),
+    expected
+  );
+  assert.throws(
+    () => desktopCodexTrustedEffectRecoveryReference(
+      "authorization_reopen",
+      { ...reopenTarget(), extra: true }
+    ),
+    { code: "desktop_codex_authorization_orchestrator_invalid_input" }
+  );
+
+  const accessor = reopenTarget();
+  Object.defineProperty(accessor, "executorId", {
+    enumerable: true,
+    get() {
+      throw new Error("private accessor canary");
+    }
+  });
+  assert.throws(
+    () => desktopCodexTrustedEffectRecoveryReference("authorization_reopen", accessor),
+    { code: "desktop_codex_authorization_orchestrator_invalid_input" }
+  );
+
+  let operationReads = 0;
+  const descriptorOnly = new Proxy(reopenTarget(), {
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      if (key !== "operationId" || !descriptor || !("value" in descriptor)) return descriptor;
+      operationReads += 1;
+      return {
+        ...descriptor,
+        value: operationReads === 1 ? "operation_reopen_1" : "private_canary"
+      };
+    }
+  });
+  assert.equal(
+    desktopCodexTrustedEffectRecoveryReference("authorization_reopen", descriptorOnly),
+    expected
+  );
+  assert.equal(operationReads, 1);
+
+  const waitGate = deferred();
+  const current = fixture({ supervisor: { waitGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+  await assert.rejects(current.orchestrator.reopenTrusted(accessor), {
+    code: "desktop_codex_authorization_orchestrator_invalid_input"
+  });
+  assert.equal(current.supervisor.reopenCalls, 0);
+  waitGate.resolve();
+  await current.orchestrator.waitForIdle("session_1");
+});
+
+test("twenty exact trusted reopen callers share one effect and conflicting operations serialize", async () => {
+  const waitGate = deferred();
+  const firstGate = deferred();
+  const current = fixture({ supervisor: { waitGate, reopenGate: firstGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+
+  const operations = Array.from(
+    { length: 20 },
+    () => current.orchestrator.reopenTrusted(reopenTarget())
+  );
+  assert.ok(operations.every((operation) => operation === operations[0]));
+  const competing = current.orchestrator.reopenTrusted(reopenTarget({
+    operationId: "operation_reopen_2"
+  }));
+  for (let index = 0; index < 100 && current.supervisor.reopenCalls === 0; index += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(current.supervisor.reopenCalls, 1);
+  firstGate.resolve();
+  const results = await Promise.all(operations);
+  for (const result of results) assert.equal(result, results[0]);
+  assert.deepEqual(results[0], {
+    result: "succeeded",
+    failureCode: null,
+    snapshot: {
+      sessionId: "session_1",
+      executorId: "executor_1",
+      sequence: 7,
+      status: "waiting_user",
+      canReopen: true,
+      canCancel: true
+    }
+  });
+  assert.equal((await competing).result, "succeeded");
+  assert.equal(current.supervisor.reopenCalls, 2);
+  assert.deepEqual(
+    current.calls.filter((call) => call.includes("supervisor:reopen_login")),
+    [
+      "supervisor:reopen_login:session_1:begin",
+      "supervisor:reopen_login:session_1:opened",
+      "supervisor:reopen_login:session_1:begin",
+      "supervisor:reopen_login:session_1:opened"
+    ]
+  );
+  waitGate.resolve();
+  await current.orchestrator.waitForIdle("session_1");
+});
+
+test("trusted reopen lanes execute different sessions in parallel", async () => {
+  const firstWait = deferred();
+  const secondWait = deferred();
+  const firstReopen = deferred();
+  const secondReopen = deferred();
+  const current = fixture({
+    transport: { executorByHandoff: { handoff_2: "executor_2" } },
+    supervisor: {
+      waitGateBySession: { session_1: firstWait, session_2: secondWait },
+      reopenGateBySession: { session_1: firstReopen, session_2: secondReopen }
+    }
+  });
+  await Promise.all([
+    current.orchestrator.start(startInput()),
+    current.orchestrator.start(startInput({
+      sessionId: "session_2",
+      executorId: "executor_2",
+      handoffId: "handoff_2"
+    }))
+  ]);
+  await Promise.all([
+    waitForStatus(current, "waiting_user", "session_1"),
+    waitForStatus(current, "waiting_user", "session_2")
+  ]);
+  const first = current.orchestrator.reopenTrusted(reopenTarget());
+  const second = current.orchestrator.reopenTrusted(reopenTarget({
+    sessionId: "session_2",
+    executorId: "executor_2",
+    operationId: "operation_reopen_2"
+  }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    current.calls.filter((call) => call.endsWith(":begin")),
+    [
+      "supervisor:reopen_login:session_1:begin",
+      "supervisor:reopen_login:session_2:begin"
+    ]
+  );
+  firstReopen.resolve();
+  secondReopen.resolve();
+  assert.equal((await first).result, "succeeded");
+  assert.equal((await second).result, "succeeded");
+  firstWait.resolve();
+  secondWait.resolve();
+  await Promise.allSettled([
+    current.orchestrator.waitForIdle("session_1"),
+    current.orchestrator.waitForIdle("session_2")
+  ]);
+});
+
+test("scan completion wins a pending reopen as stale_target", async () => {
+  const waitGate = deferred();
+  const reopenGate = deferred();
+  const current = fixture({ supervisor: { waitGate, reopenGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+  const reopening = current.orchestrator.reopenTrusted(reopenTarget());
+  await new Promise((resolve) => setImmediate(resolve));
+  waitGate.resolve();
+  for (let index = 0; index < 100; index += 1) {
+    if ((await current.sessionStore.read("session_1"))?.status !== "waiting_user") break;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  reopenGate.resolve();
+  const result = await reopening;
+  assert.equal(result.result, "stale_target");
+  assert.equal(result.failureCode, null);
+  assert.notEqual(result.snapshot.status, "waiting_user");
+  assert.equal(JSON.stringify(result).includes("http"), false);
+  await current.orchestrator.waitForIdle("session_1");
+});
+
+test("trusted reopen returns safe stale and runtime failure results without leaking URLs", async () => {
+  const missing = fixture();
+  await assert.rejects(missing.orchestrator.reopenTrusted(reopenTarget()), {
+    code: "desktop_codex_authorization_orchestrator_conflict"
+  });
+  assert.equal(missing.supervisor.reopenCalls, 0);
+
+  const current = fixture();
+  const waiting = await seedResumableRecord(current, "waiting_user");
+  current.calls.length = 0;
+  assert.deepEqual(await current.orchestrator.reopenTrusted(reopenTarget()), {
+    result: "failed",
+    failureCode: "desktop_codex_authorization_runtime_missing",
+    snapshot: projectDesktopCodexAuthorizationSnapshot(waiting)
+  });
+  assert.equal(current.supervisor.reopenCalls, 0);
+  assert.equal((await current.orchestrator.reopenTrusted(reopenTarget({
+    expectedSessionRevision: 99
+  }))).result, "stale_target");
+
+  const waitGate = deferred();
+  const canary = "https://auth.example.invalid/private?token=secret";
+  const failed = fixture({ supervisor: {
+    waitGate,
+    failAt: "reopen_login",
+    reopenFailureCanary: canary
+  } });
+  await failed.orchestrator.start(startInput());
+  await waitForStatus(failed, "waiting_user");
+  const result = await failed.orchestrator.reopenTrusted(reopenTarget());
+  assert.deepEqual(result, {
+    result: "failed",
+    failureCode: "desktop_codex_authorization_reopen_failed",
+    snapshot: {
+      sessionId: "session_1",
+      executorId: "executor_1",
+      sequence: 7,
+      status: "waiting_user",
+      canReopen: true,
+      canCancel: true
+    }
+  });
+  assert.equal(JSON.stringify(result).includes(canary), false);
+  waitGate.resolve();
+  await failed.orchestrator.waitForIdle("session_1");
 });
 
 test("a converged executor admits a different session while the original session stays idempotent", async () => {
