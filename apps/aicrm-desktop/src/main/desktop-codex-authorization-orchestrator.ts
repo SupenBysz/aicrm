@@ -140,6 +140,7 @@ export type DesktopCodexTrustedAuthorizationPurpose =
 export interface DesktopCodexTrustedAuthorizationTarget {
   sessionId: string;
   executorId: string;
+  deviceId: string;
   operationId: string;
   expectedSessionRevision: number;
 }
@@ -780,7 +781,8 @@ export class DesktopCodexAuthorizationOrchestrator {
     }
 
     const instance = this.instances.get(target.sessionId);
-    if (!instance || instance.input.executorId !== target.executorId) {
+    if (!instance || instance.input.executorId !== target.executorId ||
+        instance.record?.deviceId !== target.deviceId) {
       return trustedEffectResult(
         "failed",
         "desktop_codex_authorization_runtime_missing",
@@ -811,7 +813,8 @@ export class DesktopCodexAuthorizationOrchestrator {
       if (beforeRecoveryRaw === null) throw conflictError();
       const beforeRecovery = captureTrustedSessionRecord(beforeRecoveryRaw);
       if (beforeRecovery.sessionId !== target.sessionId ||
-          beforeRecovery.executorId !== target.executorId) {
+          beforeRecovery.executorId !== target.executorId ||
+          beforeRecovery.deviceId !== target.deviceId) {
         throw conflictError();
       }
       let record: DesktopCodexAuthorizationSessionRecord;
@@ -934,6 +937,7 @@ export class DesktopCodexAuthorizationOrchestrator {
       return Object.freeze({
         matches: current.sessionId === target.sessionId &&
           current.executorId === target.executorId &&
+          current.deviceId === target.deviceId &&
           current.sessionRevision === target.expectedSessionRevision &&
           !isTerminal(current.status) && current.status !== "activation_acked",
         record: current,
@@ -950,7 +954,8 @@ export class DesktopCodexAuthorizationOrchestrator {
     const instance = this.instances.get(target.sessionId);
     if (!instance || instance.cancelFence !== null ||
         instance.input.sessionId !== target.sessionId ||
-        instance.input.executorId !== target.executorId) return;
+        instance.input.executorId !== target.executorId ||
+        instance.record?.deviceId !== target.deviceId) return;
     instance.cancelFence = createTrustedCancellationFence(target, false);
   }
 
@@ -988,7 +993,8 @@ export class DesktopCodexAuthorizationOrchestrator {
       const raw = await this.sessionStore.read(target.sessionId);
       const current = raw === null ? null : captureTrustedSessionRecord(raw);
       if (!current || current.sessionId !== target.sessionId ||
-          current.executorId !== target.executorId) return fallback;
+          current.executorId !== target.executorId ||
+          current.deviceId !== target.deviceId) return fallback;
       return safeSnapshot(current);
     } catch {
       return fallback;
@@ -1014,6 +1020,7 @@ export class DesktopCodexAuthorizationOrchestrator {
       return Object.freeze({
         matches: current.sessionId === target.sessionId &&
           current.executorId === target.executorId &&
+          current.deviceId === target.deviceId &&
           current.sessionRevision === target.expectedSessionRevision &&
           current.status === "waiting_user",
         snapshot
@@ -1630,6 +1637,7 @@ export function desktopCodexTrustedEffectRecoveryReference(
       purpose,
       sessionId: target.sessionId,
       executorId: target.executorId,
+      deviceId: target.deviceId,
       operationId: target.operationId,
       expectedSessionRevision: target.expectedSessionRevision
     }), "utf8")
@@ -1642,18 +1650,20 @@ function validateTrustedAuthorizationTarget(
   let captured: Record<string, any>;
   try {
     captured = captureExact(value, [
-      "sessionId", "executorId", "operationId", "expectedSessionRevision"
+      "sessionId", "executorId", "deviceId", "operationId", "expectedSessionRevision"
     ]);
   } catch {
     throw invalidInputError();
   }
   if (!safeId(captured.sessionId) || !safeId(captured.executorId) ||
+      typeof captured.deviceId !== "string" || !DEVICE_ID.test(captured.deviceId) ||
       !safeId(captured.operationId) || !positiveInteger(captured.expectedSessionRevision)) {
     throw invalidInputError();
   }
   return Object.freeze({
     sessionId: captured.sessionId,
     executorId: captured.executorId,
+    deviceId: captured.deviceId,
     operationId: captured.operationId,
     expectedSessionRevision: captured.expectedSessionRevision
   });
@@ -1664,7 +1674,8 @@ function exactReopenReceipt(
   target: Readonly<DesktopCodexTrustedAuthorizationTarget>
 ): Readonly<DesktopCodexAppServerReceipt> | null {
   if (!instance || instance.appServerStopped || instance.input.sessionId !== target.sessionId ||
-      instance.input.executorId !== target.executorId || !instance.appServerReceipt) return null;
+      instance.input.executorId !== target.executorId ||
+      instance.record?.deviceId !== target.deviceId || !instance.appServerReceipt) return null;
   const captured = captureAppServerReceipt(instance.appServerReceipt);
   if (!captured || captured.executorId !== target.executorId ||
       captured.sessionId !== target.sessionId) return null;

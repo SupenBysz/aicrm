@@ -901,6 +901,7 @@ function reopenTarget(overrides = {}) {
   return {
     sessionId: "session_1",
     executorId: "executor_1",
+    deviceId: DEVICE_ID,
     operationId: "operation_reopen_1",
     expectedSessionRevision: 2,
     ...overrides
@@ -911,6 +912,7 @@ function cancelTarget(overrides = {}) {
   return {
     sessionId: "session_1",
     executorId: "executor_1",
+    deviceId: DEVICE_ID,
     operationId: "operation_cancel_1",
     expectedSessionRevision: 2,
     ...overrides
@@ -930,6 +932,18 @@ test("trusted reopen target and recovery reference are exact, descriptor-safe, a
   assert.notEqual(
     desktopCodexTrustedEffectRecoveryReference("authorization_cancel", reopenTarget()),
     expected
+  );
+  assert.notEqual(
+    desktopCodexTrustedEffectRecoveryReference("authorization_reopen", reopenTarget({
+      deviceId: "1".repeat(64)
+    })),
+    expected
+  );
+  assert.throws(
+    () => desktopCodexTrustedEffectRecoveryReference("authorization_reopen", reopenTarget({
+      deviceId: "device_unsafe"
+    })),
+    { code: "desktop_codex_authorization_orchestrator_invalid_input" }
   );
   assert.throws(
     () => desktopCodexTrustedEffectRecoveryReference(
@@ -977,6 +991,26 @@ test("trusted reopen target and recovery reference are exact, descriptor-safe, a
     code: "desktop_codex_authorization_orchestrator_invalid_input"
   });
   assert.equal(current.supervisor.reopenCalls, 0);
+  waitGate.resolve();
+  await current.orchestrator.waitForIdle("session_1");
+});
+
+test("a cross-device trusted target is stale before every reopen or cancel effect", async () => {
+  const waitGate = deferred();
+  const current = fixture({ supervisor: { waitGate } });
+  await current.orchestrator.start(startInput());
+  await waitForStatus(current, "waiting_user");
+
+  const foreignDevice = { deviceId: "1".repeat(64) };
+  assert.equal((await current.orchestrator.reopenTrusted(reopenTarget(foreignDevice))).result,
+    "stale_target");
+  assert.equal((await current.orchestrator.cancelTrusted(cancelTarget(foreignDevice))).result,
+    "stale_target");
+  assert.equal(current.supervisor.reopenCalls, 0);
+  assert.equal(current.calls.includes("supervisor:stop"), false);
+
+  assert.equal((await current.orchestrator.reopenTrusted(reopenTarget())).result, "succeeded");
+  assert.equal(current.supervisor.reopenCalls, 1);
   waitGate.resolve();
   await current.orchestrator.waitForIdle("session_1");
 });
