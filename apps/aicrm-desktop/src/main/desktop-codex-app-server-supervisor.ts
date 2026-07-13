@@ -98,9 +98,11 @@ interface RuntimeInstance {
   errorCode: DesktopCodexAppServerSupervisorErrorCode | null;
   client: DesktopCodexAppServerClient | null;
   loginId: string | null;
+  authUrl: string | null;
   startPromise: Promise<Readonly<DesktopCodexAppServerReceipt>>;
   loginStartPromise: Promise<Readonly<DesktopCodexAppServerSnapshot>> | null;
   loginWaitPromise: Promise<Readonly<DesktopCodexAppServerLoginCompletion>> | null;
+  loginReopenPromise: Promise<Readonly<DesktopCodexAppServerSnapshot>> | null;
   stopPromise: Promise<Readonly<DesktopCodexAppServerSnapshot>> | null;
   stopCompleted: boolean;
 }
@@ -173,9 +175,11 @@ export class DesktopCodexAppServerSupervisor {
       errorCode: null,
       client: null,
       loginId: null,
+      authUrl: null,
       startPromise: Promise.resolve(receipt),
       loginStartPromise: null,
       loginWaitPromise: null,
+      loginReopenPromise: null,
       stopPromise: null,
       stopCompleted: false
     };
@@ -217,6 +221,36 @@ export class DesktopCodexAppServerSupervisor {
     instance.loginWaitPromise = operation;
     void operation.catch(() => undefined);
     return operation;
+  }
+
+  reopenBrowserLogin(
+    receipt: DesktopCodexAppServerReceipt
+  ): Promise<Readonly<DesktopCodexAppServerSnapshot>> {
+    const instance = this.resolveReceipt(receipt);
+    if (instance.state !== "waiting_user" || !instance.client ||
+        instance.loginId === null || instance.authUrl === null) {
+      return Promise.reject(this.stateError(instance));
+    }
+    if (instance.loginReopenPromise) return instance.loginReopenPromise;
+    const operation = this.performReopenBrowserLogin(
+      instance,
+      instance.client,
+      instance.loginId,
+      instance.authUrl
+    );
+    const tracked = operation.then(
+      (value) => {
+        if (instance.loginReopenPromise === tracked) instance.loginReopenPromise = null;
+        return value;
+      },
+      (error: unknown) => {
+        if (instance.loginReopenPromise === tracked) instance.loginReopenPromise = null;
+        throw error;
+      }
+    );
+    instance.loginReopenPromise = tracked;
+    void tracked.catch(() => undefined);
+    return tracked;
   }
 
   async readAccount(
@@ -356,9 +390,13 @@ export class DesktopCodexAppServerSupervisor {
       throw this.stateError(instance);
     }
     instance.loginId = challenge.loginId;
+    instance.authUrl = challenge.authUrl;
     try {
       await this.openTrustedUrl(challenge.authUrl);
-      if (!this.isExactReadyInstance(instance, client)) throw this.stateError(instance);
+      if (!this.isExactReadyInstance(instance, client) ||
+          instance.loginId !== challenge.loginId || instance.authUrl !== challenge.authUrl) {
+        throw this.stateError(instance);
+      }
       this.transition(instance, "waiting_user");
       return this.snapshot(instance);
     } catch {
@@ -366,6 +404,7 @@ export class DesktopCodexAppServerSupervisor {
       // normalized, including when shutdown completed while the effect waited.
       await client.cancelLogin(challenge.loginId).catch(() => undefined);
       if (instance.loginId === challenge.loginId) instance.loginId = null;
+      if (instance.authUrl === challenge.authUrl) instance.authUrl = null;
       if (!this.isExactReadyInstance(instance, client)) throw this.stateError(instance);
       this.fail(instance, "desktop_codex_app_server_operation_failed");
       throw supervisorError(
@@ -373,6 +412,30 @@ export class DesktopCodexAppServerSupervisor {
         "Codex App Server 浏览器授权启动失败"
       );
     }
+  }
+
+  private async performReopenBrowserLogin(
+    instance: RuntimeInstance,
+    client: DesktopCodexAppServerClient,
+    loginId: string,
+    authUrl: string
+  ): Promise<Readonly<DesktopCodexAppServerSnapshot>> {
+    try {
+      await this.openTrustedUrl(authUrl);
+    } catch {
+      if (!this.isExactWaitingInstance(instance, client, loginId, authUrl)) {
+        throw this.stateError(instance);
+      }
+      this.fail(instance, "desktop_codex_app_server_operation_failed");
+      throw supervisorError(
+        "desktop_codex_app_server_operation_failed",
+        "Codex App Server 浏览器授权重开失败"
+      );
+    }
+    if (!this.isExactWaitingInstance(instance, client, loginId, authUrl)) {
+      throw this.stateError(instance);
+    }
+    return this.snapshot(instance);
   }
 
   private async performWaitForLogin(
@@ -390,6 +453,7 @@ export class DesktopCodexAppServerSupervisor {
         );
       }
       instance.loginId = null;
+      instance.authUrl = null;
       this.transition(instance, "login_completed");
       return this.loginCompletion(instance, loginId);
     } catch (error) {
@@ -397,6 +461,7 @@ export class DesktopCodexAppServerSupervisor {
         throw this.stateError(instance);
       }
       instance.loginId = null;
+      instance.authUrl = null;
       const invalid = normalizedInvalidInput(error);
       this.fail(
         instance,
@@ -453,6 +518,7 @@ export class DesktopCodexAppServerSupervisor {
     if (!wasFailed) this.transition(instance, "stopping");
     const loginId = instance.loginId;
     instance.loginId = null;
+    instance.authUrl = null;
     let failed = false;
     if (cancelLogin && loginId !== null) {
       try {
@@ -495,6 +561,17 @@ export class DesktopCodexAppServerSupervisor {
       this.instances.get(instance.binding.executorId) === instance;
   }
 
+  private isExactWaitingInstance(
+    instance: RuntimeInstance,
+    client: DesktopCodexAppServerClient,
+    loginId: string,
+    authUrl: string
+  ): boolean {
+    return !this.shuttingDown && instance.state === "waiting_user" &&
+      instance.client === client && instance.loginId === loginId && instance.authUrl === authUrl &&
+      this.instances.get(instance.binding.executorId) === instance;
+  }
+
   private stateError(instance: RuntimeInstance): DesktopCodexAppServerSupervisorError {
     return supervisorError(
       instance.state === "failed"
@@ -511,6 +588,7 @@ export class DesktopCodexAppServerSupervisor {
     code: DesktopCodexAppServerSupervisorErrorCode
   ): void {
     if (instance.state === "failed" || instance.state === "stopped") return;
+    instance.authUrl = null;
     instance.errorCode = code;
     this.transition(instance, "failed");
   }

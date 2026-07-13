@@ -126,6 +126,10 @@ function fixture(options = {}) {
     },
     async openTrustedUrl(value) {
       effects.push(value);
+      if (options.effectHandler) {
+        await options.effectHandler(value, effects.length);
+        return;
+      }
       if (options.effectGate) await options.effectGate.promise;
       if (options.effectError) throw options.effectError;
     },
@@ -276,6 +280,171 @@ test("browser login exposes raw challenge only to Main effects and advances ever
     "stopped"
   ]);
   assertSafe([receipt, waitingSnapshots, completed, stopped, current.events]);
+});
+
+test("reopen uses the exact in-memory validated challenge with concurrent singleflight", async () => {
+  const reopenGate = deferred();
+  const current = fixture({
+    async effectHandler(value, callNumber) {
+      assert.equal(value, RAW_URL);
+      if (callNumber === 2) await reopenGate.promise;
+    }
+  });
+  const receipt = await current.supervisor.start(binding());
+  const waiting = await current.supervisor.startBrowserLogin(receipt);
+  assert.equal(waiting.state, "waiting_user");
+
+  const descriptorOnlyReceipt = new Proxy(receipt, {
+    get() {
+      throw new Error(`${RAW_CANARY}/receipt-get`);
+    }
+  });
+  const first = current.supervisor.reopenBrowserLogin(descriptorOnlyReceipt);
+  const second = current.supervisor.reopenBrowserLogin(receipt);
+  assert.equal(first, second);
+  await Promise.resolve();
+  assert.deepEqual(current.effects, [RAW_URL, RAW_URL]);
+  assert.deepEqual(current.events.map((event) => event.state), [
+    "starting", "ready", "waiting_user"
+  ]);
+
+  reopenGate.resolve();
+  const [firstSnapshot, secondSnapshot] = await Promise.all([first, second]);
+  assert.equal(firstSnapshot, secondSnapshot);
+  assert.equal(firstSnapshot.state, "waiting_user");
+  assert.equal("authUrl" in firstSnapshot, false);
+  assert.equal("loginId" in firstSnapshot, false);
+  assertSafe([waiting, firstSnapshot, current.events]);
+  await current.supervisor.shutdownAll();
+});
+
+test("reopen fails closed when cancel, completion, or shutdown wins the URL effect race", async (t) => {
+  await t.test("cancel", async () => {
+    const reopenGate = deferred();
+    const current = fixture({
+      async effectHandler(_value, callNumber) {
+        if (callNumber === 2) await reopenGate.promise;
+      }
+    });
+    const receipt = await current.supervisor.start(binding());
+    await current.supervisor.startBrowserLogin(receipt);
+    const reopening = current.supervisor.reopenBrowserLogin(receipt);
+    await Promise.resolve();
+    const canceled = await current.supervisor.cancelLogin(receipt);
+    assert.equal(canceled.state, "stopped");
+    await assert.rejects(current.supervisor.reopenBrowserLogin(receipt), {
+      code: "desktop_codex_app_server_stopped"
+    });
+    reopenGate.resolve();
+    await assert.rejects(reopening, { code: "desktop_codex_app_server_stopped" });
+    assert.deepEqual(current.effects, [RAW_URL, RAW_URL]);
+    assertSafe([canceled, current.events]);
+  });
+
+  await t.test("login completion", async () => {
+    const waiting = deferred();
+    const reopenGate = deferred();
+    const current = fixture({
+      clientOptions: { waiting },
+      async effectHandler(_value, callNumber) {
+        if (callNumber === 2) await reopenGate.promise;
+      }
+    });
+    const receipt = await current.supervisor.start(binding());
+    await current.supervisor.startBrowserLogin(receipt);
+    const completion = current.supervisor.waitForLogin(receipt);
+    const reopening = current.supervisor.reopenBrowserLogin(receipt);
+    await Promise.resolve();
+    waiting.resolve({ loginId: RAW_LOGIN_ID, success: true });
+    const completed = await completion;
+    assert.equal(completed.state, "login_completed");
+    await assert.rejects(current.supervisor.reopenBrowserLogin(receipt), {
+      code: "desktop_codex_app_server_stopped"
+    });
+    reopenGate.resolve();
+    await assert.rejects(reopening, { code: "desktop_codex_app_server_stopped" });
+    assert.deepEqual(current.effects, [RAW_URL, RAW_URL]);
+    assertSafe([completed, current.events]);
+    await current.supervisor.shutdownAll();
+  });
+
+  await t.test("shutdown", async () => {
+    const reopenGate = deferred();
+    const current = fixture({
+      async effectHandler(_value, callNumber) {
+        if (callNumber === 2) await reopenGate.promise;
+      }
+    });
+    const receipt = await current.supervisor.start(binding());
+    await current.supervisor.startBrowserLogin(receipt);
+    const reopening = current.supervisor.reopenBrowserLogin(receipt);
+    await Promise.resolve();
+    await current.supervisor.shutdownAll();
+    assert.equal(current.supervisor.getSnapshot(receipt).state, "stopped");
+    await assert.rejects(current.supervisor.reopenBrowserLogin(receipt), {
+      code: "desktop_codex_app_server_stopped"
+    });
+    reopenGate.resolve();
+    await assert.rejects(reopening, { code: "desktop_codex_app_server_stopped" });
+    assert.deepEqual(current.effects, [RAW_URL, RAW_URL]);
+    assertSafe(current.events);
+  });
+});
+
+test("reopen never leaks its URL through snapshots, events, or normalized failures", async () => {
+  const failureCanary = `${RAW_URL}/${RAW_CANARY}/reopen-effect`;
+  let authUrlDescriptorReads = 0;
+  const challenge = new Proxy({
+    type: "chatgpt",
+    loginId: RAW_LOGIN_ID,
+    authUrl: RAW_URL
+  }, {
+    get(_target, key) {
+      if (key === "then") return undefined;
+      throw new Error(`${RAW_CANARY}/challenge-get`);
+    },
+    getOwnPropertyDescriptor(target, key) {
+      if (key === "authUrl") {
+        authUrlDescriptorReads += 1;
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: true,
+          value: authUrlDescriptorReads === 1
+            ? RAW_URL
+            : `https://chatgpt.com/auth/codex?state=${RAW_CANARY}`
+        };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    }
+  });
+  const current = fixture({
+    clientOptions: { challenge },
+    async effectHandler(value, callNumber) {
+      assert.equal(value, RAW_URL);
+      if (callNumber === 2) throw new Error(failureCanary);
+    }
+  });
+  const receipt = await current.supervisor.start(binding());
+  await current.supervisor.startBrowserLogin(receipt);
+  assert.equal(authUrlDescriptorReads, 1);
+  await assert.rejects(current.supervisor.reopenBrowserLogin(receipt), (error) => {
+    assert.equal(error.code, "desktop_codex_app_server_operation_failed");
+    assert.equal(error.message, "Codex App Server 浏览器授权重开失败");
+    assertSafe({ message: error.message, stack: error.stack }, [
+      RAW_URL, RAW_LOGIN_ID, RAW_CANARY, failureCanary, process.cwd()
+    ]);
+    return true;
+  });
+  assert.equal(current.supervisor.getSnapshot(receipt).state, "failed");
+  assert.equal("authUrl" in current.supervisor.getSnapshot(receipt), false);
+  assert.equal(current.events.some((event) => "authUrl" in event || "loginId" in event), false);
+  await assert.rejects(current.supervisor.reopenBrowserLogin(receipt), {
+    code: "desktop_codex_app_server_operation_failed"
+  });
+  assert.deepEqual(current.effects, [RAW_URL, RAW_URL]);
+  assertSafe(current.events);
+  await current.supervisor.shutdownAll();
 });
 
 test("cancel wins a pending completion race and stops the exact in-memory client", async () => {
@@ -607,7 +776,18 @@ test("old boots, forged instances, and malformed receipts are rejected without t
     { code: "desktop_codex_app_server_stale_receipt" }
   );
   await assert.rejects(
+    Promise.resolve().then(() => newBoot.supervisor.reopenBrowserLogin(receipt)),
+    { code: "desktop_codex_app_server_stale_receipt" }
+  );
+  await assert.rejects(
     Promise.resolve().then(() => oldBoot.supervisor.getSnapshot({
+      ...receipt,
+      instanceIdHash: "f".repeat(64)
+    })),
+    { code: "desktop_codex_app_server_stale_receipt" }
+  );
+  await assert.rejects(
+    Promise.resolve().then(() => oldBoot.supervisor.reopenBrowserLogin({
       ...receipt,
       instanceIdHash: "f".repeat(64)
     })),
