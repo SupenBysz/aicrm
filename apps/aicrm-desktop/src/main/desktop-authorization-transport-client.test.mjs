@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +8,10 @@ import {
   DesktopAuthorizationTransportClient
 } from "./desktop-authorization-transport-client.ts";
 import { DesktopDeviceIdentityStore } from "./desktop-device-identity.ts";
-import { DesktopDeviceRequestJournalStore } from "./desktop-device-request-journal.ts";
+import {
+  DesktopDeviceRequestJournalStore,
+  desktopTrustedRequestReference
+} from "./desktop-device-request-journal.ts";
 import { DesktopDeviceRequestLane } from "./desktop-device-request-lane.ts";
 import { desktopDeviceKeyMaterialFromSeed } from "./desktop-device-proof.ts";
 
@@ -242,6 +246,20 @@ function authorizationCommandRecoveryInput(prepared, overrides = {}) {
     result: "succeeded",
     expectedRequestReference: prepared.requestReference,
     expectedRequestHash: prepared.requestHash,
+    ...overrides
+  };
+}
+
+function authorizationCommandInspectionInput(overrides = {}) {
+  return {
+    sessionId: "session_1",
+    operationId: "command_operation_1",
+    purpose: "authorization_cancel",
+    expectedSessionRevision: 2,
+    result: "succeeded",
+    expectedCommandTokenHash: createHash("sha256")
+      .update(COMMAND_TICKET, "ascii")
+      .digest("hex"),
     ...overrides
   };
 }
@@ -882,6 +900,144 @@ test("ticket-free authorization command ACK recovery replays only the exact dura
   assert.equal(networkCalls, 0);
   assert.deepEqual(durable.data, authorizationCommandData({ replayed: true }));
   await current.client().completeRequest(prepared.requestReference, prepared.requestHash);
+});
+
+test("command ACK inspection adopts only the exact encrypted request and durable response", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  const client = current.client({
+    fetch: async () => {
+      throw new Error("offline");
+    }
+  });
+  assert.deepEqual(await client.inspectAuthorizationCommandAck(
+    authorizationCommandInspectionInput()
+  ), {
+    state: "absent",
+    requestReference: desktopTrustedRequestReference(
+      "authorization_command_ack",
+      "/api/v1/ai-executor-authorization-sessions/session_1/desktop-commands/command_operation_1/ack"
+    ),
+    requestHash: null,
+    completedAt: null,
+    responseStatus: null,
+    responseBodyHash: null
+  });
+  assert.equal(current.signCount(), 0);
+
+  let prepared;
+  await assert.rejects(
+    client.acknowledgeAuthorizationCommand(authorizationCommandInput(), {
+      onPrepared: async (value) => {
+        prepared = value;
+      }
+    }),
+    { code: "desktop_authorization_transport_failed" }
+  );
+  const pending = await client.inspectAuthorizationCommandAck(
+    authorizationCommandInspectionInput()
+  );
+  assert.deepEqual(pending, {
+    state: "prepared",
+    requestReference: prepared.requestReference,
+    requestHash: prepared.requestHash,
+    completedAt: NOW,
+    responseStatus: null,
+    responseBodyHash: null
+  });
+  assert.equal(current.signCount(), 1);
+
+  const recovered = await current.client({
+    fetch: async () => response(authorizationCommandData())
+  }).recoverAuthorizationCommandAck(authorizationCommandRecoveryInput(prepared));
+  const succeeded = await client.inspectAuthorizationCommandAck(
+    authorizationCommandInspectionInput()
+  );
+  const durable = await current.journal.load(recovered.requestReference);
+  assert.deepEqual(succeeded, {
+    state: "succeeded",
+    requestReference: recovered.requestReference,
+    requestHash: recovered.requestHash,
+    completedAt: NOW,
+    responseStatus: 200,
+    responseBodyHash: createHash("sha256")
+      .update(Buffer.from(durable.response.bodyBase64, "base64"))
+      .digest("hex")
+  });
+  assert.deepEqual(Object.keys(succeeded).sort(), [
+    "completedAt",
+    "requestHash",
+    "requestReference",
+    "responseBodyHash",
+    "responseStatus",
+    "state"
+  ]);
+  await client.completeRequest(recovered.requestReference, recovered.requestHash);
+});
+
+test("command ACK inspection proves deterministic rejection and rejects every drift", async (t) => {
+  const current = await fixture();
+  t.after(() => rm(current.base, { recursive: true, force: true }));
+  let prepared;
+  await assert.rejects(
+    current.client({
+      fetch: async () => rejectionResponse(409, "command_conflict")
+    }).acknowledgeAuthorizationCommand(authorizationCommandInput(), {
+      onPrepared: async (value) => {
+        prepared = value;
+      }
+    }),
+    { code: "desktop_authorization_transport_rejected", status: 409 }
+  );
+  const client = current.client({
+    fetch: async () => assert.fail("inspection must not use network")
+  });
+  const rejected = await client.inspectAuthorizationCommandAck(
+    authorizationCommandInspectionInput()
+  );
+  const durable = await current.journal.load(prepared.requestReference);
+  assert.deepEqual(rejected, {
+    state: "rejected",
+    requestReference: prepared.requestReference,
+    requestHash: prepared.requestHash,
+    completedAt: NOW,
+    responseStatus: 409,
+    responseBodyHash: createHash("sha256")
+      .update(Buffer.from(durable.response.bodyBase64, "base64"))
+      .digest("hex")
+  });
+
+  for (const mismatch of [
+    { expectedCommandTokenHash: "f".repeat(64) },
+    { purpose: "authorization_reopen" },
+    { expectedSessionRevision: 3 },
+    { result: "failed", failureCode: "stop_failed" }
+  ]) {
+    await assert.rejects(
+      client.inspectAuthorizationCommandAck(
+        authorizationCommandInspectionInput(mismatch)
+      )
+    );
+  }
+  assert.equal((await client.inspectAuthorizationCommandAck(
+    authorizationCommandInspectionInput({ operationId: "command_operation_other" })
+  )).state, "absent");
+
+  let getterReads = 0;
+  const hostile = authorizationCommandInspectionInput();
+  Object.defineProperty(hostile, "expectedCommandTokenHash", {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      throw new Error(COMMAND_TICKET);
+    }
+  });
+  await assert.rejects(
+    async () => client.inspectAuthorizationCommandAck(hostile),
+    { code: "desktop_authorization_transport_contract_invalid" }
+  );
+  assert.equal(getterReads, 0);
+  await client.completeRequest(prepared.requestReference, prepared.requestHash);
 });
 
 test("authorization command ACK rejects unsafe inputs, mismatched recovery and response drift", async (t) => {

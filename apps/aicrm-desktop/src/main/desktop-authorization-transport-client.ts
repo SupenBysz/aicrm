@@ -263,6 +263,25 @@ export interface AcknowledgeDesktopAuthorizationCommandResponse {
   replayed: boolean;
 }
 
+export interface InspectDesktopAuthorizationCommandAckInput {
+  sessionId: string;
+  operationId: string;
+  purpose: DesktopAuthorizationCommandPurpose;
+  expectedSessionRevision: number;
+  result: DesktopAuthorizationCommandAckResult;
+  failureCode?: string;
+  expectedCommandTokenHash: string;
+}
+
+export interface DesktopAuthorizationCommandAckInspection {
+  state: "absent" | "prepared" | "succeeded" | "rejected";
+  requestReference: string;
+  requestHash: string | null;
+  completedAt: string | null;
+  responseStatus: number | null;
+  responseBodyHash: string | null;
+}
+
 interface AuthorizationIdentityStore
   extends Pick<DesktopDeviceIdentityStore, "getIdentity" | "signRequest"> {}
 
@@ -838,6 +857,173 @@ export class DesktopAuthorizationTransportClient {
       epoch,
       hooks
     );
+  }
+
+  /**
+   * Reads and fully validates an existing command ACK journal without signing,
+   * dispatching, or returning its ticket/body. Command recovery uses this as
+   * the only authority for adopting a prepared request or terminalizing a
+   * durable deterministic rejection.
+   */
+  async inspectAuthorizationCommandAck(
+    input: InspectDesktopAuthorizationCommandAckInput
+  ): Promise<Readonly<DesktopAuthorizationCommandAckInspection>> {
+    const captured = captureObjectWithOptionalKey(
+      input,
+      [
+        "sessionId",
+        "operationId",
+        "purpose",
+        "expectedSessionRevision",
+        "result",
+        "expectedCommandTokenHash"
+      ],
+      "failureCode"
+    );
+    if (!captured) {
+      throw contractInvalid("Desktop 授权命令确认检查参数结构无效");
+    }
+    const sessionId = validOpaqueValue(captured.sessionId, "sessionId");
+    const operationId = validOpaqueValue(captured.operationId, "operationId");
+    const purpose = validAuthorizationCommandPurpose(captured.purpose);
+    const expectedSessionRevision = positiveRevisionValue(
+      captured.expectedSessionRevision,
+      "expectedSessionRevision"
+    );
+    const result = validAuthorizationCommandAckResult(captured.result);
+    const failureCode = authorizationCommandFailureCode(
+      result,
+      captured.failureCode,
+      Object.hasOwn(captured, "failureCode")
+    );
+    const expectedCommandTokenHash = validDigestValue(
+      captured.expectedCommandTokenHash,
+      "expectedCommandTokenHash"
+    );
+    const path = `/api/v1/ai-executor-authorization-sessions/${sessionId}/desktop-commands/${operationId}/ack`;
+    const requestReference = desktopTrustedRequestReference(
+      "authorization_command_ack",
+      path
+    );
+    const record = await this.requestJournal.load(requestReference);
+    if (record === null) {
+      return Object.freeze({
+        state: "absent",
+        requestReference,
+        requestHash: null,
+        completedAt: null,
+        responseStatus: null,
+        responseBodyHash: null
+      });
+    }
+
+    const authorizationPrefix = "AiCRM-Command ";
+    const commandTicket = record.authorization.startsWith(authorizationPrefix)
+      ? record.authorization.slice(authorizationPrefix.length)
+      : "";
+    if (!isTicket(commandTicket) ||
+        buildAuthorization("AiCRM-Command", commandTicket) !== record.authorization ||
+        sha256Hex(Buffer.from(commandTicket, "ascii")) !== expectedCommandTokenHash) {
+      throw recoveryConflict("Desktop 授权命令确认检查票据栅栏不匹配");
+    }
+
+    let completedAt = "";
+    const validateRecoveredBody = (body: Uint8Array): void => {
+      const value = parseJson(body, "授权命令确认检查 body 无效");
+      const recovered = captureObjectWithOptionalKey(
+        value,
+        ["operationId", "purpose", "expectedSessionRevision", "result", "completedAt"],
+        "failureCode"
+      );
+      if (!recovered) throw recoveryConflict("授权命令确认检查 body 结构不匹配");
+      const recoveredFailureCode = authorizationCommandFailureCodeForRecovery(
+        result,
+        recovered.failureCode,
+        Object.hasOwn(recovered, "failureCode")
+      );
+      if (recovered.operationId !== operationId || recovered.purpose !== purpose ||
+          recovered.expectedSessionRevision !== expectedSessionRevision ||
+          recovered.result !== result || recoveredFailureCode !== failureCode ||
+          !canonicalDeviceTime(recovered.completedAt)) {
+        throw recoveryConflict("授权命令确认检查 body 与当前操作不匹配");
+      }
+      completedAt = recovered.completedAt as string;
+      requireCanonicalEncoding(
+        body,
+        result === "failed"
+          ? {
+              operationId,
+              purpose,
+              expectedSessionRevision,
+              result,
+              completedAt,
+              failureCode
+            }
+          : { operationId, purpose, expectedSessionRevision, result, completedAt }
+      );
+    };
+    const origin = trustedApiOrigin(await this.loadTrustedApiBaseUrl());
+    const identity = await this.identityStore.getIdentity();
+    validateRegisteredIdentity(identity);
+    const definition: TrustedRequestDefinition<AcknowledgeDesktopAuthorizationCommandResponse> = {
+      kind: "authorization_command_ack",
+      path,
+      authorization: record.authorization,
+      authorizationScheme: "AiCRM-Command",
+      createBody: () => {
+        throw recoveryConflict("Desktop 授权命令确认检查禁止创建请求");
+      },
+      validateRecoveredBody,
+      validateResponse: (value) =>
+        validateAuthorizationCommandResponse(value, {
+          sessionId,
+          operationId,
+          purpose,
+          expectedSessionRevision,
+          result,
+          failureCode
+        })
+    };
+    validateRecoveredRecord(record, definition, identity, origin);
+    if (!completedAt) throw recoveryConflict("Desktop 授权命令确认检查缺少完成时间");
+
+    if (record.response === null) {
+      return Object.freeze({
+        state: "prepared",
+        requestReference,
+        requestHash: record.signed.requestHash,
+        completedAt,
+        responseStatus: null,
+        responseBodyHash: null
+      });
+    }
+    const responseBytes = Buffer.from(record.response.bodyBase64, "base64");
+    const responseBodyHash = sha256Hex(responseBytes);
+    if (record.response.status === 200) {
+      parseSuccessfulResponse(
+        responseBytes.toString("utf8"),
+        definition.validateResponse
+      );
+      return Object.freeze({
+        state: "succeeded",
+        requestReference,
+        requestHash: record.signed.requestHash,
+        completedAt,
+        responseStatus: 200,
+        responseBodyHash
+      });
+    }
+    if (!isDeterministicDesktopDeviceRequestRejectionStatus(record.response.status)) {
+      throw recoveryConflict("Desktop 授权命令确认检查响应状态无效");
+    }
+    return Object.freeze({
+      state: "rejected",
+      requestReference,
+      requestHash: record.signed.requestHash,
+      completedAt,
+      responseStatus: record.response.status,
+      responseBodyHash
+    });
   }
 
   recoverAuthorizationCommandAck(
