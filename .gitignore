@@ -29,3 +29,6 @@ Thumbs.db
 
 # Local-only tooling config
 .claude/settings.local.json
+
+# 本项目本地环境配置，可能包含访问凭据
+/.env

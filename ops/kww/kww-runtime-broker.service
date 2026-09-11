@@ -1,0 +1,54 @@
+[Unit]
+Description=kww 开发环境执行器运行代理
+Requires=kww-runtime-broker.socket
+After=kww-runtime-broker.socket
+
+PartOf=kww-dev.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStartPre=/usr/bin/install -d -o root -g kww-executor -m 1770 /var/lib/kww/agent-executors
+ExecStartPre=/usr/bin/install -d -o root -g root -m 0700 /var/lib/private/aicrm-codex-runtime
+ExecStart=/data/kww.org.cn/runtime/bin/ky-agent-executor-runtime-broker
+Environment=KY_AGENT_EXECUTOR_CREDENTIAL_ROOT=/var/lib/kww/agent-executors
+Environment=KY_AGENT_EXECUTOR_USER=kww-executor
+Environment=KY_CODEX_BINARY=/opt/kww/toolchain/npm/node_modules/.bin/codex
+Environment=KY_SYSTEMD_RUN_PATH=/usr/bin/systemd-run
+Environment=KY_SYSTEMCTL_PATH=/usr/bin/systemctl
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+LimitCORE=0
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kww/agent-executors /var/lib/private/aicrm-codex-runtime
+InaccessiblePaths=/etc/kww
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+# systemd 255's RestrictSUIDSGID seccomp profile rejects openat2; the broker
+# requires openat2 for anchored no-symlink traversal and keeps NoNewPrivileges.
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH
+
+[Install]
+WantedBy=multi-user.target

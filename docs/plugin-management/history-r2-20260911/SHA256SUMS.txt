@@ -1,0 +1,3 @@
+ed802969ed17a9c52815b3c21e994d6dce1670c811a08470410b5588f4ed3c61  docs/plugin-management/history-r2-20260911/审阅记录.md
+e853e4bff9b73607a185e824d3b609d9727861cb63e2bf174a03e1ad2c39d919  docs/plugin-management/history-r2-20260911/需求与方案.md
+9ec428933c1700b6118ec3ea9e0529af1acf5d7432e691938b7f5229c8b3febd  docs/plugin-management/history-r2-20260911/验收与任务依赖.md

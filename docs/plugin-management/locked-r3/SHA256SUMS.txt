@@ -1,0 +1,3 @@
+b669d73ab0001f0f20d50cd6a69aeaace641b9b7ba0087825402c20bb3eeedad  docs/plugin-management/locked-r3/审阅记录.md
+c8d7b99ef722ecd0fd7c2a6ee610d5a8c58618c0988575dc50d5f13a78f72a8f  docs/plugin-management/locked-r3/需求与方案.md
+a6b344d2a5fc9e7839c2a9c685cc0d0a5c0d3bdecc42eeb090a87d53f9e908d6  docs/plugin-management/locked-r3/验收与任务依赖.md

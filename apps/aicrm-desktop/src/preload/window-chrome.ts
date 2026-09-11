@@ -49,12 +49,12 @@ body.aicrm-desktop-window-chrome-enabled .app-sider {
 }
 
 body.aicrm-desktop-window-chrome-enabled .app-sider-scroll {
-  height: calc(100vh - var(--aicrm-desktop-topbar-height)) !important;
+  height: calc(var(--admin-viewport-height, 100vh) - var(--aicrm-desktop-topbar-height)) !important;
 }
 
 body.aicrm-desktop-window-chrome-enabled .app-content {
-  height: calc(100vh - var(--aicrm-desktop-topbar-height)) !important;
-  min-height: calc(100vh - var(--aicrm-desktop-topbar-height)) !important;
+  height: calc(var(--admin-viewport-height, 100vh) - var(--aicrm-desktop-topbar-height)) !important;
+  min-height: calc(var(--admin-viewport-height, 100vh) - var(--aicrm-desktop-topbar-height)) !important;
 }
 
 body.aicrm-desktop-window-chrome-enabled .ant-modal-root,

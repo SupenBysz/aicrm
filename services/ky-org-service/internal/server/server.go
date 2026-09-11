@@ -12,9 +12,12 @@ import (
 )
 
 type Server struct {
-	cfg    config.Config
-	store  *store.Store
-	cipher *crypto.Cipher
+	cfg              config.Config
+	store            *store.Store
+	cipher           *crypto.Cipher
+	pluginAccess     pluginAccessFunc
+	pluginHTTPClient *http.Client
+	healthHTTPClient *http.Client
 }
 
 func New(cfg config.Config) *Server {
@@ -46,6 +49,8 @@ func (s *Server) Run(ctx context.Context) error {
 	const orgWs = "agency,enterprise"
 
 	// Platform agencies
+	mux.HandleFunc("GET /api/v1/platform/plugin-management/service-health", s.pluginServiceHealth)
+
 	mux.HandleFunc("GET /api/v1/platform/agencies", s.ws("platform", perms("platform.agencies.view"), s.listAgencies))
 	mux.HandleFunc("POST /api/v1/platform/agencies", s.ws("platform", perms("platform.agencies.create"), s.createAgency))
 	mux.HandleFunc("GET /api/v1/platform/agencies/{id}", s.ws("platform", perms("platform.agencies.view"), s.getAgency))

@@ -129,3 +129,7 @@ custom
 - 资源 grant、设备 proof、expected revision 是否按接口要求与 actor 权限做 AND 校验？
 - 下级 workspace 的响应是否只有安全摘要，没有设备、凭据、路径或授权会话？
 - 工作区切换后缓存 key 是否隔离？
+
+## 客户端宿主插件增量合同
+
+客户端插件签名不授予业务权限。有效本地能力为宿主支持、构建策略、签名授权和 manifest 的交集；首期无 token/工作区/业务请求或数据库角色。 完整项目合同见 `docs/desktop-host-plugins/锁定记录.md`；若模板未携带该实现，不得宣称拥有插件更新能力。

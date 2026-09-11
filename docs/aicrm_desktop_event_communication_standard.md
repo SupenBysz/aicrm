@@ -835,3 +835,7 @@ React 是否 cleanup？
 ### 17.6 兼容与移除
 
 legacy Bridge 最多保留一个明确的平台发布版本，只能返回结构化兼容错误或只读安全投影；不得在兼容名义下继续探测全局凭据、启动旧授权命令或接受 Renderer 状态回写。Bridge v2、Host adapter、设备签名和对应 E2E 全部通过后，下一版本删除 legacy channel/DTO/handler，并保留墓碑测试防止恢复。
+
+## 客户端宿主插件增量（2026-09-11）
+
+客户端插件使用集中 IPC 通道及全入口 sender gate；默认拒绝未知与子 frame。UI 采用会话/导航代次/集合/revision/digest ACK，非空可信可见集合才允许启用；订阅先缓冲后快照并清理。 首轮阶段 1–3 方案已锁定，实现验收另记；详见 [锁定记录](desktop-host-plugins/锁定记录.md)。不改变既有 v9 账号/执行器信任平面与协议门禁。

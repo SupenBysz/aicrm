@@ -1,7 +1,18 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+
+const configDir = fileURLToPath(new URL(".", import.meta.url));
+const pluginNames=["ky-matrix-account","ky-identity-management","ky-organization-management","ky-access-management","ky-audit-management","ky-notification","ky-system-settings","ky-ai-configuration"];
+const versions=Object.fromEntries(pluginNames.map(name=>[name,JSON.parse(readFileSync(resolve(configDir,"../../plugins",name,"package.json"),"utf8")).version]));
+const buildId=createHash("sha256").update(JSON.stringify(versions)+new Date().toISOString()+Math.random()).digest("hex").slice(0,16);
 
 export default defineConfig({
+  define: { __KWW_ADMIN_PLUGIN_BUILD__: JSON.stringify({buildId, versions}) },
   plugins: [react()],
   resolve: {
     alias: {

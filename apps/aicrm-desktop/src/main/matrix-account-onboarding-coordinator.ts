@@ -1,3 +1,4 @@
+import { senderRegistration } from "./guarded-ipc";
 import { randomUUID } from "node:crypto";
 import { BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../shared/constants";
@@ -540,6 +541,7 @@ function sanitizeMessage(value: string | undefined): string | undefined {
 
 function broadcastOnboardingEvent(payload: MatrixAccountOnboardingEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
+      if (senderRegistration(window.webContents)?.role !== "main") continue;
     if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
     window.webContents.send(IPC_CHANNELS.matrixAccountOnboardingEvent, payload);
   }

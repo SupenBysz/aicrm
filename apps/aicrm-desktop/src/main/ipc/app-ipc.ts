@@ -1,5 +1,5 @@
-import { app, ipcMain } from "electron";
-import { DESKTOP_APPLICATION_NAME, IPC_CHANNELS } from "../../shared/constants";
+import { guardedIpc as ipcMain } from "../guarded-ipc";
+import { DESKTOP_APPLICATION_NAME, DESKTOP_APPLICATION_VERSION, IPC_CHANNELS } from "../../shared/constants";
 import { loadDesktopConfig } from "../config";
 
 interface PublicPlatformProfileEnvelope {
@@ -32,5 +32,6 @@ export function registerAppIpc() {
     ...loadDesktopConfig(),
     programTitle: await loadProgramTitle()
   }));
-  ipcMain.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
+  // 开发运行壳可能携带 Electron 的包版本，应用版本以客户端包元数据为准。
+  ipcMain.handle(IPC_CHANNELS.appGetVersion, () => DESKTOP_APPLICATION_VERSION);
 }

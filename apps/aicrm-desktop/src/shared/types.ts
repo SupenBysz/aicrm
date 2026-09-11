@@ -819,3 +819,33 @@ export interface DesktopNetworkLogSnapshot {
   maxEntries: number;
   entries: DesktopNetworkLogEntry[];
 }
+
+/** 客户端宿主插件的安全 UI 投影，不携带业务上下文。 */
+export interface DesktopPluginSnapshot {
+  id: string;
+  name: "desktop-plugins:changed";
+  version: 1;
+  source: "main";
+  scope: "app";
+  occurredAt: string;
+  correlationId: string;
+  operationId: string;
+  runtimeEpoch: string;
+  nativeSequence: number;
+  activeRevision: number;
+  digest: string;
+  pluginVersion: string;
+  phase: string;
+  items: import("../../../../packages/desktop-plugin-contracts/src/index").Item[];
+  confirmation?: { uiSessionId: string; navigationGeneration: number; uiMembershipRevision: number; activeRevision: number; digest: string; challenge: string };
+}
+export interface DesktopPluginInventoryItem { id:string; name:string; description:string|null; provider:string|null; capabilities:string[]; compatibleHost:string|null; pluginApi:string|null; uiApi:string|null; candidateVersion:string|null; rollbackVersion:string|null; uiConfirmationState:"confirmed"|"unconfirmed"|"unknown"; lastUpdateResult:{code:string;message:string}|null; lastRollbackResult:{code:string;message:string}|null; errorReason:string|null; version:string|null; buildId:string|null; phase:string|null; active:boolean; runtimeState:"running"|"unresponsive"|"stopped"|"unknown"; enabledState:"enabled"|"disabled"|"unknown"; signatureState:"builtin_trusted"|"verified"|"unknown"; loadState:"loaded"|"not_loaded"|"loading"|"failed"|"unknown"; sampledAtUtc:string; }
+export interface DesktopPluginsBridge {
+  inventory(input: Record<string, never>): Promise<DesktopPluginInventoryItem[]>;
+  registerUi(input: { uiApiVersion: string; slots: string[] }): Promise<DesktopPluginSnapshot>;
+  unregisterUi(): Promise<boolean>;
+  getSnapshot(): Promise<DesktopPluginSnapshot>;
+  ackRendered(input: NonNullable<DesktopPluginSnapshot["confirmation"]>): Promise<boolean>;
+  action(input: { actionId: string; activeRevision: number }): Promise<boolean>;
+  onChanged(listener: (snapshot: DesktopPluginSnapshot) => void): () => void;
+}

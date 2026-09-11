@@ -1,6 +1,7 @@
 import desktopPackage from "../../package.json" with { type: "json" };
 
 export const DESKTOP_APPLICATION_NAME = desktopPackage.productName;
+export const DESKTOP_APPLICATION_VERSION = desktopPackage.version;
 export const DESKTOP_APPLICATION_ID = desktopPackage.appId;
 export const LEGACY_DESKTOP_USER_DATA_DIRECTORY = "AiCRM Desktop";
 
@@ -8,6 +9,22 @@ export const DEFAULT_API_BASE_URL = "http://127.0.0.1:16178";
 export const DEFAULT_WEB_URL = "https://kyaicrm.entai.im";
 
 export const IPC_CHANNELS = {
+  desktopPluginsInventory: "desktop-plugins:inventory",
+  desktopPluginsRegisterUi: "desktop-plugins:register-ui",
+  desktopPluginsUnregisterUi: "desktop-plugins:unregister-ui",
+  desktopPluginsSnapshot: "desktop-plugins:get-snapshot",
+  desktopPluginsAck: "desktop-plugins:ack-rendered",
+  desktopPluginsAction: "desktop-plugins:action",
+  desktopPluginsChanged: "desktop-plugins:changed",
+  desktopPluginsVersion: "desktop-plugins:host-version",
+  desktopPluginsHello: "desktop-plugins:hello",
+  desktopPluginsPublish: "desktop-plugins:publish",
+  desktopPluginsReady: "desktop-plugins:ready",
+  desktopPluginsHeartbeat: "desktop-plugins:heartbeat",
+  desktopPluginsDrained: "desktop-plugins:drained",
+  desktopPluginsActionAck: "desktop-plugins:action-ack",
+  desktopPluginsLifecycle: "desktop-plugins:lifecycle",
+  desktopPluginsActionEvent: "desktop-plugins:action-event",
   apiRequest: "api:request",
   appGetConfig: "app:get-config",
   appGetVersion: "app:get-version",

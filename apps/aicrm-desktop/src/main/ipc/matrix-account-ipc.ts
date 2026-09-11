@@ -1,10 +1,12 @@
+import { registerSender } from "../guarded-ipc";
+import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, chmod, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   app,
   BrowserWindow,
-  ipcMain,
+
   screen,
   session as electronSession,
   type IpcMainInvokeEvent,
@@ -595,6 +597,7 @@ function openControlledBrowser(
   });
 
   const targetUrl = input.url || loginUrls[input.platform];
+  registerSender(browser.webContents, "controlled", () => false);
   void browser.loadURL(targetUrl);
   emitLoginState(event, {
     accountId: input.accountId,
@@ -765,6 +768,7 @@ async function clearControlledWebSpace(
 }
 
 async function loadControlledUrl(browser: BrowserWindow, targetUrl: string): Promise<void> {
+  // 账号浏览窗口不拥有宿主 IPC；其原生生命周期保持原实现。
   try {
     await Promise.race([browser.loadURL(targetUrl), delay(12000)]);
   } catch {

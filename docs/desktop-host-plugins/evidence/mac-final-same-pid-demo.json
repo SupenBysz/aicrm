@@ -1,0 +1,78 @@
+{
+  "v1": {
+    "阶段": "v1",
+    "PID": 22106,
+    "进程": "22106 Fri Sep 11 16:22:28 2026     AiCRM",
+    "宿主版本": "0.1.0",
+    "phase": "stable",
+    "active": {
+      "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+      "version": "1.0.0",
+      "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+    },
+    "revision": 97,
+    "activeRevision": 10,
+    "highWater": {
+      "policyVersion": 1,
+      "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+      "releaseSequence": 2,
+      "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+    }
+  },
+  "v2": {
+    "阶段": "v2",
+    "PID": 22106,
+    "进程": "22106 Fri Sep 11 16:22:28 2026     AiCRM",
+    "宿主版本": "0.1.0",
+    "phase": "stable",
+    "active": {
+      "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+      "version": "1.1.0",
+      "authorizationDigest": "c2ee97d97b9386fc7a16d8a23a653cd977647c3584c62154291bac2be7a5ee20"
+    },
+    "revision": 106,
+    "activeRevision": 11,
+    "highWater": {
+      "policyVersion": 1,
+      "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+      "releaseSequence": 2,
+      "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+    }
+  },
+  "rollback": {
+    "阶段": "rollback",
+    "PID": 22106,
+    "进程": "22106 Fri Sep 11 16:22:28 2026     AiCRM",
+    "宿主版本": "0.1.0",
+    "phase": "stable",
+    "active": {
+      "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+      "version": "1.0.0",
+      "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+    },
+    "revision": 113,
+    "activeRevision": 12,
+    "highWater": {
+      "policyVersion": 1,
+      "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+      "releaseSequence": 2,
+      "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+    }
+  },
+  "冻结": {
+    "条目": 1120,
+    "三次差异": 0,
+    "摘要": "e7bf62a69062dbae6692d637cf0e54a41c2781771863679b104160e6f6ce26fd",
+    "范围": "完整runtime.app、应用out/resources/package/启动脚本、外置运行依赖、服务器完整Web资源（不含插件发布目录）"
+  },
+  "交互": {
+    "原生菜单更新": true,
+    "原生菜单回滚": true,
+    "真实60秒观察两次": true,
+    "按钮展开": "客户端 v0.1.0",
+    "按钮收起": "v0.1.0",
+    "回滚恢复文本": true,
+    "登录工作台持续可见": true
+  },
+  "启动方式": "固定 preview --skipBuild，无HMR"
+}

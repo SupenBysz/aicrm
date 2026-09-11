@@ -16,6 +16,7 @@ const DESKTOP_CLIENT_MODE = "desktop";
 const DESKTOP_CLIENT_NAME = "aicrm-desktop";
 
 export interface DesktopBridgeLike {
+  desktopPlugins?: import("../../aicrm-desktop/src/shared/types").DesktopPluginsBridge;
   app?: {
     getVersion?: () => Promise<string>;
     getConfig?: () => Promise<{ debugMode?: boolean }>;

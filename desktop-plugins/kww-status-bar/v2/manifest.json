@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "desktop-host-plugin",
+  "id": "cn.org.kww.desktop.status-bar",
+  "version": "1.1.0",
+  "entry": "plugin.js",
+  "engines": {
+    "host": ">=0.1.0 <0.2.0",
+    "pluginApi": ">=1.0.0 <2.0.0",
+    "uiApi": ">=1.0.0 <2.0.0"
+  },
+  "platforms": [
+    "darwin"
+  ],
+  "capabilities": [
+    "host.app.version.read",
+    "host.ui.statusBar.publish",
+    "host.ui.statusBar.action",
+    "host.runtime.lifecycle"
+  ],
+  "contributes": {
+    "slot": "statusBar.right",
+    "actions": [
+      "toggle-version"
+    ]
+  },
+  "data": {
+    "mode": "none",
+    "schemaVersion": 0
+  }
+}

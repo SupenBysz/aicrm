@@ -1,0 +1,42 @@
+{
+  "验收": "真实 Electron 隔离",
+  "结果": {
+    "hostNetworkReachable": true,
+    "unknownSenderDenied": true,
+    "pluginSenderDenied": true,
+    "actualSandbox": true,
+    "spaBridgeSurvives": true,
+    "sameOriginSubframeDenied": true,
+    "subframeSandboxed": true,
+    "remoteImportDenied": true,
+    "websocketDenied": true,
+    "iframeDenied": true,
+    "nodeUnavailable": true,
+    "noFullBridge": true,
+    "externalNetworkDenied": true,
+    "noOldApiSideEffect": true,
+    "popupDenied": true,
+    "workerDenied": true,
+    "productionPluginSandbox": true,
+    "importCspRecorded": true,
+    "frameCspRecorded": true,
+    "syntheticCanaryNotExposed": true,
+    "networkCspRecorded": true,
+    "workerCspRecorded": true,
+    "noOldSessionSideEffect": true,
+    "isolatedUserData": true
+  },
+  "全部通过": true,
+  "启动器": {
+    "启动器判定通过": true,
+    "退出码": 0,
+    "收到最终通过": true
+  },
+  "本地类型检查及构建": "通过",
+  "源码摘要": {
+    "scripts/desktop-plugins/electron-isolation.ts": "6ec8d551450ff24b0b602be7474f247e5586c5750d54b1f0e8105d4b85959075",
+    "apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts": "4dcdc0e885defce8794b27b978364abdeedc4daf71b2daf35e04c3a5e90edb9c",
+    "apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs": "0864f9a80c51ddd6466ae9459e57c494616b6ff331149d0c12567b8035439c98",
+    "apps/aicrm-desktop/src/main/guarded-ipc.ts": "16fdb5e3bc60f03cf347cd34d180ca25e86948835a65588d9def84ac5e98bb61"
+  }
+}

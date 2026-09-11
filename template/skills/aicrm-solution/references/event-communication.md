@@ -129,3 +129,7 @@ After template extraction, verify:
 - Command Ticket, device proof and sequence examples do not expose secrets or permit raw-ID local writes.
 - No production domain, secret, token, cookie, local screenshot, or build artifact is included.
 - `quick_validate.py` passes for the copied skill.
+
+## 客户端宿主插件增量合同
+
+客户端插件使用集中 IPC 通道及全入口 sender gate；默认拒绝未知与子 frame。UI 采用会话/导航代次/集合/revision/digest ACK，非空可信可见集合才允许启用；订阅先缓冲后快照并清理。 完整项目合同见 `docs/desktop-host-plugins/锁定记录.md`；若模板未携带该实现，不得宣称拥有插件更新能力。

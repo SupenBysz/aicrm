@@ -80,6 +80,7 @@ import {
   PermissionContextProvider,
   RequestClientProvider,
   WorkspaceContextProvider,
+  PluginInventoryProvider,
   usePermissions,
   type PluginRoute,
   type WorkspaceIdentity
@@ -102,6 +103,7 @@ import {
   workspaceTypeLabel
 } from "./workspace-ui";
 import { PlatformProfileProvider, usePlatformProfile } from "./platform-profile";
+import { DesktopClientFrame } from "./desktop-client-frame";
 import {
   getDesktopBridge,
   isDesktopClientMode,
@@ -109,6 +111,7 @@ import {
   type DesktopWindowState
 } from "./desktop-client";
 import { useTableHorizontalScrollbars } from "./table-horizontal-scrollbar";
+import { createPluginInventoryPort } from "./plugin-inventory";
 
 const HEADER_HEIGHT = 76;
 const SIDEBAR_WIDTH = 177;
@@ -274,6 +277,7 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <RequestClientProvider client={requestClient}>
           <AntdApp>
+            <DesktopClientFrame>
             <PlatformProfileProvider>
             <BrowserRouter>
               <Routes>
@@ -319,6 +323,7 @@ export function App() {
               </Routes>
             </BrowserRouter>
             </PlatformProfileProvider>
+            </DesktopClientFrame>
           </AntdApp>
         </RequestClientProvider>
       </QueryClientProvider>
@@ -349,9 +354,11 @@ function GuardedPluginRoute({ route }: { route: PluginRoute }) {
 }
 
 function menuVisible(
-  menu: { requiredPermission?: string; requiredAnyPermissions?: string[] },
-  perms: string[]
+  menu: { requiredPermission?: string; requiredAnyPermissions?: string[]; menuKey?: string },
+  perms: string[],
+  menuKeys: string[] = []
 ): boolean {
+  if (menu.menuKey?.startsWith("menu.") && !menuKeys.includes(menu.menuKey)) return false;
   if (menu.requiredPermission && !perms.includes(menu.requiredPermission)) {
     return false;
   }
@@ -488,6 +495,8 @@ function WorkspaceLayout() {
   const currentWorkspace = workspaces.find(
     (workspace) => workspace.id === params.workspaceId && workspace.type === params.workspaceType
   );
+  const inventoryPort = useMemo(() => createPluginInventoryPort(requestClient), [currentWorkspace?.type, currentWorkspace?.id, currentWorkspace?.membershipId, currentWorkspace?.permissions.join("|"), user?.id]);
+  useEffect(() => () => inventoryPort.clear(), [inventoryPort]);
   const canViewNotifications = Boolean(
     currentWorkspace?.permissions.some((permission) =>
       ["platform.notifications.view", "agency.notifications.view", "enterprise.notifications.view"].includes(permission)
@@ -588,7 +597,7 @@ function WorkspaceLayout() {
   const orderedPlugins = [...localPlugins].sort((a, b) => (a.navOrder ?? 100) - (b.navOrder ?? 100));
   const navGroups = orderedPlugins
     .map((plugin) => {
-      const visible = (plugin.menus ?? []).filter((menu) => Boolean(menu.path) && menuVisible(menu, currentWorkspace.permissions));
+      const visible = (plugin.menus ?? []).filter((menu) => Boolean(menu.path) && menuVisible(menu, currentWorkspace.permissions, currentWorkspace.menuKeys));
       if (visible.length === 0) {
         return null;
       }
@@ -611,8 +620,8 @@ function WorkspaceLayout() {
   const pluginWorkbenchGroups: NavGroupMeta[] = [];
   for (const plugin of orderedPlugins) {
     for (const menu of plugin.workbenchMenus ?? []) {
-      if (!menuVisible(menu, currentWorkspace.permissions)) continue;
-      const children = (menu.children ?? []).filter((child) => Boolean(child.path) && menuVisible(child, currentWorkspace.permissions));
+      if (!menuVisible(menu, currentWorkspace.permissions, currentWorkspace.menuKeys)) continue;
+      const children = (menu.children ?? []).filter((child) => Boolean(child.path) && menuVisible(child, currentWorkspace.permissions, currentWorkspace.menuKeys));
       if (children.length > 0) {
         const items = children.map((child) => ({
           key: child.key,
@@ -926,6 +935,7 @@ function WorkspaceLayout() {
     return (
       <CurrentUserContextProvider user={user}>
         <WorkspaceContextProvider workspace={currentWorkspace}>
+          <PluginInventoryProvider port={inventoryPort}>
           <PermissionContextProvider
             value={{
               permissions: currentWorkspace.permissions,
@@ -937,6 +947,7 @@ function WorkspaceLayout() {
               <Outlet />
             </Layout>
           </PermissionContextProvider>
+          </PluginInventoryProvider>
         </WorkspaceContextProvider>
       </CurrentUserContextProvider>
     );
@@ -945,6 +956,7 @@ function WorkspaceLayout() {
   return (
     <CurrentUserContextProvider user={user}>
       <WorkspaceContextProvider workspace={currentWorkspace}>
+        <PluginInventoryProvider port={inventoryPort}>
         <PermissionContextProvider
           value={{
             permissions: currentWorkspace.permissions,
@@ -1443,6 +1455,7 @@ function WorkspaceLayout() {
             ) : null}
           </Layout>
         </PermissionContextProvider>
+        </PluginInventoryProvider>
       </WorkspaceContextProvider>
     </CurrentUserContextProvider>
   );

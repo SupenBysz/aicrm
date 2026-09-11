@@ -1,7 +1,9 @@
 import type { PluginRoute } from "@ky/admin-core";
 import { SettingsHubPage } from "./pages/settings-hub-page";
+import { PluginManagementPage } from "./pages/plugin-management-page";
 
 export const routes: PluginRoute[] = [
+  { path: "/system/plugins", requiredPermission: "platform.plugin_management.view", element: <PluginManagementPage /> },
   {
     path: "/system",
     requiredAnyPermissions: [

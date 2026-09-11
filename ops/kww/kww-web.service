@@ -1,0 +1,27 @@
+[Unit]
+Description=kww 开发环境 Web 与 API 入口
+After=network.target
+PartOf=kww-dev.target
+
+[Service]
+Type=simple
+User=kww-app
+Group=kww-app
+RuntimeDirectory=kww-nginx
+LogsDirectory=kww
+ExecStartPre=/opt/kww/toolchain/nginx/usr/sbin/nginx -t -c /etc/kww/nginx/nginx.conf
+ExecStart=/opt/kww/toolchain/nginx/usr/sbin/nginx -c /etc/kww/nginx/nginx.conf -g "daemon off;"
+ExecReload=/bin/kill -HUP $MAINPID
+ReadWritePaths=/var/log/kww /var/lib/kww/nginx /run/kww-nginx
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+UMask=0077
+LimitCORE=0
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

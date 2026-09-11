@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { IPC_CHANNELS } from "../../shared/constants";
 import type { DesktopSession } from "../../shared/types";
 import type { DesktopDeviceTrustRuntime } from "../desktop-device-trust-runtime";

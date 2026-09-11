@@ -14,6 +14,7 @@
       "@ky/plugin-ai-configuration": ["../../plugins/ky-ai-configuration/src/index.tsx"],
       "@ky/plugin-audit-management": ["../../plugins/ky-audit-management/src/index.tsx"],
       "@ky/plugin-identity-management": ["../../plugins/ky-identity-management/src/index.tsx"],
+      "@ky/plugin-matrix-account": ["../../plugins/ky-matrix-account/src/index.tsx"],
       "@ky/plugin-notification": ["../../plugins/ky-notification/src/index.tsx"],
       "@ky/plugin-organization-management": ["../../plugins/ky-organization-management/src/index.tsx"],
       "@ky/plugin-system-settings": ["../../plugins/ky-system-settings/src/index.tsx"]

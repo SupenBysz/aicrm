@@ -1,3 +1,4 @@
+import { registerSender, changeSenderRole } from "./guarded-ipc";
 import { join } from "node:path";
 import { BrowserWindow, Menu, nativeTheme, shell } from "electron";
 import { DESKTOP_APPLICATION_NAME } from "../shared/constants";
@@ -92,6 +93,9 @@ export function createMainWindow(): BrowserWindow {
     }
   });
 
+  registerSender(window.webContents, "main", (url) => getUrlOrigin(url) === webOrigin || url === "kww-offline://local/");
+  window.webContents.on("did-frame-navigate", (_event,url,_code,_text,main) => { if(main) changeSenderRole(window.webContents, url === "kww-offline://local/" ? "offline" : "main"); });
+  window.webContents.on("did-fail-load", (_event, code, _text, _url, main) => { if (main && code !== -3 && window.webContents.getURL() !== "kww-offline://local/") void window.loadURL("kww-offline://local/"); });
   bindWindowStateEvents(window);
 
   window.once("ready-to-show", () => {

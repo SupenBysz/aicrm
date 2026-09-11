@@ -1,9 +1,11 @@
+import { desktopPlugins } from "./plugin-host-bridge";
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "../shared/constants";
 import type { DesktopSession, DesktopWindowState } from "../shared/types";
 import type { AiCrmDesktopBridge } from "./types";
 
 const bridge: AiCrmDesktopBridge = {
+  desktopPlugins,
   api: {
     request: (request) => ipcRenderer.invoke(IPC_CHANNELS.apiRequest, request)
   },

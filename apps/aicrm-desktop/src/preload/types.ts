@@ -61,6 +61,7 @@ import type {
 } from "../shared/types";
 
 export interface AiCrmDesktopBridge {
+  desktopPlugins: import("../shared/types").DesktopPluginsBridge;
   api: {
     request: <T = unknown>(request: DesktopApiRequest) => Promise<DesktopApiResponse<T>>;
   };

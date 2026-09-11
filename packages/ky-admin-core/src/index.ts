@@ -128,3 +128,7 @@ export * from "./request-context";
 export * from "./matrix-account-desktop";
 export * from "./ai-executor-desktop";
 export * from "./event-stream";
+
+export * from "./plugin-inventory";
+
+export * from "./plugin-inventory-context";

@@ -1,0 +1,11 @@
+{
+  "name": "@kww/desktop-plugin-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext src/index.ts",
+    "test": "node --test ../../scripts/desktop-plugins/contract.test.mjs"
+  }
+}

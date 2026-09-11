@@ -1,0 +1,7 @@
+[Unit]
+Description=kww 开发环境服务组
+Wants=kww-auth.service kww-org.service kww-membership.service kww-matrix-account.service kww-ai-model.service kww-agent-executor.service kww-runtime-broker.service kww-web.service kww-runtime-broker.socket
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

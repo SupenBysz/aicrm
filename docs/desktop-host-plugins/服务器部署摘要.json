@@ -1,0 +1,86 @@
+{
+  "说明": "阶段1-3开发环境公共部署资源；Web与v1/v2已上线，宿主未重新部署",
+  "入口": "http://127.0.0.1:18180/",
+  "插件源": "http://127.0.0.1:18180/desktop-plugin-releases/dev/",
+  "冻结摘要": "e7bf62a69062dbae6692d637cf0e54a41c2781771863679b104160e6f6ce26fd",
+  "当前客户端": {
+    "PID": 22106,
+    "宿主版本": "0.1.0",
+    "插件版本": "1.0.0",
+    "activeRevision": 12,
+    "highWater": 2,
+    "状态": "stable（回滚完成）"
+  },
+  "文件": [
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/index.html",
+      "字节数": 393,
+      "sha256": "2c3d5e173e0efa13a84843bf1bd74a784daebaaf4b5e335c734cb2b92a491901"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-4FuG3a0n.css",
+      "字节数": 57205,
+      "sha256": "b925567e83c5a2b96043abfef659793f1504f38738aecf204733f4844bb7e9c9"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-6lhJPNHn.js",
+      "字节数": 2217244,
+      "sha256": "dfd352015fd015aba092cb9c75271a7ade5a6dccfd72412204574e5e35cbf1fd"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-9lHZ5oWi.js",
+      "字节数": 2217133,
+      "sha256": "5fc792e6b56c72212e79b316c1d9dfbe7300609560457d0dd7ffc83a579e3c36"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-BDlQvz04.js",
+      "字节数": 2216046,
+      "sha256": "bd1930486a6224f8b6a5f4b65c686a61fe109add8961a0f562f3a05392c496a6"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-C0b-YVuj.js",
+      "字节数": 2215375,
+      "sha256": "7cc6a958d9067d387439ac19a7caa33d79c8e0b464af9b50f9034d7a057aa89f"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-CHnISvrL.js",
+      "字节数": 2215367,
+      "sha256": "7d486e0baef91342ee3d643010dce4da372cf6b00861d0d40e93cee6f2b8bc0c"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-CKvDtNvW.css",
+      "字节数": 58345,
+      "sha256": "8fd31ae817226c4e924f959896bfda6259ec4a35c6883c88b2f93044ce053772"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-CarZT9X7.js",
+      "字节数": 2216028,
+      "sha256": "1cd5732edc944c9b7595d622fde85de9bf9ba1c9618b45bb741ac0047ca2cd9e"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/assets/index-Jau-LejW.css",
+      "字节数": 58620,
+      "sha256": "086d86ea9b47a760fb874d3efba6606d5a45c1a1762e937298280413df1ae15a"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/desktop-plugin-releases/dev/72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5.kwwplugin.json",
+      "字节数": 1878,
+      "sha256": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/desktop-plugin-releases/dev/policy.json",
+      "字节数": 804,
+      "sha256": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/desktop-plugin-releases/dev/index.json",
+      "字节数": 764,
+      "sha256": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+    },
+    {
+      "路径": "/data/kww.org.cn/runtime/www/ky-admin-host/desktop-plugin-releases/dev/a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64.kwwplugin.json",
+      "字节数": 2246,
+      "sha256": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64"
+    }
+  ]
+}

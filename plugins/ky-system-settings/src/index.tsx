@@ -7,6 +7,14 @@ export const systemSettingsPlugin: AdminPlugin = {
   navOrder: 60,
   menus: [
     {
+      key: "ky-system-settings.plugins",
+      label: "插件管理",
+      path: "/system/plugins",
+      icon: "ApiOutlined",
+      menuKey: "menu.platform.plugin_management",
+      requiredPermission: "platform.plugin_management.view"
+    },
+    {
       key: "ky-system-settings.hub",
       label: "系统配置",
       path: "/system",

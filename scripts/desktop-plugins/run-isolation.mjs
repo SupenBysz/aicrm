@@ -1,0 +1,11 @@
+import {createRequire} from 'node:module';import {spawn} from 'node:child_process';
+const require=createRequire(new URL('../../apps/aicrm-desktop/package.json',import.meta.url));const binary=require('electron');
+const env={};for(const key of ['PATH','HOME','TMPDIR','LANG','DISPLAY','XDG_RUNTIME_DIR'])if(process.env[key])env[key]=process.env[key];
+console.log('启动独立 Electron 验收；必须最终全部通过且退出码为 0');
+const child=spawn(binary,[new URL('../../apps/aicrm-desktop/out/isolation/electron-isolation.mjs',import.meta.url).pathname],{env,stdio:['ignore','pipe','pipe']});
+let buffer='',finalPassed=false,timedOut=false;
+child.stdout.on('data',chunk=>{process.stdout.write(chunk);buffer+=chunk.toString();let end;while((end=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);try{const r=JSON.parse(line);if(r.验收==='真实 Electron 隔离')finalPassed=r.全部通过===true&&r.结果&&Object.values(r.结果).every(x=>x===true);}catch{}}if(buffer.length>1048576)buffer='';});
+child.stderr.on('data',chunk=>process.stderr.write(chunk));
+const watchdog=setTimeout(()=>{timedOut=true;console.error('独立 Electron 验收启动器超时，未判通过');child.kill('SIGKILL');},75000);
+child.on('error',()=>{clearTimeout(watchdog);console.error('Electron 验收进程启动失败');process.exitCode=1;});
+child.on('close',code=>{clearTimeout(watchdog);const success=code===0&&finalPassed&&!timedOut;console.log(JSON.stringify({启动器判定通过:success,退出码:code,收到最终通过:finalPassed}));process.exitCode=success?0:1;});

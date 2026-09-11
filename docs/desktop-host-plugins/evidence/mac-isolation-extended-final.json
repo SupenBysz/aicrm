@@ -1,0 +1,84 @@
+{
+  "验收": "真实 Electron 隔离",
+  "结果": {
+    "hostNetworkReachable": true,
+    "unknownSenderDenied": true,
+    "pluginSenderDenied": true,
+    "actualSandbox": true,
+    "spaBridgeSurvives": true,
+    "sameOriginSubframeDenied": true,
+    "subframeSandboxed": true,
+    "remoteImportDenied": true,
+    "websocketDenied": true,
+    "iframeDenied": true,
+    "nodeUnavailable": true,
+    "noFullBridge": true,
+    "externalNetworkDenied": true,
+    "noOldApiSideEffect": true,
+    "popupDenied": true,
+    "workerDenied": true,
+    "externalProtocolDenied": true,
+    "permissionRequestDenied": true,
+    "downloadDenied": true,
+    "crossPackageDenied": true,
+    "productionPluginSandbox": true,
+    "importCspRecorded": true,
+    "frameCspRecorded": true,
+    "syntheticCanaryNotExposed": true,
+    "networkCspRecorded": true,
+    "workerCspRecorded": true,
+    "noOldSessionSideEffect": true,
+    "isolatedUserData": true
+  },
+  "诊断": {
+    "permission": {
+      "ok": false,
+      "error": "PERMISSION_DENIED"
+    },
+    "permissionRequests": 0,
+    "permissionDenied": 0,
+    "permissionChecks": 1,
+    "permissionCheckDenied": 1,
+    "violations": [
+      {
+        "directive": "connect-src",
+        "blockedURI": "http://127.0.0.1:51806/plugin-probe"
+      },
+      {
+        "directive": "script-src-elem",
+        "blockedURI": "http://127.0.0.1:51806/plugin-import"
+      },
+      {
+        "directive": "connect-src",
+        "blockedURI": "ws://127.0.0.1:51806/plugin-ws"
+      },
+      {
+        "directive": "frame-src",
+        "blockedURI": "http://127.0.0.1:51806"
+      },
+      {
+        "directive": "connect-src",
+        "blockedURI": "kww-plugin"
+      },
+      {
+        "directive": "worker-src",
+        "blockedURI": "data"
+      }
+    ],
+    "crossPackageViolations": [
+      {
+        "directive": "connect-src",
+        "blockedURI": "kww-plugin"
+      }
+    ],
+    "crossPackageAttempts": 0
+  },
+  "全部通过": true,
+  "退出码": 0,
+  "源码摘要": {
+    "scripts/desktop-plugins/electron-isolation.ts": "a26c27ea9b9956c2450bf0f8128f3ee9dfb148e46ce0950138308f9b39eeed32",
+    "apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts": "4dcdc0e885defce8794b27b978364abdeedc4daf71b2daf35e04c3a5e90edb9c",
+    "apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs": "0864f9a80c51ddd6466ae9459e57c494616b6ff331149d0c12567b8035439c98",
+    "apps/aicrm-desktop/src/main/guarded-ipc.ts": "16fdb5e3bc60f03cf347cd34d180ca25e86948835a65588d9def84ac5e98bb61"
+  }
+}

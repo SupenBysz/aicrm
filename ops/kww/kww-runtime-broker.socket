@@ -1,0 +1,14 @@
+[Unit]
+Description=kww 执行器运行代理套接字
+
+PartOf=kww-dev.target
+
+[Socket]
+ListenSequentialPacket=/run/kww-agent-runtime.sock
+SocketUser=root
+SocketGroup=kww-executor
+SocketMode=0660
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

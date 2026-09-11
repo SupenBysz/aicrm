@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "desktop-plugin-build-policy",
+  "channel": "dev",
+  "enabled": true,
+  "productionEnabled": false,
+  "updateBaseUrl": "http://127.0.0.1:18180/desktop-plugin-releases/dev/",
+  "allowLoopbackHttp": true,
+  "publicKey": {
+    "schemaVersion": 1,
+    "purpose": "kww-desktop-plugin-signing",
+    "channel": "dev",
+    "algorithm": "Ed25519",
+    "publicKeyFormat": "raw-ed25519-base64",
+    "publicKey": "F405Ah5JPp//o0UwOo3heISMg5Lw3WhLAoiCaANiZ5A=",
+    "fingerprint": "sha256:3fed2a12f086954745aa222e84d74d5da2561252823f3db8e9872ffe64f5d288",
+    "keyId": "sha256:3fed2a12f086954745aa222e84d74d5da2561252823f3db8e9872ffe64f5d288"
+  },
+  "pluginId": "cn.org.kww.desktop.status-bar",
+  "capabilities": [
+    "host.app.version.read",
+    "host.ui.statusBar.publish",
+    "host.ui.statusBar.action",
+    "host.runtime.lifecycle"
+  ],
+  "platforms": [
+    "darwin"
+  ],
+  "policyFile": "policy.json",
+  "indexFile": "index.json"
+}

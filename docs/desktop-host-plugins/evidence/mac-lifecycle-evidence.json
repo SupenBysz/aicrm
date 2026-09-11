@@ -1,0 +1,272 @@
+{
+  "同PID更新与回滚": {
+    "宿主版本": "0.1.0",
+    "PID": 8683,
+    "插件版本序列": [
+      "1.0.0",
+      "1.1.0",
+      "1.0.0"
+    ],
+    "各阶段": "均经原生菜单和真实60秒观察后stable",
+    "v2按钮展开收起": true,
+    "冻结资源数": 1109,
+    "三次资源完全一致": true,
+    "回滚后发布高水位": 2,
+    "运行时签名校验": true,
+    "安装包发布验收": false
+  },
+  "四个强杀点": [
+    {
+      "检查点": "verified",
+      "PID": 8683,
+      "状态": {
+        "phase": "verified",
+        "revision": 42,
+        "activeRevision": 3,
+        "active": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "lastKnownGood": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "rollbackTarget": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "bfdcfc4fd8852bc097975929810deb975cf79d014c6c0ab274f69fc9db5e9782"
+        },
+        "previousStable": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "candidate": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "593e438f6e7d16a358fce808f8068382b584f0aa5c26125a43b24341a4e47ac9"
+        },
+        "highWater": {
+          "policyVersion": 1,
+          "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+          "releaseSequence": 2,
+          "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+        },
+        "recovery": {
+          "updatesBlocked": false,
+          "reason": null
+        }
+      },
+      "恢复": {
+        "PID": 10923,
+        "phase": "stable",
+        "active": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "releaseSequence": 2,
+        "正常恢复": true
+      }
+    },
+    {
+      "检查点": "activating",
+      "PID": 10923,
+      "状态": {
+        "phase": "activating",
+        "revision": 51,
+        "activeRevision": 3,
+        "active": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "lastKnownGood": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "rollbackTarget": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "bfdcfc4fd8852bc097975929810deb975cf79d014c6c0ab274f69fc9db5e9782"
+        },
+        "previousStable": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "candidate": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "abf8971cbbf04dd2a1d7eb4154d997a95973803bca009f81e804257b983c7aef"
+        },
+        "highWater": {
+          "policyVersion": 1,
+          "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+          "releaseSequence": 2,
+          "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+        },
+        "recovery": {
+          "updatesBlocked": false,
+          "reason": null
+        }
+      },
+      "恢复": {
+        "PID": 11155,
+        "phase": "stable",
+        "active": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "releaseSequence": 2,
+        "正常恢复": true
+      }
+    },
+    {
+      "检查点": "probation",
+      "PID": 11155,
+      "状态": {
+        "phase": "probation",
+        "revision": 62,
+        "activeRevision": 5,
+        "active": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "a42d622c724bcdc7006ef22848e5708b976fd32702bd9d3beb1b4a3f350cdd92"
+        },
+        "lastKnownGood": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "rollbackTarget": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "bfdcfc4fd8852bc097975929810deb975cf79d014c6c0ab274f69fc9db5e9782"
+        },
+        "previousStable": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "candidate": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "a42d622c724bcdc7006ef22848e5708b976fd32702bd9d3beb1b4a3f350cdd92"
+        },
+        "highWater": {
+          "policyVersion": 1,
+          "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+          "releaseSequence": 2,
+          "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+        },
+        "recovery": {
+          "updatesBlocked": false,
+          "reason": null
+        }
+      },
+      "恢复": {
+        "PID": 11401,
+        "phase": "stable",
+        "active": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "releaseSequence": 2,
+        "正常恢复": true
+      }
+    },
+    {
+      "检查点": "stable",
+      "PID": 11401,
+      "状态": {
+        "phase": "stable",
+        "revision": 74,
+        "activeRevision": 7,
+        "active": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "918c776602bcc64bf6ece0319d9381e365b24461352b1afa13462cc9543f037b"
+        },
+        "lastKnownGood": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "918c776602bcc64bf6ece0319d9381e365b24461352b1afa13462cc9543f037b"
+        },
+        "rollbackTarget": {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "version": "1.0.0",
+          "authorizationDigest": "3fa4b3a2b292d8925d506d609a661885dd5304e51dd5bb6c97b209b56fd152a0"
+        },
+        "previousStable": null,
+        "candidate": null,
+        "highWater": {
+          "policyVersion": 1,
+          "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+          "releaseSequence": 2,
+          "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+        },
+        "recovery": {
+          "updatesBlocked": false,
+          "reason": null
+        }
+      },
+      "恢复": {
+        "PID": 12093,
+        "phase": "stable",
+        "active": {
+          "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+          "version": "1.1.0",
+          "authorizationDigest": "918c776602bcc64bf6ece0319d9381e365b24461352b1afa13462cc9543f037b"
+        },
+        "releaseSequence": 2,
+        "正常恢复": true
+      }
+    }
+  ],
+  "候选渲染进程崩溃": {
+    "场景": "观察期候选renderer通过原生菜单强制崩溃，继续事务",
+    "主PID": 12093,
+    "主进程保留": true,
+    "恢复后v2按钮展开收起": true,
+    "状态": {
+      "phase": "stable",
+      "active": {
+        "digest": "a4811cca2ecae015917cee9607ed834e7c52e48c865fa3acf25d19d6dc415d64",
+        "version": "1.1.0",
+        "authorizationDigest": "918c776602bcc64bf6ece0319d9381e365b24461352b1afa13462cc9543f037b"
+      },
+      "candidate": null,
+      "highWater": {
+        "policyVersion": 1,
+        "policyDigest": "b6fb510945d96987809501992fe815eec9880337ae4174cffc99fea7be9bdb2e",
+        "releaseSequence": 2,
+        "indexDigest": "c547397aa810436faa63d4c1f1f39f4b194147a64dda3f9d8273ff1771ad150d"
+      },
+      "failures": [
+        {
+          "digest": "72abcb9c3adbe60c5515770f243c8d8142ec68998c5e07bca26a4fa5ad2c3be5",
+          "sequence": 2,
+          "code": "plugin_activation_failed",
+          "time": 1789113547896
+        }
+      ]
+    }
+  },
+  "窗口已验证": [
+    "明暗状态栏",
+    "全屏及退出全屏",
+    "约964px较窄窗口状态栏",
+    "最小化后恢复按钮交互",
+    "正常退出旧PID8203且清理日志完成"
+  ],
+  "窗口待核对": [
+    "关闭最后窗口后重开图形工具截图不可用，尚不能判定"
+  ],
+  "离线已验证": "本地SSH转发中断时离线页和v0.1.0显示，恢复后原生重试返回业务路由，登录保留"
+}

@@ -3,13 +3,13 @@
   "displayName": "AiCRM",
   "productName": "AiCRM",
   "appId": "com.kysion.aicrm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/start-dev.mjs dev",
-    "build": "electron-vite build",
+    "build": "electron-vite build && node ../../scripts/desktop-plugins/build-preloads.mjs",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:codex-executor-auth-safety": "node --test src/main/codex-executor-auth-safety.test.mjs",
     "test:codex-authorization-bridge-v2": "node --test src/main/codex-authorization-bridge-v2.test.mjs",
@@ -45,6 +45,7 @@
     "@types/node": "^26.1.0",
     "electron": "^43.0.0",
     "electron-vite": "^5.0.0",
+    "esbuild": "0.25.12",
     "typescript": "^6.0.3",
     "vite": "^7.3.6"
   }

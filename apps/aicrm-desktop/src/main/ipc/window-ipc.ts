@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { guardedIpc as ipcMain } from "../guarded-ipc";
+import { BrowserWindow,  type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
 import type { DesktopOpenDevToolsResult, DesktopWindowState } from "../../shared/types";
 import { isDesktopProductionMode } from "../runtime-mode";

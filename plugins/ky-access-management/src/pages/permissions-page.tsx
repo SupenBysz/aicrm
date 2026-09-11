@@ -110,7 +110,7 @@ export function PermissionsPage() {
         </Space>
       }
     >
-      <div style={{ padding: "0 16px 16px" }}>
+      <div style={{ padding: "2px" }}>
         {filtered.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={isFetching ? "加载中…" : "暂无权限"} />
         ) : (

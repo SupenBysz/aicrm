@@ -1,4 +1,4 @@
-import { ipcMain } from "electron";
+import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { IPC_CHANNELS } from "../../shared/constants";
 import type { ApiEnvelope, DesktopApiRequest, DesktopApiResponse } from "../../shared/types";
 import { loadDesktopConfig } from "../config";

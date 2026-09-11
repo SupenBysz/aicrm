@@ -181,3 +181,7 @@ Desktop 设备签名请求使用其独立的 key-generation、sequence、nonce �
 - internal API 是否受控且未泄露私表、凭据、路径或原始输出？
 - 前端 request client 是否统一注入 token、workspace 和 requestId？
 - 文档、类型、测试或 smoke 是否同步更新？
+
+## 客户端宿主插件增量合同
+
+客户端宿主插件采用独立版本 manifest/pluginApi/uiApi 和严格 schema；静态签名更新不新增业务 API。IPC 保留既有返回合同，更新采用 CAS 与不回退高水位。 完整项目合同见 `docs/desktop-host-plugins/锁定记录.md`；若模板未携带该实现，不得宣称拥有插件更新能力。

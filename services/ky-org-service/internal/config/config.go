@@ -7,14 +7,16 @@ import (
 )
 
 type Config struct {
-	ServiceName     string
-	HTTPAddr        string
-	RuntimeEnvFile  string
-	DatabaseURL     string
-	RedisURL        string
-	NATSURL         string
-	AuthTokenSecret string
-	SecretKey       string
+	ServiceName          string
+	HTTPAddr             string
+	RuntimeEnvFile       string
+	DatabaseURL          string
+	RedisURL             string
+	NATSURL              string
+	AuthTokenSecret      string
+	SecretKey            string
+	MembershipURL        string
+	InternalServiceToken string
 }
 
 func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
@@ -38,7 +40,9 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 		AuthTokenSecret: os.Getenv("KY_AUTH_TOKEN_SECRET"),
 		// Platform-wide secret for encrypting settings credentials (storage/SMS/email).
 		// Falls back to KY_AI_SECRET_KEY so a single master key can serve both.
-		SecretKey: firstNonEmpty(os.Getenv("KY_SECRET_KEY"), os.Getenv("KY_AI_SECRET_KEY")),
+		SecretKey:            firstNonEmpty(os.Getenv("KY_SECRET_KEY"), os.Getenv("KY_AI_SECRET_KEY")),
+		MembershipURL:        firstNonEmpty(os.Getenv("KY_MEMBERSHIP_SERVICE_URL"), "http://127.0.0.1:18083"),
+		InternalServiceToken: os.Getenv("KY_INTERNAL_SERVICE_TOKEN"),
 	}
 }
 

@@ -1,0 +1,48 @@
+{
+  "lifecycle": {
+    "结果": {
+      "验收": "真实产品生命周期",
+      "结果": {
+        "initialProductUi": true,
+        "hostObserved": true,
+        "noUiRequired": true,
+        "noUiConfirmed": true,
+        "doubleUi": true,
+        "minimizedUiInvalidates": true,
+        "restoreReack": true,
+        "staleAckRejected": true,
+        "reloadOldConfirmationRejected": true,
+        "reloadReack": true,
+        "oneUiAfterClose": true,
+        "noUiAfterClose": true,
+        "productActivateReopensUi": true,
+        "reopenedProductUi": true
+      },
+      "coverage": {
+        "trustedUiRegistrationTested": true,
+        "trustedUiConfirmed": true,
+        "reopenedUiRegistrationTested": false
+      },
+      "全部通过": true
+    },
+    "脚本SHA256": "b01e81477318cc34e8e21b50e4b908157cf17176a5c04a899a1ee3ace02da3c5",
+    "退出码": 0
+  },
+  "react": {
+    "结果": {
+      "A09真实React挂载": true,
+      "multipleMounts": true,
+      "gap": true,
+      "text": true,
+      "epochStaleIgnored": true,
+      "staleRegistrationIgnored": true,
+      "allUnmounted": true,
+      "browserFooterZero": true,
+      "fallbackFooterOne": true,
+      "pluginFooterOne": true,
+      "全部通过": true
+    },
+    "脚本SHA256": "f561d50beccfd91fa7d2a58ff6af0bafee07353070899aa76de511773867460a",
+    "退出码": 0
+  }
+}

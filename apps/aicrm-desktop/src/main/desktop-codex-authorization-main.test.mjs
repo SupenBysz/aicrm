@@ -45,7 +45,7 @@ test("production graph keeps secrets and paths Main-only and publishes only safe
 
 test("index creates P2A services only inside app readiness and awaits one shutdown fence", async () => {
   const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
-  const ready = source.indexOf("app.whenReady().then(() => {");
+  const ready = source.search(/app\.whenReady\(\)\.then\((?:async )?\(\) => \{/);
   const create = source.indexOf(
     "desktopCodexAuthorizationServices = getDesktopCodexAuthorizationMainServices();"
   );
@@ -53,7 +53,9 @@ test("index creates P2A services only inside app readiness and awaits one shutdo
   assert.match(source, /desktopCodexAuthorizationServices\.initialize\(\)\.catch/);
   assert.match(source, /app\.on\("before-quit", \(event\) =>/);
   assert.match(source, /desktopCodexQuitFence\?\.handleBeforeQuit\(event\)/);
-  assert.match(source, /shutdown: \(\) => desktopCodexAuthorizationServices!\.shutdown\(\)/);
+  assert.match(source, /desktopCodexAuthorizationServices!\.shutdown\(\)/);
+  assert.match(source, /getPluginHost\(\)\?\.shutdown\(\)/);
+  assert.match(source, /await Promise\.allSettled/);
   assert.match(source, /quit: \(\) => app\.quit\(\)/);
   assert.match(source, /registerCodexExecutorIpc\(\);/);
 });

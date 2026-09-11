@@ -140,3 +140,7 @@ Shared 禁止放：
 - 异步事件是否使用 outbox、安全引用、幂等消费和 reconciler？
 - 所有权迁移是否保持单写者，并有 freeze/drain、cutover 和回滚分界？
 - 是否需要更新 architecture、API、permission、communication 或 template 文档？
+
+## 客户端宿主插件增量合同
+
+客户端宿主插件使用独立 desktop-plugins/ 与 desktop-plugin-contracts，不混用 AdminPlugin/localPlugins。Electron 持有生命周期/能力授权，Web 仅消费声明式槽；插件不接管账号、登录或工作区。 完整项目合同见 `docs/desktop-host-plugins/锁定记录.md`；若模板未携带该实现，不得宣称拥有插件更新能力。

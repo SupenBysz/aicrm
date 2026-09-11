@@ -1,5 +1,7 @@
+import { registerSender } from "../guarded-ipc";
+import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { join } from "node:path";
-import { BrowserWindow, Menu, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Menu,  nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
 import type {
   AiExecutorTerminalWindowInput,
@@ -86,6 +88,7 @@ function openTerminalWindow(
     void shell.openExternal(url);
   });
 
+  registerSender(window.webContents, "terminal", (url) => { try { return new URL(url).origin === new URL(input.url).origin; } catch { return false; } });
   void window.loadURL(input.url);
   return ok({
     taskId: input.taskId,

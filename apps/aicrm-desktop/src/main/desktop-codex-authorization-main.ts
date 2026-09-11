@@ -1,3 +1,4 @@
+import { senderRegistration } from "./guarded-ipc";
 import path from "node:path";
 import { app, BrowserWindow, safeStorage, shell } from "electron";
 import { DESKTOP_APPLICATION_NAME, IPC_CHANNELS } from "../shared/constants.ts";
@@ -77,6 +78,7 @@ export function getDesktopCodexAuthorizationMainServices(): DesktopCodexAuthoriz
   const events = new DesktopCodexAuthorizationEventBroadcaster({
     sink: (event) => {
       for (const window of BrowserWindow.getAllWindows()) {
+      if (senderRegistration(window.webContents)?.role !== "main") continue;
         if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
           window.webContents.send(IPC_CHANNELS.codexAuthorizationChanged, event);
         }

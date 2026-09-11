@@ -20,7 +20,7 @@ const packageJson = JSON.parse(readFileSync(packageFile, "utf8"));
 const productName = String(packageJson.productName || packageJson.displayName || "AiCRM").trim() || "AiCRM";
 const applicationId = String(packageJson.appId || "com.aicrm").trim() || "com.aicrm";
 const fileName = productName.replace(/[/:]/g, "-");
-const runtimeSchemaVersion = 3;
+const runtimeSchemaVersion = 4;
 
 function run(command, args) {
   const result = spawnSync(command, args, { stdio: "inherit" });
@@ -52,7 +52,7 @@ function prepareNamedMacRuntime(electronExecutable) {
   const runtimeKey = createHash("sha256").update(sourceFingerprint).digest("hex").slice(0, 16);
   const cacheRoot = join(runtimeRoot, `${electronPackage.version}-${runtimeKey}`);
   const targetApp = join(cacheRoot, `${fileName}.app`);
-  const targetExecutable = join(targetApp, "Contents", "MacOS", fileName);
+  const targetExecutable = join(targetApp, "Contents", "MacOS", "Electron");
   const stampFile = join(cacheRoot, "runtime.json");
   const currentFingerprint = existsSync(stampFile) ? readFileSync(stampFile, "utf8") : "";
 
@@ -63,14 +63,13 @@ function prepareNamedMacRuntime(electronExecutable) {
     mkdirSync(cacheRoot, { recursive: true });
     run("/bin/cp", ["-cR", sourceApp, targetApp]);
 
-    const originalExecutable = join(targetApp, "Contents", "MacOS", "Electron");
     const resources = join(targetApp, "Contents", "Resources");
     const infoPlist = join(targetApp, "Contents", "Info.plist");
     const iconFileName = `${fileName}.icns`;
 
-    renameSync(originalExecutable, targetExecutable);
+    // 保留 Electron 主二进制名，避免开发壳被 isPackaged 判定为正式产物。
     copyFileSync(join(resources, "electron.icns"), join(resources, iconFileName));
-    rewriteBundleMetadata(targetApp, productName, fileName, applicationId);
+    rewriteBundleMetadata(targetApp, productName, "Electron", applicationId);
     const helperSuffixes = ["", " (GPU)", " (Plugin)", " (Renderer)"];
     helperSuffixes.forEach((suffix) => {
       const oldName = `Electron Helper${suffix}`;
@@ -97,7 +96,10 @@ const namedElectronExecutable =
 const electronVitePackage = require.resolve("electron-vite/package.json");
 const electronViteCli = join(dirname(electronVitePackage), "bin", "electron-vite.js");
 const command = process.argv[2] || "dev";
-const child = spawn(process.execPath, [electronViteCli, command, ...process.argv.slice(3)], {
+const commandArgs = process.argv.slice(3);
+// preview 只能使用已构建产物，防止覆盖独立 sandbox preload。
+if (command === "preview" && !commandArgs.includes("--skipBuild")) commandArgs.push("--skipBuild");
+const child = spawn(process.execPath, [electronViteCli, command, ...commandArgs], {
   detached: process.platform !== "win32",
   env: { ...process.env, ELECTRON_EXEC_PATH: namedElectronExecutable },
   stdio: "inherit"

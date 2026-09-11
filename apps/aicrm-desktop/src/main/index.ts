@@ -1,6 +1,8 @@
+import { registerPluginSchemes, startPluginHost, getPluginHost } from "./desktop-plugin-host/host";
+import { guardedIpc as ipcMain } from "./guarded-ipc";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow } from "electron";
 import {
   DESKTOP_APPLICATION_ID,
   DESKTOP_APPLICATION_NAME,
@@ -25,6 +27,8 @@ import {
   type DesktopCodexAuthorizationMainServices
 } from "./desktop-codex-authorization-main";
 import { DesktopCodexAuthorizationQuitFence } from "./desktop-codex-authorization-main-lifecycle";
+
+registerPluginSchemes();
 
 process.title = DESKTOP_APPLICATION_NAME;
 app.setName(DESKTOP_APPLICATION_NAME);
@@ -60,10 +64,18 @@ registerMatrixAccountIpc();
 registerNetworkIpc();
 registerWindowIpc();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  void startPluginHost().catch(() => console.info("客户端插件已降级，主窗口继续启动"));
   desktopCodexAuthorizationServices = getDesktopCodexAuthorizationMainServices();
   desktopCodexQuitFence = new DesktopCodexAuthorizationQuitFence({
-    shutdown: () => desktopCodexAuthorizationServices!.shutdown(),
+    shutdown: async () => {
+      console.info("客户端退出清理：开始");
+      await Promise.allSettled([
+        desktopCodexAuthorizationServices!.shutdown().finally(() => console.info("客户端退出清理：授权运行时结束")),
+        Promise.resolve(getPluginHost()?.shutdown()).finally(() => console.info("客户端退出清理：插件宿主结束"))
+      ]);
+      console.info("客户端退出清理：完成");
+    },
     quit: () => app.quit()
   });
   void desktopCodexAuthorizationServices.initialize().catch(() => undefined);
@@ -74,16 +86,17 @@ app.whenReady().then(() => {
   installNetworkLogCapture();
   installApplicationMenu();
   void desktopDeviceTrustRuntime.resumeAfterStartup();
-  const mainWindow = createMainWindow();
+  let mainWindow = createMainWindow();
 
   app.on("second-instance", () => {
+    if (mainWindow.isDestroyed()) mainWindow = createMainWindow();
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+    if (BrowserWindow.getAllWindows().filter(w => !getPluginHost()?.instances.has(w.webContents)).length === 0) {
+      mainWindow = createMainWindow();
     }
   });
 });
@@ -97,3 +110,5 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+app.on("will-quit", () => { console.info("客户端退出清理：will-quit"); });

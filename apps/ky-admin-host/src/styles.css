@@ -150,13 +150,13 @@ a {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
 }
 
 .app-shell {
   background: var(--admin-content-bg);
-  height: 100vh;
-  min-height: 100vh;
+  height: var(--admin-viewport-height, 100vh);
+  min-height: var(--admin-viewport-height, 100vh);
   overflow: hidden;
   position: relative;
 }
@@ -164,7 +164,7 @@ a {
 .app-shell::before {
   background: var(--admin-right-shell-bg);
   border-bottom-left-radius: 40px;
-  bottom: 0;
+  bottom: var(--desktop-statusbar-height, 0px);
   content: "";
   left: calc(var(--admin-sidebar-width) - 1px);
   pointer-events: none;
@@ -176,8 +176,8 @@ a {
 
 .app-terminal-window-shell {
   background: var(--admin-content-bg);
-  height: 100vh;
-  min-height: 100vh;
+  height: var(--admin-viewport-height, 100vh);
+  min-height: var(--admin-viewport-height, 100vh);
   overflow: hidden;
 }
 
@@ -289,7 +289,7 @@ a {
 
 .app-body {
   background: transparent;
-  height: calc(100vh - var(--admin-header-height));
+  height: calc(var(--admin-viewport-height, 100vh) - var(--admin-header-height));
   overflow: hidden;
   position: relative;
   z-index: 1;
@@ -298,7 +298,7 @@ a {
 .app-sider {
   background: var(--admin-nav-bg) !important;
   border-right: 1px solid var(--admin-divider);
-  bottom: 0;
+  bottom: var(--desktop-statusbar-height, 0px);
   left: 0;
   overflow: hidden;
   position: fixed !important;
@@ -308,7 +308,7 @@ a {
 }
 
 .app-sider-scroll {
-  height: calc(100vh - var(--admin-header-height));
+  height: calc(var(--admin-viewport-height, 100vh) - var(--admin-header-height));
   overflow-x: hidden;
   overflow-y: auto;
   padding: 10px 0;
@@ -493,8 +493,8 @@ a {
 
 .app-content {
   background: transparent;
-  height: calc(100vh - var(--admin-header-height));
-  min-height: calc(100vh - var(--admin-header-height));
+  height: calc(var(--admin-viewport-height, 100vh) - var(--admin-header-height));
+  min-height: calc(var(--admin-viewport-height, 100vh) - var(--admin-header-height));
   overflow-x: hidden;
   overflow-y: auto;
   padding: 48px 12px 22px;
@@ -1139,7 +1139,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .global-account-shell {
   background: var(--admin-content-bg);
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
 }
 
 .global-account-header {
@@ -1176,7 +1176,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   align-items: center;
   display: flex;
   justify-content: center;
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
 }
 
 .login-shell {
@@ -1190,7 +1190,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   overflow: hidden;
   place-items: center;
   position: relative;
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
   padding: 24px;
 }
 
@@ -1488,7 +1488,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
     radial-gradient(circle at 12% 14%, var(--admin-accent-soft), transparent 30%),
     radial-gradient(circle at 88% 10%, rgba(255, 252, 247, 0.72), transparent 26%),
     linear-gradient(180deg, #fbf7ef 0%, var(--admin-content-bg) 46%, #efe1cf 100%);
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
   overflow: hidden;
   padding: 28px 24px;
   position: relative;
@@ -2155,7 +2155,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
     linear-gradient(180deg, #edf4fb 0%, #f5f7fa 100%);
   display: flex;
   justify-content: center;
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
   padding: 24px;
 }
 
@@ -2218,7 +2218,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
     linear-gradient(180deg, #edf4fb 0%, #f5f7fa 100%);
   display: flex;
   justify-content: center;
-  min-height: 100vh;
+  min-height: var(--admin-viewport-height, 100vh);
   padding: 24px;
 }
 
@@ -2594,3 +2594,42 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
     width: 100%;
   }
 }
+
+/* 客户端底栏预留独立高度，页面与固定侧栏均截止在底栏上方。 */
+.desktop-client-frame {
+  --desktop-statusbar-height: 28px;
+  --admin-viewport-height: calc(100dvh - var(--desktop-statusbar-height));
+  min-height: 100dvh;
+  padding-bottom: var(--desktop-statusbar-height);
+}
+
+.desktop-status-bar {
+  align-items: center;
+  background: var(--admin-surface-solid);
+  border-top: 1px solid var(--admin-divider);
+  bottom: 0;
+  color: var(--admin-text-muted);
+  display: flex;
+  font-size: 12px;
+  height: var(--desktop-statusbar-height);
+  justify-content: flex-end;
+  left: 0;
+  min-width: 0;
+  padding: 0 8px;
+  position: fixed;
+  right: 0;
+  z-index: 1000;
+  -webkit-app-region: no-drag;
+}
+
+.client-version {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-plugin-item { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.desktop-plugin-item { cursor: pointer; }
+button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
