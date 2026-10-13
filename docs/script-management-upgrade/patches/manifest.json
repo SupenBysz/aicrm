@@ -1,0 +1,768 @@
+{
+  "baseCommit": "28520ed74874b02402be3da24f026bd4825207ab",
+  "referenceRepository": "https://gitea.jditco.ltd/kww/kwwcrm.git",
+  "referenceCommit": "5ddcf15b08d07a2cafd66c5ef3d584a34dae3332",
+  "mainPatch": {
+    "path": "01-script-management.patch",
+    "files": [
+      {
+        "path": "apps/ky-admin-host/package.json",
+        "targetSha256": "c0f7bea364329c8fb596ba63dade04779911d31dcbd5cc36311dcf10a61ce8c1",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "apps/ky-admin-host/src/app.tsx",
+        "targetSha256": "55b4fbf557ce31aecf6dcf259514e52061eead6faaabff9c798dd926bf636411",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "apps/ky-admin-host/src/local-plugin-manifest.ts",
+        "targetSha256": "cd98f6d6741567a893a700e10934d9f0702e87760903d965b43a296899110c24",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "apps/ky-admin-host/src/styles.css",
+        "targetSha256": "b4c08473fe5536d7898043d733684267124ea01bdce151b7f0f034e0de4f00b8",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "apps/ky-admin-host/vite.config.ts",
+        "targetSha256": "a50d0f78c6e50dec1138b4cc2c3a30bec3b55b61662d1f9ec618b4f14f591844",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "ops/db/086_matrix_account_douyin_scripts.sql",
+        "targetSha256": "54b740a2aaf54ef88dd4f0e3dcc0ecbc7df6ade86bd8448450096caf0c08ab9e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/087_matrix_account_douyin_script_assets.sql",
+        "targetSha256": "cf0d3b1b248daaf00d947625d1443b3f9b13e597864923f2428ef9b0a2358334",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/088_matrix_account_douyin_script_identifier.sql",
+        "targetSha256": "48e0d06786a63188f2f7e870a7c754be3401d1107813092187d2c238bef8cb1e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/089_matrix_account_douyin_script_runtime_contract.sql",
+        "targetSha256": "0aa07b92630d4bf43bb04c46c3a6f03f32af427dd3f3434fb8f716a97c13634a",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/090_matrix_account_douyin_asset_published_at.sql",
+        "targetSha256": "a34d328e37d55ac64b4d972633f098bf338bb83975506ac31cf57a09784fdf91",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/091_matrix_account_douyin_style_runtime.sql",
+        "targetSha256": "954f5821aba64d7c8531a020b90cb85f3f0ab63a8b1742fdddba6e47e210b613",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/092_matrix_account_public_scripts.sql",
+        "targetSha256": "0c280f3b253a6e194f99950d679a514595636774fd8c13b01e5fdb12adafca9c",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/093_matrix_account_douyin_script_match_rules.sql",
+        "targetSha256": "558112cbc8e2267342ce51927d3806c2fe4db34b61dec464a88da7824d3546e2",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/094_matrix_account_public_script_sdk.sql",
+        "targetSha256": "f1f072b4ae54a2375cc49a74e590fc733faab5ebefbe2bd0888eb3a5d2319928",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/096_matrix_account_douyin_asset_source_hash_fix.sql",
+        "targetSha256": "5006cc1d528c4d203e3a153cabbf5f26c92a7379b63030575114c293321bb28a",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/db/099_matrix_account_public_styles.sql",
+        "targetSha256": "0fdb1c797eb037dd5eca438912aed5ad43757428a78953304087ccacb260ed42",
+        "source": "reference-exact"
+      },
+      {
+        "path": "ops/native/ky-admin-host.nginx.conf",
+        "targetSha256": "e547022aa835145382d8ded6ff8a0329b8ca0bb81587534778dbd553b5c243e7",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "plugins/ky-script-management/package.json",
+        "targetSha256": "bb16194edaa8972b2ca5decb43816422cee281f665576e9d8ec7d9a3dcd32e4a",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "plugins/ky-script-management/src/api.ts",
+        "targetSha256": "02a7dc0043b4a3d2edf034b4f3d495eaaa31b2e06727a26207303dd22a64c81e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/asset-history-contract.test.mjs",
+        "targetSha256": "a5013029ebc25e86bee02b58c1f94e2fa89c31fb8b5bd642f5fd9e0bea180ff0",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/business-script-init-template.test.mjs",
+        "targetSha256": "a8d1537d46cd0ab994f51b1e7e4fe0e0610147ec0abb508329486e37d9aed769",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/business-script-init-template.ts",
+        "targetSha256": "50506ed3a4b7e2a76d0f8304892e5a550933982c78f2c929251c65aaad51f8ee",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/components/monaco-command-dispatch.d.mts",
+        "targetSha256": "f42193571b102d13b642f0ca0d1399a06d6d2b30b9a5578a7cc16182402643ff",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/components/monaco-command-dispatch.mjs",
+        "targetSha256": "8205fe12e783793b4dc09c6cb1f24ba3325edf9456b7b968189f51125e8bfeef",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/components/monaco-source-editor.tsx",
+        "targetSha256": "a1b84c9c6a5d0ab081832f7542f175d0ca99ddcf94d06cd000a9c8a8c494c46e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/editor-shortcut-preferences.test.mjs",
+        "targetSha256": "5c669ee5c4378a8ba1a6b9caf69f2f394be7233cb1b90fb17b27be626ce7f7ce",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/editor-shortcut-preferences.ts",
+        "targetSha256": "79fc0a4a62fe321dcae0f1d09c6b423768e887f42d472e2fe02f6bcc54b7ced6",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/editor-typography-contract.test.mjs",
+        "targetSha256": "bd0fcd4610149f9d495b3bbc4e10890567d42bc815592be5b21cc77ccb26708a",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/help-content-contract.test.mjs",
+        "targetSha256": "7bab09554b12c65017725393c3c59214ccd099396f9268acb35fd29b34b013ad",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/help-drawer-sizing.test.mjs",
+        "targetSha256": "c2611fed07f9059a8aa259e43f48172d21f15a48e08a38be1e434d1f8b6606d3",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/help-drawer-sizing.ts",
+        "targetSha256": "4d97b09cdfb1385738e88c694a3d30e54ea10e3264630fbb4b9bd144b2d7ce4d",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/index.tsx",
+        "targetSha256": "65ce8a2cae7d1c3ca21c514ecb2dc29df4ff8ccfaf589c669ec9a0bcd68ed27f",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/jssdk-reference.ts",
+        "targetSha256": "c12566bd7fd02abd6821ad6a41edbb00ea42d814f183d57b1aab0504fe4d8fb8",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/lifecycle-snippets-contract.test.mjs",
+        "targetSha256": "3a1952454d65cfe1b1713fa20d9d91b354a1477c6cf3fde7245467ec1ce61a96",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/monaco-editor-contract.test.mjs",
+        "targetSha256": "f7bf6612799498c43e120995c0c7ac3f9916e10e599f8a2ad22b966019bf83c5",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/monaco-find-replace-contract.test.mjs",
+        "targetSha256": "c972bb7498d267b97c969375aa89d9d9e602a816df9fe0a8df3cade577b0efcd",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/monaco-menu-contract.test.mjs",
+        "targetSha256": "67ec62783211c1d0f5edb27aae6e71c64d8fcbde58cd2dd694a00504ddb5e968",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/monaco-native-shortcut-focus-contract.test.mjs",
+        "targetSha256": "e5d3f7675f3c13eac22c8bd1a0d8ed864cf248de3cb6f146ae62baff2c4a91c2",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/pages/script-management-page.tsx",
+        "targetSha256": "33737f33fd42f7a6d92df5a8dedec1edc103e559c44ef6bc6f85f74bb58a8c1d",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/permissions.ts",
+        "targetSha256": "6fa8b84bc57348733e12282c7a3c6865e3b8b55bac96e42b43fc89fa33411177",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/routes.tsx",
+        "targetSha256": "389722527b9e4583c2be1cde46e2cdf7d5fff70bd8e0f69fba8830975704285f",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/runtime-sdk.test.mjs",
+        "targetSha256": "d8f8f7826b77035fd1154e9c84bbf4875a826d4810dd07560fb1ebfd7f060577",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/src/runtime-sdk.ts",
+        "targetSha256": "54ae55b05975dfe7aa09498d83306641a2fd5eeb0ca8f775043904a240b8296e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "plugins/ky-script-management/tsconfig.json",
+        "targetSha256": "26bff72e0371011b417b1a44907eaf0cf424623920539aa98bd5e997bd86276d",
+        "source": "reference-exact"
+      },
+      {
+        "path": "pnpm-lock.yaml",
+        "targetSha256": "d4bcf95d39f91778c13a1f5d0bc2a7afefa38aaecbd0365762912e71351c8c3b",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/matcher/url.go",
+        "targetSha256": "5f399b91afcebbaa165ff82f09d4e3081c7c2d2cb2ca3cabef5f95f13e1710e5",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/matcher/url_test.go",
+        "targetSha256": "846563de4dcb898a0b7625f0f9abb58732a7498d04ecda69fb0c970985bba053",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/douyin_asset_handlers.go",
+        "targetSha256": "6f8c3e6353a7859f6d7daac62e297fa0ff446e85947cf8f661d84a2e5c288eff",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/douyin_script_handlers.go",
+        "targetSha256": "69b94d2bd16b38d581c7a7440b4fd64fef6adee75f35fd40943176e445985d17",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/public_script_handlers.go",
+        "targetSha256": "c6b803a2a6c6dac48e06ddcda1bd2745b16aac793127a2f975ffeb5ee1118cfe",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/public_style_handlers.go",
+        "targetSha256": "4efa15cdf7c3b7b9d87660312b7022159fad03d9e63af79722927f2170e12ab4",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/script_runtime_handlers.go",
+        "targetSha256": "2f52a289dddd82d34e7f359dcd9600ee6b62d3870356871d0552a42b595744e6",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/script_runtime_handlers_test.go",
+        "targetSha256": "93300896af2c8166edb9d0759ca39eae1618c6795409e02069582daca7a0257b",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/server/server.go",
+        "targetSha256": "bd74e5f7adc1468690799093e835bde9e508aa92a73fe456e4cf3a737346a336",
+        "source": "current-project-adaptation"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_asset_store.go",
+        "targetSha256": "083b94b851f4c2d0a90944051b40d203d9f1948bd6ba6e9b01e157ee3e5dd7cf",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_asset_store_test.go",
+        "targetSha256": "8d8270cbe2bcecaeec63ff5fabc414d49a3c66eed21af63be77db530c2b72b3c",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_match_rules.go",
+        "targetSha256": "4238782910bd6bf1af4a84bda2e5a8f832687b243b951dc5f7c7a7ed017ffc50",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_match_rules_test.go",
+        "targetSha256": "3b07b4200f942cdc0fa20959f0a9ede070fc3d2538dce45ee044be4eca37a24e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_script_migration_test.go",
+        "targetSha256": "0406482f5019765d962c4ca685fad99c120136e1f3119f1594c67984e0e55587",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_script_runtime.go",
+        "targetSha256": "76bf27295bb18ff97ce1cae7a7e88757de0281846036c44becf24748831d37d4",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_script_runtime_test.go",
+        "targetSha256": "ba06be5a509cf0f541a929504c5f6d554b236dc49392d2407101e8795ac1c3df",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_script_store.go",
+        "targetSha256": "fecc7d0511341a593e2e5d0012707fbecb657009bee2adc9c077d989c030e75b",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/douyin_script_store_test.go",
+        "targetSha256": "5e506dd0107021bd15997987f7c9aa3f13479f56e56de0f550410cf187e2e293",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/network_sdk_contract.go",
+        "targetSha256": "65900fd5c4fbadc58b3f6894235071c034a2ce82d2868d29c4971c19b75346d2",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/network_sdk_contract_test.go",
+        "targetSha256": "79d397918d7ea9a6176f9f3f901434361c3ec67d75efbe6e8896fe8209bb6447",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/public_script_runtime.go",
+        "targetSha256": "da1a6e89bfdf9b12918c937b1043ba4ec6519a7ab5b60e8d4c9a5bee47127973",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/public_script_store.go",
+        "targetSha256": "825b7d3adb88c4b05cf84d25a73b34bb6c50888365d7870a3034c4b1f6b9dc82",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/public_script_store_test.go",
+        "targetSha256": "27c8c7c1768e6aec88815a3cd08ac0b7e5d8debcb0a9844c3b950d690c52e21a",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/public_style_runtime.go",
+        "targetSha256": "2203a518fb1053417f16fba71c7699b31d54125e195effd5a7e4cfd3f612b930",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/public_style_store.go",
+        "targetSha256": "a74e1210d2b8174b8f0cad2a9d250f16cbeacd92f05786f43f571f3fe106c926",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/public_style_store_test.go",
+        "targetSha256": "2b6de5b0eaf0aff34664db11620beb89b7f880913f65cb0b61afb799162573ff",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_candidates.go",
+        "targetSha256": "879e9f3b0f27b8474237f5373b36d2215dc5b81c2f71ac4f90fef1f4382e8f13",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_compat.go",
+        "targetSha256": "05dfa3e592d211e19746187423b1ff343dd620e860b70603bcaae3e3e5a6e26c",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_compat_test.go",
+        "targetSha256": "c17b131bda7f9b577148143cc8a7bcf9d1778d7f5d61b7d97e89d725f832de77",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_manifest.go",
+        "targetSha256": "eb40197b11c614f6eb487afe0ccc423bdb64c4395fcc9d33b6f20aff0ff413f2",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_manifest_store.go",
+        "targetSha256": "8abfd317c10665921bf52e0f3e1bd194403958e043f070fa53e8d6148f9257b7",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_manifest_test.go",
+        "targetSha256": "28486a0fba9651f7d8b57ac381b36e7304bbf31385970ae18b822e6ff36c258e",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_match_rules.go",
+        "targetSha256": "623be90b48600d47bee2a62ea0ddd22c6a410c4a56c7e48ca8dadb2e187ea57a",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_resolver.go",
+        "targetSha256": "fc2918de87f5779865056e4eacc8b860a662bb69534cf8e4380396ac5fb1855a",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_resolver_test.go",
+        "targetSha256": "972a48627268a7d1aa501752a026e6a15f0ff8bbd6caa107fda8f61e350c5724",
+        "source": "reference-exact"
+      },
+      {
+        "path": "services/ky-matrix-account-service/internal/store/script_runtime_types.go",
+        "targetSha256": "6d4abc45b0f110fa1d89775f0ec2409d3721f1782ef11c190cd095543af895cd",
+        "source": "reference-exact"
+      }
+    ],
+    "adaptations": [
+      "Host dependency/manifest/Vite alias and version map registration only",
+      "Host CodeOutlined icon registration only",
+      "Only reference script editor CSS block; preserve system settings CSS",
+      "Plugin peer/dev versions align existing workspace; monaco-editor and react-markdown reused",
+      "Lockfile regenerated without changing existing resolved entries",
+      "Only script routes added to existing server auth; no workbench authorization migration",
+      "Reuse existing Nginx matrix-account upstream/header block for four new API prefixes"
+    ]
+  },
+  "runtimeReferencePatch": {
+    "path": "02-desktop-script-runtime.reference.patch",
+    "integrationReady": false,
+    "files": [
+      {
+        "path": "apps/aicrm-desktop/electron.vite.config.ts",
+        "targetSha256": "11eec84471269227d1991b2bb5dae551a448a98085c582722cc632aa527b5f7b"
+      },
+      {
+        "path": "apps/aicrm-desktop/package.json",
+        "targetSha256": "1e2dbaa78546f1cac535c3e204f57aaf2f7be48c104ce4a6686e302169feca07"
+      },
+      {
+        "path": "apps/aicrm-desktop/resources/desktop-plugin-dev-policy.json",
+        "targetSha256": "1152e745adbd18be1918b3bd6ddacdd1eb5adc9d1e85d50e112494c6cc894916"
+      },
+      {
+        "path": "apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json",
+        "targetSha256": "24fd0c9b87357e51b9ef8e9ef00b8c4951a12b13ec95bb1b06ccbbfb752f7ac1"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/app-window.ts",
+        "targetSha256": "29f8fed33018c4f6161e365a4b0ec5d96f2b53a3c056db67e9a30a38eca96aaa"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/async-timeout.ts",
+        "targetSha256": "a8e0dc4bade8998735874f33e5430a9ae6429f9213049b4f46678e8d06eba4fb"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs",
+        "targetSha256": "424adf4775a4b07b4becd766b200c939a4147aa6be7afce297dc8ebc3b6f3b61"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts",
+        "targetSha256": "b6312b3db42da61ea969590bf4afe0f1030c4aeafe319a9686cbbb9417ec0d2b"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs",
+        "targetSha256": "9dc4594d0173e7bd7dfe10f65f68e86ce846d6d375417284be0647d5116a55c6"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/guarded-ipc.ts",
+        "targetSha256": "618247a8fbb8ff57b0274d764a25f84c08b8d497702ca33c8acaf9891ee5fbad"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/index.ts",
+        "targetSha256": "a221f629cc901a31e0644cb59709635475463d6cd2e35c10801e1a0c2eaea487"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/ipc/matrix-account-ipc.ts",
+        "targetSha256": "43fb174c87e58cfd86a2325b67ccec783bd6eb77ef83c63a33e8c852c1f637e2"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/login-space-websocket-policy.ts",
+        "targetSha256": "d330544a1d31b1a5165578616d032a1013b3d8d8a92cfc23f8aed501bc7f7b31"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/login-space-window-counts.ts",
+        "targetSha256": "7ffaefd215ce545aae36c2a8fbd3c05688066a14a4cf9db759d3b3fbd45fbf16"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-debug-log.ts",
+        "targetSha256": "93ecc8ed796b05ed81ceaaa7686b42122feadb67109034612e6ab27881056cbd"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-cloud-sync.ts",
+        "targetSha256": "667d168bf97f12aba136c4178eeb5da51b1a7d175e86bc5829f0002205680682"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-local-state.ts",
+        "targetSha256": "270fff0abef30d571f80c8b4f0151793bb487880ef47ab75d9cc614ff8597df4"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-profile-store.ts",
+        "targetSha256": "b6428f608843517cd9c2861db909df8b27509b55198380e4bc5b61d4bd555d72"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-restore-diagnostics.ts",
+        "targetSha256": "fc198a56f4208f3dcb27e6d0d1c37d6c77d8a54f033ace95d28f9b3a90576baf"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-restore-validation.ts",
+        "targetSha256": "46fc50e3c3c892eb6327f5b24446f75107754bc890c9f3079bb2693b2fb540fe"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-portable-cookies.ts",
+        "targetSha256": "0f9488785e2eb518472d4cd3117f29d7b2b7b081cc1b65530f251b45a15a99ba"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/matrix-account-session-vault.ts",
+        "targetSha256": "0dca891646c9521f401dd2dd0d19dffa583949a3b2188aa19eff533426d32d3b"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-injection-plan.test.mjs",
+        "targetSha256": "4d49ac8276df20778bdf2accd70f6ecad2da70fe45d3c1afae28bffff858cc67"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-injection-plan.ts",
+        "targetSha256": "5a24ae02925cebcc8967ac4afc0692b6edc194e49a1bbe19e64921158dc9c7fb"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-injector.electron.test.mjs",
+        "targetSha256": "a47b8a2faaf238e9b9fa4d160f969c19c8e402fd9b471422bdf0b3f21ea7bac8"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-injector.test.mjs",
+        "targetSha256": "c41b4f833d0c9f63cbbb488b470413e72d53f1328e8b7fbceb5569ea100ded4e"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-injector.ts",
+        "targetSha256": "14c62a6d6c05db6e66a51f4b49a8ccf73ea7b040d3128e0fca22f675c26e5b40"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-cache.ts",
+        "targetSha256": "78a14cb55153e6d8d070f8145cf620f34d211be354471729a56ef2023c6c2b0f"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-contract.ts",
+        "targetSha256": "62017896079b01d3378341c115c17ed76e8d355921b4cc2e88a36cf80d182f82"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-lifecycle-contract.test.mjs",
+        "targetSha256": "eab70d2ba28c9e42b9881f8149b0f08f7337122cdb561bcba0a559c19517bbcf"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.test.mjs",
+        "targetSha256": "559de06df0a6abd8277f750a1cf307605fa6af8aa40ab7489c1dcac5d5facf14"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.ts",
+        "targetSha256": "98b8273d96d06b2e7fd7c492205d1464f2065c02e24a6038bf5a4fe1c3f66c02"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-origin-policy.test.mjs",
+        "targetSha256": "ac27e0a893b24c35ae0429ff7e27091279fb8198fd62a7ff992a4a310a98c0a5"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-origin-policy.ts",
+        "targetSha256": "a7da47923618115d19398056530e23725914c6f54213a335112c8475699deca6"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime-sdk-contract.test.mjs",
+        "targetSha256": "eed4b77f7e6da710e9554ddba355599f96d00800585847a837e6e9d39d0aac0a"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime.test.mjs",
+        "targetSha256": "7bde7546b697c6c1899a3be787d4f7284f82107c0f94b1dedfe8bc5f9fba25ed"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/script-runtime.ts",
+        "targetSha256": "fd0f2fd300cf935cca7955e2b51e96b9315aaf8966dce626eaec1205ac8a2c26"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-injection-window.ts",
+        "targetSha256": "162c6777ad11b0ccec6b972fe7a748884688945011d64a50ba2174d8efd74228"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-space-context.ts",
+        "targetSha256": "aa948e8db2cf8c9aa7da59a0e7de04512473eaab1fe29ad4f8900765a14ece18"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-action-contract.test.mjs",
+        "targetSha256": "cba249120fc4fca5d5a133b40cadfb2f3c27ff2cc92b5ac86311873c0066b0f9"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-injection.test.mjs",
+        "targetSha256": "12f83b324ac361a1002b0a1c4b33f2a2b379ed4b9f29bf35a547f7aa6132a5f5"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-injection.ts",
+        "targetSha256": "6f5128fba0dbb667b4fa0ee0102de309befe1ea979b0cb0ec736b788ee89d359"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-manager.test.mjs",
+        "targetSha256": "faa3de3e0aaa8419e7c37954ed00f48e3d7eaea94af2b04dae8d9f75bb440347"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-manager.ts",
+        "targetSha256": "492bc239ef4856a5ba44b1c587d263b1eb02a1904af344e5e6f498a416e5741d"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-navigation-controller.ts",
+        "targetSha256": "09e12e60c7d8490e0e598e2b01001d6491a73e66bec9903b34736b8eb17779ed"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-navigation.electron.test.mjs",
+        "targetSha256": "ccc215fd0b1ddf3f0cbe17ce76d0fc0484a1b7041a7e8fd08af29c2943d34492"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-navigation.test.mjs",
+        "targetSha256": "b27db5652fff4f4b5d8139bc9d71e6f6b0b26f4919e44bd041d744447061991b"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-navigation.ts",
+        "targetSha256": "4b1ae84d06f4a31413e84641ea55c4b2c427bfb82d6bb07ce862dd45fde066da"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-network.electron.test.mjs",
+        "targetSha256": "997bb918c55dfc7441a9178c7930aa51485dd31214891c05327c662857b7d83a"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-network.test.mjs",
+        "targetSha256": "e264ff5edc4a69fd71e4b15005e5d4f6c6e68030f5e86d5560e31106da2c097e"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-network.ts",
+        "targetSha256": "1216990eaf8e6a9bc1ca6066251089be84d584dd5ac6fbc8978b36e31416cb6a"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts",
+        "targetSha256": "39dbb94b328d410a7c965ca5ec58bba60ee87d70ae03c0bb6f6c395c7fb96e85"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-plugin-host.ts",
+        "targetSha256": "2666110c2f2a8039c5a4f56163b853b83f22a430bfa33e601057a41b7798f7e0"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-remote-image.test.mjs",
+        "targetSha256": "25637ed517115ebb5f1961f92cc1c0850e181ea53e9f0db00b4b4868a20bfcf3"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-remote-image.ts",
+        "targetSha256": "bdc3ff9389647c86111752a1e64a8dfe4b937ee0f197edc2c2d8d6ebfbaac271"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-sdk-host-contract.test.mjs",
+        "targetSha256": "08356bb692c4aa4f822f9d112da338bfcf30dfe638b81013db81fc4a84715b78"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-store-sdk.test.mjs",
+        "targetSha256": "3bd82176c99a9b603db06cd07183d4c2ccebab9e1a5f649cfa20dcd8750b9539"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-store-sdk.ts",
+        "targetSha256": "93e7141ae58467ae16c89778d98fbc6fb417b63692c6be601ac1e7fd3900163c"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/web-window-view.ts",
+        "targetSha256": "86707b03fa8554653040f28c5fc2da271c1c9eaf1586cc42ea13356826c3bc66"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/main/window-lifecycle.ts",
+        "targetSha256": "6e1f1094a5f33351ad288f94adac616a53deb005f927d41c0aaa07472c3d420e"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/preload/plugin-host-bridge.ts",
+        "targetSha256": "b6bbf91712ed404f469cc1ed7f141368d45ca19e1547a05d17418635cccc9532"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/preload/web-window-plugin.ts",
+        "targetSha256": "5169fbe86e3d7bd3c07971c99d901724ce187934ca004b473d8ec8634b3076aa"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/preload/web-window-ui.ts",
+        "targetSha256": "f330aeda14782c1923e2f21843a7035b354133c82bad3957ccd59f06281981a4"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/preload/web-window.ts",
+        "targetSha256": "b2f6acb696fb983bc1e6fee41a88c91492847b9fa1f4762a3549007a687e7b02"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/shared/constants.ts",
+        "targetSha256": "c6341119d71f9ee710e646141598aacefe6d3e2aa08191462871d681f8121321"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/shared/login-space-protocol-whitelist.ts",
+        "targetSha256": "4dea6b402e1dacae1664ce29083925ac448b9cfa377661086225d195aca17ca9"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/shared/types.ts",
+        "targetSha256": "ae0ae182a28cd321a0553e9272b26e3a293f100b0954d697dd9376201fcad3bd"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/shared/web-window-action.ts",
+        "targetSha256": "fbecab275d405da1ff1b705efdff1326f4972f8223eb406b94f7161ea27d4dee"
+      },
+      {
+        "path": "apps/aicrm-desktop/src/shared/web-window-contract.ts",
+        "targetSha256": "b8e694fee5c89ed5b5c83ebf90a378f962a5d1f6fa02dc0be83a176caf24960a"
+      },
+      {
+        "path": "desktop-plugins/kww-web-window/v1/manifest.json",
+        "targetSha256": "12cceb32f85df15221363655e10d4fe10479363fce7be32f5878c4a10c555966"
+      },
+      {
+        "path": "desktop-plugins/kww-web-window/v1/plugin.js",
+        "targetSha256": "7d4cf50fe4fb8bd45cc7cc7d95ecc9196ad1d62f85ce18e98558649176b4d665"
+      },
+      {
+        "path": "docs/desktop-host-plugins/web-window-plugin/2026-10-04-Web专用窗口JSSDK接口参考.md",
+        "targetSha256": "56a4b7e55a6ba7f74476a17ddb2660e98226cfb528f43cf06b6ca600ac743942"
+      },
+      {
+        "path": "packages/desktop-plugin-contracts/src/index.ts",
+        "targetSha256": "989cda9c3576ba23ea92b4d09f1a05a076b7e9abb62c2b57ccfe634b2e61377a"
+      },
+      {
+        "path": "packages/desktop-plugin-contracts/src/web-window.test.mjs",
+        "targetSha256": "58f7c60fed92f76362d1fcda38a9eaa4de87539477a8df6c67f203cd7f5544e3"
+      },
+      {
+        "path": "packages/desktop-plugin-contracts/src/web-window.ts",
+        "targetSha256": "5ffc40f6358b75b857079b4c4d4243cad9e4b406eff7d0892ff0a834459281d6"
+      },
+      {
+        "path": "scripts/desktop-plugins/build-preloads.mjs",
+        "targetSha256": "ddac96d37ebe0a4453c710aa115b3c93cd00a7bbd22b381f24001604282e7479"
+      },
+      {
+        "path": "scripts/desktop-plugins/package-format.mjs",
+        "targetSha256": "49f3898ddda1b3a1d576e326e5f23ef2cf9c4c667e5714edb403a2f1a3da68cd"
+      },
+      {
+        "path": "scripts/desktop-plugins/test-electron.mjs",
+        "targetSha256": "fcfaad94e6d679f09dc8f8246cdaaac19d05b152b077409b245f992596d1f92b"
+      }
+    ],
+    "requiresIntegrationReview": [
+      "shop-management/login-space backend APIs and migrations",
+      "Host/Core desktop port and renderer IPC consumer alignment",
+      "Web-window plugin distribution policy/package/signature alignment",
+      "Reference-wide workbench authorization changes are not in main patch"
+    ]
+  },
+  "validation": {
+    "mainPatchAppliedInIsolatedCheckout": true,
+    "pluginTypecheck": true,
+    "pluginBuild": true,
+    "hostTypecheck": true,
+    "hostBuild": true,
+    "goTests": true,
+    "goBuild": true,
+    "databaseRunnerTests": true,
+    "managementTestsPassed": 39,
+    "desktopCrossContractTest": "40/40 plugin tests pass with runtime-reference source fixture",
+    "databaseExecuted": false,
+    "realElectronUIVerified": false,
+    "currentWorkspaceBusinessCodeApplied": false,
+    "runtimePureTests": "42 pass; 1 source test fails because reference deleted preload/public-script-api.ts",
+    "desktopTypecheck": "Not accepted; runtime reference dependencies and consumer integration remain outside main patch",
+    "freshApplyAndReverseClean": true,
+    "mainFileHashChecks": "81/81 PASS",
+    "runtimeReferenceFileHashChecks": "78/78 PASS"
+  }
+}
