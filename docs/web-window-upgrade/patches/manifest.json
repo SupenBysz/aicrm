@@ -1,0 +1,601 @@
+{
+  "baseCommit": "a61b3e0b10bd374eddcf3d8da94927deaba4ec75",
+  "referenceRepository": "https://gitea.jditco.ltd/kww/kwwcrm.git",
+  "referenceCommit": "5ddcf15b08d07a2cafd66c5ef3d584a34dae3332",
+  "patches": [
+    {
+      "path": "01-web-window-foundation.patch",
+      "referenceOnly": false,
+      "files": [
+        {
+          "path": "apps/aicrm-desktop/src/main/login-space-info-sdk.test.mjs",
+          "targetSha256": "449904c656c0d7b0707bee9e51d5ea988e2d6e8747c31034228624c96c40d0a3",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/login-space-info-sdk.ts",
+          "targetSha256": "db265d8d0db277f8c370541ee9b817aef25b129d73b31b40c4e8d47adb9952fe",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-injection-plan.test.mjs",
+          "targetSha256": "4d49ac8276df20778bdf2accd70f6ecad2da70fe45d3c1afae28bffff858cc67",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-injection-plan.ts",
+          "targetSha256": "5a24ae02925cebcc8967ac4afc0692b6edc194e49a1bbe19e64921158dc9c7fb",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-injector.electron.test.mjs",
+          "targetSha256": "a47b8a2faaf238e9b9fa4d160f969c19c8e402fd9b471422bdf0b3f21ea7bac8",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-injector.test.mjs",
+          "targetSha256": "c41b4f833d0c9f63cbbb488b470413e72d53f1328e8b7fbceb5569ea100ded4e",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-injector.ts",
+          "targetSha256": "14c62a6d6c05db6e66a51f4b49a8ccf73ea7b040d3128e0fca22f675c26e5b40",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-cache.ts",
+          "targetSha256": "78a14cb55153e6d8d070f8145cf620f34d211be354471729a56ef2023c6c2b0f",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-contract.ts",
+          "targetSha256": "62017896079b01d3378341c115c17ed76e8d355921b4cc2e88a36cf80d182f82",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-lifecycle-contract.test.mjs",
+          "targetSha256": "eab70d2ba28c9e42b9881f8149b0f08f7337122cdb561bcba0a559c19517bbcf",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.test.mjs",
+          "targetSha256": "559de06df0a6abd8277f750a1cf307605fa6af8aa40ab7489c1dcac5d5facf14",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.ts",
+          "targetSha256": "98b8273d96d06b2e7fd7c492205d1464f2065c02e24a6038bf5a4fe1c3f66c02",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-origin-policy.test.mjs",
+          "targetSha256": "ac27e0a893b24c35ae0429ff7e27091279fb8198fd62a7ff992a4a310a98c0a5",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-origin-policy.ts",
+          "targetSha256": "a7da47923618115d19398056530e23725914c6f54213a335112c8475699deca6",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime-sdk-contract.test.mjs",
+          "targetSha256": "79499d885478285070d29a52a211d0646a57decefa0ac784b6b0eea9cf9fe985",
+          "source": "current-project-adaptation"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime.test.mjs",
+          "targetSha256": "7bde7546b697c6c1899a3be787d4f7284f82107c0f94b1dedfe8bc5f9fba25ed",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/script-runtime.ts",
+          "targetSha256": "fd0f2fd300cf935cca7955e2b51e96b9315aaf8966dce626eaec1205ac8a2c26",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-injection-window.ts",
+          "targetSha256": "162c6777ad11b0ccec6b972fe7a748884688945011d64a50ba2174d8efd74228",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-action-contract.test.mjs",
+          "targetSha256": "0cadcd026b404b94e12b6602c9b635078ff0a344e97e4e5538ea04b608a704f6",
+          "source": "current-project-adaptation"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-injection.test.mjs",
+          "targetSha256": "12f83b324ac361a1002b0a1c4b33f2a2b379ed4b9f29bf35a547f7aa6132a5f5",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-injection.ts",
+          "targetSha256": "6f5128fba0dbb667b4fa0ee0102de309befe1ea979b0cb0ec736b788ee89d359",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-manager.test.mjs",
+          "targetSha256": "faa3de3e0aaa8419e7c37954ed00f48e3d7eaea94af2b04dae8d9f75bb440347",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-manager.ts",
+          "targetSha256": "492bc239ef4856a5ba44b1c587d263b1eb02a1904af344e5e6f498a416e5741d",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation-controller.ts",
+          "targetSha256": "09e12e60c7d8490e0e598e2b01001d6491a73e66bec9903b34736b8eb17779ed",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation.electron.test.mjs",
+          "targetSha256": "ccc215fd0b1ddf3f0cbe17ce76d0fc0484a1b7041a7e8fd08af29c2943d34492",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation.test.mjs",
+          "targetSha256": "b27db5652fff4f4b5d8139bc9d71e6f6b0b26f4919e44bd041d744447061991b",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation.ts",
+          "targetSha256": "4b1ae84d06f4a31413e84641ea55c4b2c427bfb82d6bb07ce862dd45fde066da",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-network.electron.test.mjs",
+          "targetSha256": "997bb918c55dfc7441a9178c7930aa51485dd31214891c05327c662857b7d83a",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-network.test.mjs",
+          "targetSha256": "e264ff5edc4a69fd71e4b15005e5d4f6c6e68030f5e86d5560e31106da2c097e",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-network.ts",
+          "targetSha256": "1216990eaf8e6a9bc1ca6066251089be84d584dd5ac6fbc8978b36e31416cb6a",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-remote-image.test.mjs",
+          "targetSha256": "25637ed517115ebb5f1961f92cc1c0850e181ea53e9f0db00b4b4868a20bfcf3",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-remote-image.ts",
+          "targetSha256": "bdc3ff9389647c86111752a1e64a8dfe4b937ee0f197edc2c2d8d6ebfbaac271",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-sdk-host-contract.test.mjs",
+          "targetSha256": "08356bb692c4aa4f822f9d112da338bfcf30dfe638b81013db81fc4a84715b78",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-store-sdk.test.mjs",
+          "targetSha256": "3bd82176c99a9b603db06cd07183d4c2ccebab9e1a5f649cfa20dcd8750b9539",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-store-sdk.ts",
+          "targetSha256": "93e7141ae58467ae16c89778d98fbc6fb417b63692c6be601ac1e7fd3900163c",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-view.ts",
+          "targetSha256": "86707b03fa8554653040f28c5fc2da271c1c9eaf1586cc42ea13356826c3bc66",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/web-window-ui.ts",
+          "targetSha256": "f330aeda14782c1923e2f21843a7035b354133c82bad3957ccd59f06281981a4",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/web-window.ts",
+          "targetSha256": "b2f6acb696fb983bc1e6fee41a88c91492847b9fa1f4762a3549007a687e7b02",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/shared/web-window-action.ts",
+          "targetSha256": "fbecab275d405da1ff1b705efdff1326f4972f8223eb406b94f7161ea27d4dee",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/shared/web-window-contract.ts",
+          "targetSha256": "b8e694fee5c89ed5b5c83ebf90a378f962a5d1f6fa02dc0be83a176caf24960a",
+          "source": "reference-exact"
+        },
+        {
+          "path": "packages/desktop-plugin-contracts/src/web-window.test.mjs",
+          "targetSha256": "58f7c60fed92f76362d1fcda38a9eaa4de87539477a8df6c67f203cd7f5544e3",
+          "source": "reference-exact"
+        },
+        {
+          "path": "packages/desktop-plugin-contracts/src/web-window.ts",
+          "targetSha256": "5ffc40f6358b75b857079b4c4d4243cad9e4b406eff7d0892ff0a834459281d6",
+          "source": "reference-exact"
+        },
+        {
+          "path": "docs/desktop-host-plugins/web-window-plugin/2026-10-04-Web专用窗口JSSDK接口参考.md",
+          "targetSha256": "56a4b7e55a6ba7f74476a17ddb2660e98226cfb528f43cf06b6ca600ac743942",
+          "source": "reference-exact"
+        }
+      ]
+    },
+    {
+      "path": "02-web-window-plugin.patch",
+      "referenceOnly": false,
+      "files": [
+        {
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs",
+          "targetSha256": "424adf4775a4b07b4becd766b200c939a4147aa6be7afce297dc8ebc3b6f3b61",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts",
+          "targetSha256": "b6312b3db42da61ea969590bf4afe0f1030c4aeafe319a9686cbbb9417ec0d2b",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs",
+          "targetSha256": "9dc4594d0173e7bd7dfe10f65f68e86ce846d6d375417284be0647d5116a55c6",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts",
+          "targetSha256": "4190cbbbb6aac84fa865a68631eaaed755572944736faf37d57c78738a0c21a9",
+          "source": "current-project-adaptation"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-window-plugin-host.ts",
+          "targetSha256": "1fd2742e63c1ab4eaadd8beb48da226f6c53edc3065bab5555d74ee7dcbe72ea",
+          "source": "current-project-adaptation"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/plugin-host-bridge.ts",
+          "targetSha256": "b6bbf91712ed404f469cc1ed7f141368d45ca19e1547a05d17418635cccc9532",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/web-window-plugin.ts",
+          "targetSha256": "5169fbe86e3d7bd3c07971c99d901724ce187934ca004b473d8ec8634b3076aa",
+          "source": "reference-exact"
+        },
+        {
+          "path": "desktop-plugins/kww-web-window/v1/manifest.json",
+          "targetSha256": "12cceb32f85df15221363655e10d4fe10479363fce7be32f5878c4a10c555966",
+          "source": "reference-exact"
+        },
+        {
+          "path": "desktop-plugins/kww-web-window/v1/plugin.js",
+          "targetSha256": "7d4cf50fe4fb8bd45cc7cc7d95ecc9196ad1d62f85ce18e98558649176b4d665",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/build-preloads.mjs",
+          "targetSha256": "ddac96d37ebe0a4453c710aa115b3c93cd00a7bbd22b381f24001604282e7479",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/deploy-web-window-public.mjs",
+          "targetSha256": "26c754e5cddd11c773fa6c5f696df52f1a5627a8065f143691f3aea79a390020",
+          "source": "current-project-adaptation"
+        },
+        {
+          "path": "scripts/desktop-plugins/package-format.mjs",
+          "targetSha256": "49f3898ddda1b3a1d576e326e5f23ef2cf9c4c667e5714edb403a2f1a3da68cd",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/sign-web-window.mjs",
+          "targetSha256": "cd9873b24101b565d9f21a99f66e8825c8a802b16a9ee1b1a051479b0df53440",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/test-electron.mjs",
+          "targetSha256": "fcfaad94e6d679f09dc8f8246cdaaac19d05b152b077409b245f992596d1f92b",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/web-window-distribution.test.mjs",
+          "targetSha256": "1a1de533e80eec4e266f524130149f06b24f228a1e3d99078cd275e17b0eadba",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/web-window-logo-layout.test.mjs",
+          "targetSha256": "0e5a6b64b1d4e9589abc6e06411ae52b0feeb19f47c97a66b7d487a4482b94d3",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/web-window-plugin-host-runtime.mjs",
+          "targetSha256": "8adb13308ce888514caabb729d6d9eddc9393063f6c8cb7addcd4d1fe03a9dec",
+          "source": "reference-exact"
+        },
+        {
+          "path": "scripts/desktop-plugins/web-window-version-panel.test.mjs",
+          "targetSha256": "606e8685431cb023007c2f806ce2f3240c93487409c4ed99b91ab259ca8a5fb4",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json",
+          "targetSha256": "24fd0c9b87357e51b9ef8e9ef00b8c4951a12b13ec95bb1b06ccbbfb752f7ac1",
+          "source": "reference-exact"
+        }
+      ]
+    },
+    {
+      "path": "03-desktop-host-integration.patch",
+      "referenceOnly": false,
+      "files": [
+        {
+          "path": "apps/aicrm-desktop/electron.vite.config.ts",
+          "targetSha256": "11eec84471269227d1991b2bb5dae551a448a98085c582722cc632aa527b5f7b",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/package.json",
+          "targetSha256": "1bd6fe9e81ce810a93bc4f355802116f5d0a48fcadae69976c9ff3f678970084",
+          "source": "current-project-adaptation"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/app-window.ts",
+          "targetSha256": "29f8fed33018c4f6161e365a4b0ec5d96f2b53a3c056db67e9a30a38eca96aaa",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/async-timeout.ts",
+          "targetSha256": "a8e0dc4bade8998735874f33e5430a9ae6429f9213049b4f46678e8d06eba4fb",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/guarded-ipc.ts",
+          "targetSha256": "618247a8fbb8ff57b0274d764a25f84c08b8d497702ca33c8acaf9891ee5fbad",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/index.ts",
+          "targetSha256": "a221f629cc901a31e0644cb59709635475463d6cd2e35c10801e1a0c2eaea487",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/ipc/matrix-account-ipc.ts",
+          "targetSha256": "43fb174c87e58cfd86a2325b67ccec783bd6eb77ef83c63a33e8c852c1f637e2",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/login-space-websocket-policy.ts",
+          "targetSha256": "d330544a1d31b1a5165578616d032a1013b3d8d8a92cfc23f8aed501bc7f7b31",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/login-space-window-counts.ts",
+          "targetSha256": "7ffaefd215ce545aae36c2a8fbd3c05688066a14a4cf9db759d3b3fbd45fbf16",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-debug-log.ts",
+          "targetSha256": "93ecc8ed796b05ed81ceaaa7686b42122feadb67109034612e6ab27881056cbd",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-cloud-sync.ts",
+          "targetSha256": "667d168bf97f12aba136c4178eeb5da51b1a7d175e86bc5829f0002205680682",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-local-state.ts",
+          "targetSha256": "270fff0abef30d571f80c8b4f0151793bb487880ef47ab75d9cc614ff8597df4",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-profile-store.ts",
+          "targetSha256": "b6428f608843517cd9c2861db909df8b27509b55198380e4bc5b61d4bd555d72",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-restore-diagnostics.ts",
+          "targetSha256": "fc198a56f4208f3dcb27e6d0d1c37d6c77d8a54f033ace95d28f9b3a90576baf",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-restore-validation.ts",
+          "targetSha256": "46fc50e3c3c892eb6327f5b24446f75107754bc890c9f3079bb2693b2fb540fe",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-portable-cookies.ts",
+          "targetSha256": "0f9488785e2eb518472d4cd3117f29d7b2b7b081cc1b65530f251b45a15a99ba",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/matrix-account-session-vault.ts",
+          "targetSha256": "0dca891646c9521f401dd2dd0d19dffa583949a3b2188aa19eff533426d32d3b",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/web-space-context.ts",
+          "targetSha256": "aa948e8db2cf8c9aa7da59a0e7de04512473eaab1fe29ad4f8900765a14ece18",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/main/window-lifecycle.ts",
+          "targetSha256": "6e1f1094a5f33351ad288f94adac616a53deb005f927d41c0aaa07472c3d420e",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/bridge.ts",
+          "targetSha256": "156e952687b5aa8877a087ddfdd233e3eb458a596b6189deb775a78ceda299d4",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/index.ts",
+          "targetSha256": "c1b1cd8a3234b71fb846bf01166c474c223035bfd3bb16ec0c06ef926fc1b9b2",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/matrix-account-local-data-compat.ts",
+          "targetSha256": "d1aecbdc169419ae01234265d060c4ea3ab41a37995f82507788ae6381ff700c",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/preload/types.ts",
+          "targetSha256": "7a6639c3fd7c429d8de4691be387510953f145868aa0423f0ce4f2f0c2918e1f",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/shared/constants.ts",
+          "targetSha256": "c6341119d71f9ee710e646141598aacefe6d3e2aa08191462871d681f8121321",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/shared/login-space-protocol-whitelist.ts",
+          "targetSha256": "4dea6b402e1dacae1664ce29083925ac448b9cfa377661086225d195aca17ca9",
+          "source": "reference-exact"
+        },
+        {
+          "path": "apps/aicrm-desktop/src/shared/types.ts",
+          "targetSha256": "ae0ae182a28cd321a0553e9272b26e3a293f100b0954d697dd9376201fcad3bd",
+          "source": "reference-exact"
+        },
+        {
+          "path": "packages/desktop-plugin-contracts/src/index.ts",
+          "targetSha256": "989cda9c3576ba23ea92b4d09f1a05a076b7e9abb62c2b57ccfe634b2e61377a",
+          "source": "reference-exact"
+        },
+        {
+          "path": "packages/ky-admin-core/src/matrix-account-desktop.ts",
+          "targetSha256": "49cae8bb954783d7dfca320f6ddfef731a915aec9465f87176bb16bfafae6bd5",
+          "source": "reference-exact"
+        },
+        {
+          "path": "pnpm-lock.yaml",
+          "targetSha256": "82f976c728768904473421cee77a4c521c88af5b0cf546c78664e4d720730e8c",
+          "source": "current-project-adaptation"
+        }
+      ]
+    },
+    {
+      "path": "04-shop-window-consumers.reference.patch",
+      "referenceOnly": true,
+      "files": [
+        {
+          "path": "plugins/ky-shop-management/src/api.ts",
+          "targetSha256": "6c9016672734a592c4ed2aea95e4720a121b09f51bdd3483d11c17a69fe00f20",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/components/login-space-binding-selector.tsx",
+          "targetSha256": "61ea8c8abb8ef3087796ad9e1b18529a6a7f6ef058d586ca8bf10d79cc2d9658",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-drawer-width.ts",
+          "targetSha256": "46daf8819e8816450b1f2d37db67a674464ef73d8cce051c12f7e77558618c63",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-local-data.ts",
+          "targetSha256": "2b871564884b9248c6938568032a0addd56795a0d93346333c22791d71c0cf07",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-protocol-whitelist-editor.tsx",
+          "targetSha256": "d57d0b4c6751e5a8ef7a327d37eeaef96b9d632de234b2907c24387cd38ced81",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-protocol-whitelist.ts",
+          "targetSha256": "a694cc30bd969bac741c97302dcfc0d56add49805ad78ea987bc5ef5e685a104",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-refresh.ts",
+          "targetSha256": "5be1708607d8cad47c8acb4938872c247033b5fa6b862e1afab4380b0ab0331d",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-resources.ts",
+          "targetSha256": "93c0a7eeaabf783f425b8ee4b8c2ebffa85ce9ebcb7f4477c192cbae8800e715",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/login-space-settings-load.ts",
+          "targetSha256": "736f48c20ae44018512fbb48d6151d7c5aac50025ba7fdb0ef07e415b54d9f46",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/pages/shop-management-page.tsx",
+          "targetSha256": "119ddc145dd52dde18e732d087d5d0a70d6b37a4d525df099ae805223de5d307",
+          "source": "reference-exact"
+        },
+        {
+          "path": "plugins/ky-shop-management/src/shop-management-error.ts",
+          "targetSha256": "015889645cd39ef736c3b25cb50ab08d90bb830b6d3e4ee4c680e26f3402c1ea",
+          "source": "reference-exact"
+        }
+      ]
+    }
+  ],
+  "applicationOrder": [
+    "01-web-window-foundation.patch",
+    "02-web-window-plugin.patch",
+    "03-desktop-host-integration.patch"
+  ],
+  "adaptations": [
+    "Remote plugin source uses KY_WEB_WINDOW_PLUGIN_SOURCE; unset disables remote checks in host",
+    "Deployment destination requires KY_WEB_WINDOW_PLUGIN_DEPLOY_ROOT; no reference production destination",
+    "Desktop React/Antd dependency versions align current Host; lockfile adds desktop dependency links",
+    "Runtime SDK test reads inline public API instead of deleted preload file",
+    "UI contract test checks workspace dependency version alignment instead of reference exact versions"
+  ],
+  "validation": {
+    "desktopTypecheck": true,
+    "desktopBuild": true,
+    "independentPreloads": 5,
+    "coreBuild": true,
+    "matrixAccountPluginTypecheck": true,
+    "hostTypecheckWithoutShopReference": true,
+    "nodeContractAndUnitTests": {
+      "total": 101,
+      "passed": 101,
+      "failed": 0,
+      "shopConsumerContractFixture": true
+    },
+    "realElectronWindowVerified": false,
+    "remotePluginPublished": false,
+    "currentWorkspaceBusinessCodeApplied": false,
+    "nodeTestFiles": [
+      "apps/aicrm-desktop/src/main/login-space-info-sdk.test.mjs",
+      "apps/aicrm-desktop/src/main/script-injection-plan.test.mjs",
+      "apps/aicrm-desktop/src/main/script-injector.test.mjs",
+      "apps/aicrm-desktop/src/main/script-runtime-lifecycle-contract.test.mjs",
+      "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.test.mjs",
+      "apps/aicrm-desktop/src/main/script-runtime-origin-policy.test.mjs",
+      "apps/aicrm-desktop/src/main/script-runtime-sdk-contract.test.mjs",
+      "apps/aicrm-desktop/src/main/script-runtime.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-action-contract.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-injection.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-manager.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-navigation.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-network.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-remote-image.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-sdk-host-contract.test.mjs",
+      "apps/aicrm-desktop/src/main/web-window-store-sdk.test.mjs",
+      "packages/desktop-plugin-contracts/src/web-window.test.mjs",
+      "scripts/desktop-plugins/web-window-distribution.test.mjs",
+      "scripts/desktop-plugins/web-window-logo-layout.test.mjs",
+      "scripts/desktop-plugins/web-window-version-panel.test.mjs"
+    ],
+    "testCommandPrefix": "node --import ./scripts/desktop-plugins/test-loader.mjs --test",
+    "scriptSyntaxChecks": true,
+    "freshApplyReverseClean": true,
+    "fileHashChecks": "102/102 PASS"
+  },
+  "excludedDependencies": [
+    "Shop login-space backend/migrations and full shop plugin",
+    "Reference-wide workbench menu authorization migrations",
+    "Production domains, deployment destinations and signing private keys"
+  ]
+}

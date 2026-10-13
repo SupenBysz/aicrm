@@ -1,0 +1,5 @@
+900b138357e9180ba6acdb4bccfc5b77624c092076d81c85c503386010bd3ead  01-web-window-foundation.patch
+f0aaf3f3a9c8edaff0cc1bf862034bbafea6b8bbc7104fad572dfc5382cab1e2  02-web-window-plugin.patch
+0df1e837d4db72df22175ba557d9d74fa29c946929c0d0d2d0ae3cf6bca2bd33  03-desktop-host-integration.patch
+d8291cdff8856c798f19332cf4c73a24185b93043341c2c87e6da0d1991e96d0  04-shop-window-consumers.reference.patch
+c9aff4daf6cd8296b41e2a889730cd7c1289dd4766e4eadc2544fa9f1d57fdce  manifest.json

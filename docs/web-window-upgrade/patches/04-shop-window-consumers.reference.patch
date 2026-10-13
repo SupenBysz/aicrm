@@ -1,0 +1,1643 @@
+diff --git a/plugins/ky-shop-management/src/api.ts b/plugins/ky-shop-management/src/api.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..bdb539327f73467a40891a4e7443a67d3201a60e
+--- /dev/null
++++ b/plugins/ky-shop-management/src/api.ts
+@@ -0,0 +1,263 @@
++import type { RequestClient } from "@ky/admin-core";
++export const shopPlatforms = [
++  { value: "douyin_shop", label: "抖店" },
++  { value: "kuaishou_shop", label: "快手" },
++  { value: "xiaohongshu_shop", label: "小红书" }
++] as const;
++export type ShopPlatform = typeof shopPlatforms[number]["value"];
++export interface ShopManagementRecord {
++  id: string; workspaceType: string; workspaceId: string; ownerMembershipId: string;
++  platform: ShopPlatform; name: string | null; account: string; city: string;
++  remark: string | null; shopId: string | null; logoUrl: string | null; logoImageId?: string | null;
++  platformAttributes: { shop_type?: "official" | "flagship" | "ordinary"; verified?: boolean };
++  hasPassword: boolean; status: "active" | "deleted"; revision: number;
++  createdAt: string; updatedAt: string; deletedAt: string | null; lastLoginAt: string | null;
++}
++export interface ShopManagementListParams { page: number; pageSize: number; platform?: ShopPlatform; keyword?: string }
++export interface ListResult<T> { items: T[]; pagination: { page: number; pageSize: number; total: number } }
++// 普通读取永不返回密码或信封。
++export function listShopManagementRecords(client: RequestClient, params: ShopManagementListParams, signal?: AbortSignal): Promise<ListResult<ShopManagementRecord>> {
++  const q = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
++  if (params.platform) q.set("platform", params.platform);
++  if (params.keyword) q.set("keyword", params.keyword);
++  return client.request(`/api/v1/shop-management/stores?${q}`, { signal });
++}
++export function getShopManagementRecord(client: RequestClient, id: string): Promise<ShopManagementRecord> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(id)}`);
++}
++
++export type ShopLoginStatus = "unknown" | "logging_in" | "logged_in" | "logged_out" | "expired" | "error";
++export type ShopLoginSpaceSyncStatus = "not_synced" | "preparing" | "uploading" | "verifying" | "synced" | "failed" | "interrupted";
++export interface ShopLoginSpaceSyncProgress {
++  phase?: "preparing" | "uploading" | "verifying" | "downloading" | "restoring";
++  bytesTransferred?: number;
++  totalBytes?: number;
++  /** Server list DTO aliases used by persisted progress projections. */
++  bytes?: number;
++  total?: number;
++  percent?: number;
++  updatedAt?: string;
++  operationId?: string;
++}
++export interface ShopLoginSpace {
++  id: string; /** Stable server-generated cross-module key; distinct from legacy id/webSpaceId. */ uuid: string; storeId: string; platform?: string; displayName: string | null; loginStatus?: ShopLoginStatus; loginStatusUpdatedAt?: string | null;
++  syncStatus?: ShopLoginSpaceSyncStatus; syncProgress?: ShopLoginSpaceSyncProgress | null;
++  status: "active" | "pending" | "available" | "invalid" | "deleting" | "error";
++  archiveSha256: string | null; archiveSize?: number | null; createdAt: string; updatedAt: string; lastOpenedAt: string | null; revision: number;
++}
++export function createShopLoginSpace(client: RequestClient, storeId: string, input: { webSpaceId: string; displayName?: string }): Promise<ShopLoginSpace> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-spaces`, { method: "POST", headers: { "Idempotency-Key": input.webSpaceId }, body: input });
++}
++export type ShopLoginSpaceRunAt = "document_start" | "dom_content_loaded" | "document_idle" | "spa_route_change";
++export type ShopLoginSpaceVersionPolicy = "latest_released" | "pinned";
++export interface ShopLoginSpaceBinding {
++  identifier: string;
++  versionId: string;
++  version: string;
++  /** Existing server responses without this field are treated as pinned. */
++  versionPolicy?: ShopLoginSpaceVersionPolicy;
++  /** Present for latest_released bindings; false means no eligible release exists. */
++  available?: boolean;
++  error?: string;
++  urlMatchers: string[];
++  runAt: ShopLoginSpaceRunAt;
++  sortOrder: number;
++}
++export type ShopLoginSpaceBindingUpdate = Omit<ShopLoginSpaceBinding, "available" | "error">;
++export interface ShopLoginSpaceConfig {
++  storeId: string;
++  defaultUrl: string;
++  scheduleMode: "page_first" | "strict_document_start";
++  /** Null/omitted only while importing legacy client-local preferences. */
++  inheritDefaultResources?: boolean | null;
++  showWebViewDevTools?: boolean | null;
++  showWebWindowDevTools?: boolean | null;
++  scripts: ShopLoginSpaceBinding[];
++  styles: ShopLoginSpaceBinding[];
++  /** 可供新空间选择的 UA/Accept-Language 快照模板。 */
++  userAgentProfiles?: ShopLoginSpaceUserAgentProfile[];
++  defaultUserAgentProfileId?: string | null;
++  /** 新 UUID 空间创建时复制的协议白名单模板。 */
++  protocolWhitelist?: ShopLoginSpaceProtocolWhitelist;
++  /** 新空间创建时使用的代理模板；GET 永不返回代理凭据。 */
++  proxy: ShopLoginSpaceProxyConfig;
++  candidateSpaceUuids: string[];
++  allocationMode: LoginSpaceAllocationMode;
++  revision: number;
++  updatedAt: string;
++}
++export interface ShopLoginSpaceUserAgentProfile {
++  id: string;
++  name: string;
++  userAgent: string;
++  acceptLanguage: string;
++}
++export type ShopLoginSpaceConfigUpdate = Pick<ShopLoginSpaceConfig, "defaultUrl" | "scheduleMode"> & {
++  inheritDefaultResources: boolean;
++  showWebViewDevTools: boolean;
++  showWebWindowDevTools: boolean;
++  scripts: ShopLoginSpaceBindingUpdate[];
++  styles: ShopLoginSpaceBindingUpdate[];
++  userAgentProfiles: ShopLoginSpaceUserAgentProfile[];
++  defaultUserAgentProfileId: string | null;
++  protocolWhitelist: ShopLoginSpaceProtocolWhitelist;
++  proxy: ShopLoginSpaceProxyInput;
++  candidateSpaceUuids: string[];
++  allocationMode: LoginSpaceAllocationMode;
++};
++export interface ShopLoginSpaceProtocolWhitelist {
++  navigation: string[];
++  webSocket: string[];
++  external: string[];
++}
++export type ShopLoginSpaceProxyMode = "direct" | "system" | "fixed";
++export type ShopLoginSpaceProxyProtocol = "http" | "https" | "socks5";
++export interface ShopLoginSpaceProxyConfig {
++  mode: ShopLoginSpaceProxyMode;
++  protocol?: ShopLoginSpaceProxyProtocol;
++  host?: string;
++  port?: number;
++  bypassRules: string[];
++  usernameConfigured: boolean;
++  passwordConfigured?: boolean;
++}
++export type LoginSpaceAllocationMode = "random" | "sequential" | "balanced";
++export interface ShopLoginSpaceProxyInput {
++  mode: ShopLoginSpaceProxyMode;
++  protocol?: ShopLoginSpaceProxyProtocol;
++  host?: string;
++  port?: number;
++  bypassRules?: string[];
++  username?: string;
++  password?: string;
++  clearUsername?: boolean;
++  clearPassword?: boolean;
++}
++export interface ShopLoginSpacePrivateConfig {
++  storeId: string;
++  spaceId: string;
++  uuid: string;
++  defaultUrl: string;
++  scheduleMode: ShopLoginSpaceRunAt | "page_first" | "strict_document_start";
++  inheritDefaultResources: boolean;
++  showWebViewDevTools: boolean;
++  showWebWindowDevTools: boolean;
++  scripts: ShopLoginSpaceBinding[];
++  styles: ShopLoginSpaceBinding[];
++  userAgentProfileId: string | null;
++  userAgentProfileName: string | null;
++  userAgent: string;
++  acceptLanguage: string;
++  userAgentLocked: boolean;
++  proxy: ShopLoginSpaceProxyConfig;
++  protocolWhitelist?: ShopLoginSpaceProtocolWhitelist;
++  revision: number;
++  updatedAt: string;
++}
++export type ShopLoginSpacePrivateConfigUpdate = Omit<Pick<ShopLoginSpacePrivateConfig,
++  "defaultUrl" | "scheduleMode" | "inheritDefaultResources" | "showWebViewDevTools" |
++  "showWebWindowDevTools" | "scripts" | "styles" | "proxy">, "proxy"> & {
++  protocolWhitelist: ShopLoginSpaceProtocolWhitelist;
++  proxy: ShopLoginSpaceProxyInput;
++};
++export interface ShopLoginSpaceBindingOption {
++  /** Stable resource identifier; version policy is configured per selected resource. */
++  key: string;
++  label: string;
++  /** Latest eligible published version; server remains authoritative at save/open time. */
++  binding: ShopLoginSpaceBinding;
++  /** Eligible exact versions available for a pinned binding. */
++  versions: ShopLoginSpaceBinding[];
++}
++interface ScriptBindingSource {
++  id: string;
++  identifier: string;
++  name: string;
++  matchUrl: string;
++  matchRules?: Array<{ pattern: string; enabled: boolean; sortOrder?: number }>;
++  runAt: ShopLoginSpaceRunAt;
++  effectiveVersionId: string;
++  effectiveVersion: string;
++  latestVersionId: string;
++  latestVersion: string;
++  status: string;
++  priority: number;
++}
++interface AssetBindingSource {
++  id: string;
++  version: string;
++  runAt: ShopLoginSpaceRunAt;
++  enabled: boolean;
++  status: string;
++}
++function compareSemVer(left: string, right: string): number {
++  const a = left.split(".");
++  const b = right.split(".");
++  for (let index = 0; index < 3; index++) {
++    const leftPart = a[index] ?? "0";
++    const rightPart = b[index] ?? "0";
++    if (leftPart.length !== rightPart.length) return leftPart.length - rightPart.length;
++    if (leftPart !== rightPart) return leftPart < rightPart ? -1 : 1;
++  }
++  return 0;
++}
++const bindingMatchers = (script: ScriptBindingSource) => {
++  const rules = (script.matchRules ?? []).filter(rule => rule.enabled).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)).map(rule => rule.pattern.trim()).filter(Boolean);
++  return rules.length ? rules : script.matchUrl ? [script.matchUrl] : [];
++};
++export async function listShopLoginSpaceBindingOptions(client: RequestClient, assetType: "script" | "style", signal?: AbortSignal): Promise<ShopLoginSpaceBindingOption[]> {
++  const response = await client.request<{ items: ScriptBindingSource[] }>("/api/v1/matrix-account-douyin-scripts?page=1&pageSize=200&status=enabled", { signal });
++  const options = await Promise.all(response.items.map(async script => {
++    const assets = await client.request<AssetBindingSource[]>(`/api/v1/matrix-account-douyin-scripts/${encodeURIComponent(script.id)}/assets?assetType=${assetType}`, { signal });
++    const eligibleAssets = assets
++      .filter(item => item.enabled && (item.status === "active" || item.status === "released") && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(item.version))
++      .sort((a, b) => compareSemVer(b.version, a.version) || a.id.localeCompare(b.id));
++    const latest = eligibleAssets[0];
++    if (!latest) return null;
++    const makeBinding = (asset: AssetBindingSource, versionPolicy: ShopLoginSpaceVersionPolicy): ShopLoginSpaceBinding => ({
++      identifier: script.identifier,
++      versionId: asset.id,
++      version: asset.version,
++      versionPolicy,
++      urlMatchers: bindingMatchers(script),
++      runAt: asset.runAt ?? script.runAt,
++      sortOrder: script.priority ?? 0
++    });
++    return {
++      key: script.identifier,
++      label: `${script.identifier} · ${script.name} · 最新 v${latest.version}`,
++      binding: makeBinding(latest, "latest_released"),
++      versions: eligibleAssets.map(asset => makeBinding(asset, "pinned"))
++    };
++  }));
++  return options.filter((option): option is ShopLoginSpaceBindingOption => Boolean(option));
++}
++export function listShopLoginSpaces(client: RequestClient, storeId: string, signal?: AbortSignal): Promise<ListResult<ShopLoginSpace>> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-spaces`, { signal });
++}
++export function updateShopLoginSpaceInfo(client: RequestClient, storeId: string, spaceId: string, patch: { displayName?: string; loginStatus?: ShopLoginStatus }): Promise<{ displayName: string; loginStatus: ShopLoginStatus; updatedAt: string; revision: number }> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-spaces/${encodeURIComponent(spaceId)}/info`, { method: "PATCH", body: patch });
++}
++export function getShopLoginSpaceConfig(client: RequestClient, storeId: string): Promise<ShopLoginSpaceConfig> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-space-config`);
++}
++export function updateShopLoginSpaceConfig(client: RequestClient, storeId: string, config: ShopLoginSpaceConfigUpdate, revision: number): Promise<ShopLoginSpaceConfig> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-space-config`, {
++    method: "PUT",
++    headers: { "Idempotency-Key": crypto.randomUUID(), "X-KY-Expected-Revision": String(revision) },
++    body: config
++  });
++}
++export function getShopLoginSpacePrivateConfig(client: RequestClient, storeId: string, spaceUuid: string): Promise<ShopLoginSpacePrivateConfig> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-spaces/${encodeURIComponent(spaceUuid)}/config`, { headers: { "Cache-Control": "no-cache" } });
++}
++export function updateShopLoginSpacePrivateConfig(client: RequestClient, storeId: string, spaceUuid: string, config: ShopLoginSpacePrivateConfigUpdate, revision: number): Promise<ShopLoginSpacePrivateConfig> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-spaces/${encodeURIComponent(spaceUuid)}/config`, {
++    method: "PUT",
++    headers: { "Idempotency-Key": crypto.randomUUID(), "X-KY-Expected-Revision": String(revision) },
++    body: config
++  });
++}
++export function deleteShopLoginSpace(client: RequestClient, storeId: string, space: ShopLoginSpace): Promise<unknown> {
++  return client.request(`/api/v1/shop-management/stores/${encodeURIComponent(storeId)}/login-spaces/${encodeURIComponent(space.id)}`, { method: "DELETE", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { revision: space.revision } });
++}
+diff --git a/plugins/ky-shop-management/src/components/login-space-binding-selector.tsx b/plugins/ky-shop-management/src/components/login-space-binding-selector.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..52c7c868fc7f349865c9ed3a631f71afdef142c8
+--- /dev/null
++++ b/plugins/ky-shop-management/src/components/login-space-binding-selector.tsx
+@@ -0,0 +1,72 @@
++import { Checkbox, Select, Space, Typography } from "antd";
++import type { ShopLoginSpaceBinding, ShopLoginSpaceBindingOption, ShopLoginSpaceVersionPolicy } from "../api";
++import { pinLoginSpaceBindingVersion, replaceSelectedLoginSpaceBindings, updateLoginSpaceBindingPolicy } from "../login-space-resources";
++
++type Props = {
++  title: string;
++  placeholder: string;
++  bindings: ShopLoginSpaceBinding[];
++  options: ShopLoginSpaceBindingOption[];
++  disabled?: boolean;
++  onChange: (bindings: ShopLoginSpaceBinding[]) => void;
++};
++
++export function LoginSpaceBindingSelector({ title, placeholder, bindings, options, disabled = false, onChange }: Props) {
++  const selectedIdentifiers = bindings.map(binding => binding.identifier);
++  const selectorOptions = [...options];
++  for (const binding of bindings) {
++    if (!selectorOptions.some(option => option.key === binding.identifier)) {
++      selectorOptions.push({ key: binding.identifier, label: `${binding.identifier} · 当前发布版本不可用`, binding, versions: [{ ...binding, versionPolicy: "pinned" }] });
++    }
++  }
++
++  const changePolicy = (identifier: string, checked: boolean) => {
++    const policy: ShopLoginSpaceVersionPolicy = checked ? "latest_released" : "pinned";
++    onChange(updateLoginSpaceBindingPolicy(bindings, identifier, policy));
++  };
++
++  return <div>
++    <Typography.Text strong>{title}</Typography.Text>
++    <Select
++      mode="multiple"
++      allowClear
++      disabled={disabled}
++      style={{ width: "100%", marginTop: 8 }}
++      placeholder={placeholder}
++      value={selectedIdentifiers}
++      options={selectorOptions.map(option => ({ value: option.key, label: option.label }))}
++      onChange={identifiers => onChange(replaceSelectedLoginSpaceBindings(bindings, identifiers, selectorOptions))}
++    />
++    {bindings.length > 0 && <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 10 }}>
++      {bindings.map(binding => {
++        const option = options.find(item => item.key === binding.identifier);
++        const followsLatest = (binding.versionPolicy ?? "pinned") === "latest_released";
++        const latestUnavailable = followsLatest && (binding.available === false || !binding.versionId || !binding.version);
++        const versionOptions = [...(option?.versions ?? [])];
++        if (binding.versionId && !versionOptions.some(item => item.versionId === binding.versionId)) {
++          versionOptions.push({ ...binding, versionPolicy: "pinned" });
++        }
++        return <div key={binding.identifier} style={{ border: "1px solid var(--ant-color-border-secondary, #eee)", borderRadius: 8, padding: "8px 10px" }}>
++          <Space direction="vertical" size={6} style={{ width: "100%" }}>
++            <Typography.Text strong>{binding.identifier}</Typography.Text>
++            <Checkbox disabled={disabled} checked={followsLatest} onChange={event => changePolicy(binding.identifier, event.target.checked)}>
++              自动跟随最新发布版
++            </Checkbox>
++            {followsLatest
++              ? latestUnavailable
++                ? <Typography.Text type="danger">当前没有可用的发布版本；请移除此绑定或发布可用版本后再打开空间。</Typography.Text>
++                : <Typography.Text type="secondary">新建或重新打开空间时解析最新版本；当前解析版本：v{binding.version}</Typography.Text>
++              : <Select
++                disabled={disabled}
++                value={binding.versionId || undefined}
++                placeholder="选择固定发布版本"
++                style={{ width: "100%" }}
++                options={versionOptions.map(item => ({ value: item.versionId, label: `固定版本 v${item.version}` }))}
++                onChange={versionId => onChange(pinLoginSpaceBindingVersion(bindings, binding.identifier, versionId, options))}
++              />}
++          </Space>
++        </div>;
++      })}
++    </Space>}
++  </div>;
++}
+diff --git a/plugins/ky-shop-management/src/login-space-drawer-width.ts b/plugins/ky-shop-management/src/login-space-drawer-width.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..c5562a73c2ba0f2975076145d2b92e773f1b8a56
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-drawer-width.ts
+@@ -0,0 +1,50 @@
++export const LOGIN_SPACE_DRAWER_WIDTH_STORAGE_KEY = "ky.shop-management.login-space-drawer-width.v1";
++export const LOGIN_SPACE_DRAWER_DEFAULT_WIDTH = 960;
++export const LOGIN_SPACE_DRAWER_MIN_WIDTH = 760;
++export const LOGIN_SPACE_DRAWER_MAX_WIDTH = 1440;
++export const LOGIN_SPACE_DRAWER_VIEWPORT_MARGIN = 24;
++
++export interface LoginSpaceDrawerWidthStorage {
++  getItem(key: string): string | null;
++  setItem(key: string, value: string): void;
++}
++
++export function getLoginSpaceDrawerWidthBounds(viewportWidth: number): { min: number; max: number } {
++  const usableViewport = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : LOGIN_SPACE_DRAWER_DEFAULT_WIDTH + LOGIN_SPACE_DRAWER_VIEWPORT_MARGIN;
++  const max = Math.max(1, Math.min(LOGIN_SPACE_DRAWER_MAX_WIDTH, Math.floor(usableViewport - LOGIN_SPACE_DRAWER_VIEWPORT_MARGIN)));
++  return { min: Math.min(LOGIN_SPACE_DRAWER_MIN_WIDTH, max), max };
++}
++
++export function clampLoginSpaceDrawerWidth(width: number, viewportWidth: number): number {
++  const bounds = getLoginSpaceDrawerWidthBounds(viewportWidth);
++  const requested = Number.isFinite(width) ? Math.round(width) : LOGIN_SPACE_DRAWER_DEFAULT_WIDTH;
++  return Math.min(bounds.max, Math.max(bounds.min, requested));
++}
++
++export function readLoginSpaceDrawerWidth(storage: LoginSpaceDrawerWidthStorage, viewportWidth: number): number {
++  const fallback = clampLoginSpaceDrawerWidth(LOGIN_SPACE_DRAWER_DEFAULT_WIDTH, viewportWidth);
++  try {
++    const raw = storage.getItem(LOGIN_SPACE_DRAWER_WIDTH_STORAGE_KEY);
++    if (raw === null || raw.trim() === "") return fallback;
++    const stored = Number(raw);
++    if (!Number.isFinite(stored) || stored <= 0) return fallback;
++    return clampLoginSpaceDrawerWidth(stored, viewportWidth);
++  } catch {
++    return fallback;
++  }
++}
++
++export function persistLoginSpaceDrawerWidth(storage: LoginSpaceDrawerWidthStorage, width: number, viewportWidth: number): number {
++  const clamped = clampLoginSpaceDrawerWidth(width, viewportWidth);
++  try {
++    storage.setItem(LOGIN_SPACE_DRAWER_WIDTH_STORAGE_KEY, String(clamped));
++  } catch {
++    // Storage may be unavailable in restricted desktop/browser contexts; resizing remains usable in memory.
++  }
++  return clamped;
++}
++
++export function persistLoginSpaceDrawerWidthWhenIdle(storage: LoginSpaceDrawerWidthStorage, width: number, viewportWidth: number, resizing: boolean): number | null {
++  if (resizing) return null;
++  return persistLoginSpaceDrawerWidth(storage, width, viewportWidth);
++}
+diff --git a/plugins/ky-shop-management/src/login-space-local-data.ts b/plugins/ky-shop-management/src/login-space-local-data.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..01a239c8bce7ef1c569d8c3e8fe49d7ac883732b
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-local-data.ts
+@@ -0,0 +1,29 @@
++import type { ShopLoginSpace } from "./api";
++
++export type ShopLoginSpaceLocalDataStatus = "has_data" | "no_data" | "unknown";
++
++export function toLoginSpaceLocalDataStatusMap(
++  spaces: ShopLoginSpace[],
++  results: Array<{ webSpaceId: string; uuid: string; status: ShopLoginSpaceLocalDataStatus }> | null | undefined
++): Record<string, ShopLoginSpaceLocalDataStatus> {
++  const byIdAndUuid = new Map((results ?? []).map(item => [`${item.webSpaceId}\u0000${item.uuid}`, item.status] as const));
++  return Object.fromEntries(spaces.map(space => [space.uuid, byIdAndUuid.get(`${space.id}\u0000${space.uuid}`) ?? "unknown"]));
++}
++
++export function loginSpaceLocalDataLabel(status: ShopLoginSpaceLocalDataStatus | undefined): string {
++  if (status === "has_data") return "本机登录数据：有";
++  if (status === "no_data") return "本机登录数据：无";
++  return "本机登录数据：未知";
++}
++
++export function cloudSnapshotLabel(status: ShopLoginSpace["syncStatus"]): string {
++  switch (status) {
++    case "synced": return "云端可恢复";
++    case "preparing": return "云端准备中";
++    case "uploading": return "云端上传中";
++    case "verifying": return "云端校验中";
++    case "failed": return "云端同步失败";
++    case "interrupted": return "云端同步中断";
++    default: return "云端无快照";
++  }
++}
+diff --git a/plugins/ky-shop-management/src/login-space-protocol-whitelist-editor.tsx b/plugins/ky-shop-management/src/login-space-protocol-whitelist-editor.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..32bd028adfed851a66e01f74220cf2cd5dc41079
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-protocol-whitelist-editor.tsx
+@@ -0,0 +1,61 @@
++import { useState } from "react";
++import { Button, Input, Space, Tag, Typography } from "antd";
++import type { ShopLoginSpaceProtocolWhitelist } from "./api";
++import {
++  DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST,
++  normalizeShopLoginSpaceProtocolWhitelist,
++  validateLoginSpaceProtocolAddition,
++  type LoginSpaceProtocolGroup
++} from "./login-space-protocol-whitelist";
++
++const groupDefinitions: Array<{ key: LoginSpaceProtocolGroup; title: string; description: string }> = [
++  { key: "navigation", title: "页面与内嵌内容", description: "在当前 WebView 内处理；http/https 仍受现有页面域名规则约束。" },
++  { key: "webSocket", title: "WebSocket 连接", description: "只允许对应登录空间建立这些协议的网络连接。" },
++  { key: "external", title: "外部应用", description: "交由系统默认应用处理；设备未配置处理程序时，系统仍可能提示。" }
++];
++
++export { normalizeShopLoginSpaceProtocolWhitelist } from "./login-space-protocol-whitelist";
++
++export function LoginSpaceProtocolWhitelistEditor(props: {
++  value?: Partial<ShopLoginSpaceProtocolWhitelist> | null;
++  disabled?: boolean;
++  onChange: (value: ShopLoginSpaceProtocolWhitelist) => void;
++}) {
++  const [drafts, setDrafts] = useState<Record<LoginSpaceProtocolGroup, string>>({ navigation: "", webSocket: "", external: "" });
++  const [errors, setErrors] = useState<Partial<Record<LoginSpaceProtocolGroup, string>>>({});
++  const value = normalizeShopLoginSpaceProtocolWhitelist(props.value);
++
++  const changeGroup = (group: LoginSpaceProtocolGroup, values: string[]) => {
++    props.onChange({ ...value, [group]: values });
++  };
++
++  const addProtocol = (group: LoginSpaceProtocolGroup) => {
++    const fail = (reason: string) => setErrors(current => ({ ...current, [group]: reason }));
++    const result = validateLoginSpaceProtocolAddition(group, drafts[group], value);
++    if ("error" in result) return fail(result.error);
++    changeGroup(group, [...value[group], result.protocol]);
++    setDrafts(current => ({ ...current, [group]: "" }));
++    setErrors(current => ({ ...current, [group]: undefined }));
++  };
++
++  return <Space direction="vertical" size={10} style={{ width: "100%" }}>
++    <Space style={{ width: "100%", justifyContent: "space-between" }}>
++      <Typography.Text strong>协议白名单</Typography.Text>
++      <Button size="small" disabled={props.disabled} onClick={() => { props.onChange({ navigation: [...DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST.navigation], webSocket: [...DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST.webSocket], external: [...DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST.external] }); setErrors({}); }}>恢复默认</Button>
++    </Space>
++    {groupDefinitions.map(group => <div key={group.key} style={{ border: "1px solid var(--ant-color-border-secondary)", borderRadius: 8, padding: 10 }}>
++      <Space direction="vertical" size={6} style={{ width: "100%" }}>
++        <Typography.Text strong>{group.title}</Typography.Text>
++        <Typography.Text type="secondary">{group.description}</Typography.Text>
++        <Space size={[4, 4]} wrap>
++          {value[group.key].length ? value[group.key].map(protocol => <Tag key={protocol} closable={!props.disabled} onClose={event => { event.preventDefault(); changeGroup(group.key, value[group.key].filter(item => item !== protocol)); }}>{protocol}</Tag>) : <Typography.Text type="secondary">未允许任何协议</Typography.Text>}
++        </Space>
++        <Space.Compact style={{ width: "100%" }}>
++          <Input value={drafts[group.key]} disabled={props.disabled} placeholder={group.key === "external" ? "添加外部应用协议，例如 weixin" : `添加协议（${group.key === "navigation" ? "http、https、blob、data" : "ws、wss"}）` } onChange={event => setDrafts(current => ({ ...current, [group.key]: event.target.value }))} onPressEnter={() => addProtocol(group.key)} />
++          <Button disabled={props.disabled} onClick={() => addProtocol(group.key)}>添加</Button>
++        </Space.Compact>
++        {errors[group.key] ? <Typography.Text type="danger">{errors[group.key]}</Typography.Text> : null}
++      </Space>
++    </div>)}
++  </Space>;
++}
+diff --git a/plugins/ky-shop-management/src/login-space-protocol-whitelist.ts b/plugins/ky-shop-management/src/login-space-protocol-whitelist.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8cd81fa15cc67331c8faac6a0bb2a9dd6d957e88
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-protocol-whitelist.ts
+@@ -0,0 +1,63 @@
++import type { ShopLoginSpaceProtocolWhitelist } from "./api";
++
++export type LoginSpaceProtocolGroup = keyof ShopLoginSpaceProtocolWhitelist;
++
++export const DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST: ShopLoginSpaceProtocolWhitelist = {
++  navigation: ["http", "https", "blob", "data"],
++  webSocket: ["ws", "wss"],
++  external: ["mailto"]
++};
++
++const navigationSchemes = new Set(DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST.navigation);
++const webSocketSchemes = new Set(DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST.webSocket);
++const blockedSchemes = new Set(["javascript", "vbscript", "file", "kww-plugin", "kww-offline"]);
++const schemePattern = /^[a-z][a-z0-9+.-]{0,63}$/;
++
++export function normalizeShopLoginSpaceProtocolWhitelist(
++  value?: Partial<ShopLoginSpaceProtocolWhitelist> | null
++): ShopLoginSpaceProtocolWhitelist {
++  const normalizeGroup = (group: LoginSpaceProtocolGroup): string[] => {
++    const raw = value?.[group];
++    if (!Array.isArray(raw)) return [...DEFAULT_SHOP_LOGIN_SPACE_PROTOCOL_WHITELIST[group]];
++    const allowed = new Set<string>();
++    const result: string[] = [];
++    for (const item of raw) {
++      if (typeof item !== "string") continue;
++      const protocol = normalizeProtocolName(item);
++      if (!protocol || blockedSchemes.has(protocol)) continue;
++      if (group === "navigation" && !navigationSchemes.has(protocol)) continue;
++      if (group === "webSocket" && !webSocketSchemes.has(protocol)) continue;
++      if (group === "external" && (navigationSchemes.has(protocol) || webSocketSchemes.has(protocol))) continue;
++      if (allowed.has(protocol)) continue;
++      allowed.add(protocol);
++      result.push(protocol);
++    }
++    return result;
++  };
++  return {
++    navigation: normalizeGroup("navigation"),
++    webSocket: normalizeGroup("webSocket"),
++    external: normalizeGroup("external")
++  };
++}
++
++export function normalizeProtocolName(value: string): string | null {
++  let protocol = value.trim().toLowerCase();
++  if (protocol.endsWith(":")) protocol = protocol.slice(0, -1);
++  return schemePattern.test(protocol) ? protocol : null;
++}
++
++export function validateLoginSpaceProtocolAddition(
++  group: LoginSpaceProtocolGroup,
++  raw: string,
++  whitelist: ShopLoginSpaceProtocolWhitelist
++): { protocol: string } | { error: string } {
++  const protocol = normalizeProtocolName(raw);
++  if (!protocol) return { error: "协议格式无效，请输入协议名，例如 weixin。" };
++  if (blockedSchemes.has(protocol)) return { error: "该协议属于禁用或应用内部协议，不能加入白名单。" };
++  if (group === "navigation" && !navigationSchemes.has(protocol)) return { error: "此分组仅支持 http、https、blob、data。" };
++  if (group === "webSocket" && !webSocketSchemes.has(protocol)) return { error: "此分组仅支持 ws、wss。" };
++  if (group === "external" && (navigationSchemes.has(protocol) || webSocketSchemes.has(protocol))) return { error: "该协议属于页面或 WebSocket 分组。" };
++  if (Object.values(whitelist).some(items => items.includes(protocol))) return { error: "该协议已在白名单中。" };
++  return { protocol };
++}
+diff --git a/plugins/ky-shop-management/src/login-space-refresh.ts b/plugins/ky-shop-management/src/login-space-refresh.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e54800cec6b3316513780171d52529184bb08e9a
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-refresh.ts
+@@ -0,0 +1,72 @@
++import type { ShopLoginSpace } from "./api";
++
++export const LOGIN_SPACE_LIST_REFRESH_INTERVAL_MS = 2_500;
++
++export type LoginSpaceInfoUpdate = {
++  storeId: string;
++  uuid: string;
++  displayName?: string;
++  loginStatus?: ShopLoginSpace["loginStatus"];
++  loginStatusUpdatedAt?: string | null;
++  updatedAt: string;
++  revision: number;
++};
++
++/** Keep the server list as the source for identity/login/snapshot fields. */
++export function mapRefreshedLoginSpaces(items: ShopLoginSpace[]): ShopLoginSpace[] {
++  return items.map(item => ({
++    ...item,
++    displayName: item.displayName ?? null,
++    loginStatus: item.loginStatus ?? "unknown",
++    syncStatus: item.syncStatus ?? "not_synced"
++  }));
++}
++
++/** Keep pushed SDK updates over a list response that began before the PATCH completed. */
++export function mergeLoginSpaceInfoUpdates(items: ShopLoginSpace[], updates: Map<string, LoginSpaceInfoUpdate>): ShopLoginSpace[] {
++  return items.map(item => {
++    const update = updates.get(item.uuid);
++    if (!update || update.storeId !== item.storeId) return item;
++    if (item.revision >= update.revision) {
++      updates.delete(item.uuid);
++      return item;
++    }
++    return {
++      ...item,
++      ...(update.displayName !== undefined ? { displayName: update.displayName } : {}),
++      ...(update.loginStatus !== undefined ? { loginStatus: update.loginStatus } : {}),
++      ...(update.loginStatusUpdatedAt !== undefined ? { loginStatusUpdatedAt: update.loginStatusUpdatedAt } : {}),
++      updatedAt: update.updatedAt,
++      revision: update.revision
++    };
++  });
++}
++
++export function applyLoginSpaceInfoUpdate(items: ShopLoginSpace[], update: LoginSpaceInfoUpdate): ShopLoginSpace[] {
++  return items.map(item => item.uuid !== update.uuid || item.storeId !== update.storeId || item.revision > update.revision ? item : {
++    ...item,
++    ...(update.displayName !== undefined ? { displayName: update.displayName } : {}),
++    ...(update.loginStatus !== undefined ? { loginStatus: update.loginStatus } : {}),
++    ...(update.loginStatusUpdatedAt !== undefined ? { loginStatusUpdatedAt: update.loginStatusUpdatedAt } : {}),
++    updatedAt: update.updatedAt,
++    revision: update.revision
++  });
++}
++
++/** A tiny single-flight gate prevents manual and timer refreshes overlapping. */
++export function createLoginSpaceRefreshGate() {
++  let running = false;
++  return {
++    get running() { return running; },
++    async run(task: () => Promise<void>): Promise<boolean> {
++      if (running) return false;
++      running = true;
++      try {
++        await task();
++        return true;
++      } finally {
++        running = false;
++      }
++    }
++  };
++}
+diff --git a/plugins/ky-shop-management/src/login-space-resources.ts b/plugins/ky-shop-management/src/login-space-resources.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..62928375e42f28ed1393aaf7923ea3c73cfb0127
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-resources.ts
+@@ -0,0 +1,177 @@
++import type { ShopLoginSpaceBinding, ShopLoginSpaceBindingOption, ShopLoginSpaceBindingUpdate, ShopLoginSpaceConfig, ShopLoginSpaceVersionPolicy } from "./api";
++
++export type LoginSpaceOpenMode = "new" | "reuse";
++
++export type LoginSpaceRuntimeInput = {
++  scriptSelectors: Array<{ identifier: string; version: string; runAt: ShopLoginSpaceBinding["runAt"]; priority: number; matchConfiguredUrlRules: true }>;
++  styleSelectors: Array<{ identifier: string; version: string; runAt: ShopLoginSpaceBinding["runAt"]; priority: number; matchConfiguredUrlRules: true }>;
++};
++
++export function isLoginSpaceCreationReady(input: { storeReady: boolean; workspaceReady: boolean; spacesLoading: boolean; configReady: boolean }): boolean {
++  return input.storeReady && input.workspaceReady && !input.spacesLoading && input.configReady;
++}
++
++/**
++ * Return the user-facing login-space name, cleaning up only the exact legacy
++ * default generated as "<store name or account> 登录空间". Custom names remain
++ * untouched, and this presentation helper never changes the persisted record.
++ */
++export function getLoginSpaceDisplayName(displayName: string | null | undefined, storeName: string | null | undefined, account: string | null | undefined): string {
++  if (!displayName) return "未命名空间";
++  const storeLabel = storeName || account || "";
++  if (storeLabel && displayName === `${storeLabel} 登录空间`) return storeLabel;
++  return displayName;
++}
++
++export interface LoginSpacePreferenceStorage {
++  getItem(key: string): string | null;
++  setItem(key: string, value: string): void;
++  removeItem?(key: string): void;
++}
++
++export type LoginSpacePreferences = {
++  showWebViewDevTools: boolean;
++  showWebWindowDevTools: boolean;
++};
++
++const defaultLoginSpacePreferences: LoginSpacePreferences = {
++  showWebViewDevTools: false,
++  showWebWindowDevTools: false
++};
++
++const preferenceKey = (storeId: string) => `ky.web-space.${storeId}.preferences`;
++const inheritDefaultResourcesKey = (storeId: string) => `ky.web-space.${storeId}.inherit-default-resources`;
++const legacyWebViewDevToolsKey = (storeId: string) => `ky.web-space.${storeId}.webview-devtools`;
++const legacyHostDevToolsKey = (storeId: string) => `ky.web-space.${storeId}.host-devtools`;
++
++export function readLoginSpacePreferences(storage: LoginSpacePreferenceStorage | null | undefined, storeId: string): LoginSpacePreferences {
++  if (!storage || !storeId) return { ...defaultLoginSpacePreferences };
++  try {
++    const raw = storage.getItem(preferenceKey(storeId));
++    if (!raw) {
++      return {
++        showWebViewDevTools: storage.getItem(legacyWebViewDevToolsKey(storeId)) === "1",
++        showWebWindowDevTools: storage.getItem(legacyHostDevToolsKey(storeId)) === "1"
++      };
++    }
++    const value = JSON.parse(raw) as Partial<LoginSpacePreferences>;
++    return {
++      showWebViewDevTools: value.showWebViewDevTools === true,
++      showWebWindowDevTools: value.showWebWindowDevTools === true
++    };
++  } catch {
++    return { ...defaultLoginSpacePreferences };
++  }
++}
++
++export function writeLoginSpacePreferences(storage: LoginSpacePreferenceStorage | null | undefined, storeId: string, value: LoginSpacePreferences): boolean {
++  if (!storage || !storeId) return false;
++  try {
++    storage.setItem(preferenceKey(storeId), JSON.stringify({
++      showWebViewDevTools: value.showWebViewDevTools === true,
++      showWebWindowDevTools: value.showWebWindowDevTools === true
++    }));
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++export function getInheritDefaultResourcesPreference(storage: LoginSpacePreferenceStorage, storeId: string): boolean {
++  return storage.getItem(inheritDefaultResourcesKey(storeId)) === "1";
++}
++
++export function setInheritDefaultResourcesPreference(storage: LoginSpacePreferenceStorage, storeId: string, enabled: boolean): void {
++  storage.setItem(inheritDefaultResourcesKey(storeId), enabled ? "1" : "0");
++}
++
++/** Import only values absent from the server, so already-synced values always win. */
++export function importLegacyLoginSpacePreferences(config: ShopLoginSpaceConfig, storage: LoginSpacePreferenceStorage | null | undefined, storeId: string): ShopLoginSpaceConfig {
++  const developerTools = readLoginSpacePreferences(storage, storeId);
++  return {
++    ...config,
++    inheritDefaultResources: config.inheritDefaultResources ?? getInheritDefaultResourcesPreference(storage ?? { getItem: () => null, setItem: () => undefined }, storeId),
++    showWebViewDevTools: config.showWebViewDevTools ?? developerTools.showWebViewDevTools,
++    showWebWindowDevTools: config.showWebWindowDevTools ?? developerTools.showWebWindowDevTools
++  };
++}
++
++export function hasUninitializedLoginSpacePreferences(config: ShopLoginSpaceConfig): boolean {
++  return config.inheritDefaultResources == null || config.showWebViewDevTools == null || config.showWebWindowDevTools == null;
++}
++
++/** Remove the old local source only after the server acknowledges the imported values. */
++export function clearLegacyLoginSpacePreferences(storage: LoginSpacePreferenceStorage | null | undefined, storeId: string): void {
++  if (!storage?.removeItem || !storeId) return;
++  storage.removeItem(preferenceKey(storeId));
++  storage.removeItem(inheritDefaultResourcesKey(storeId));
++  storage.removeItem(legacyWebViewDevToolsKey(storeId));
++  storage.removeItem(legacyHostDevToolsKey(storeId));
++}
++
++export function replaceSelectedLoginSpaceBindings(current: ShopLoginSpaceBinding[], identifiers: string[], options: ShopLoginSpaceBindingOption[]): ShopLoginSpaceBinding[] {
++  const currentByIdentifier = new Map(current.map(binding => [binding.identifier, binding]));
++  return identifiers.flatMap(identifier => {
++    const existing = currentByIdentifier.get(identifier);
++    if (existing) return [existing];
++    const option = options.find(item => item.key === identifier);
++    return option ? [{ ...option.binding, versionPolicy: "latest_released" as const }] : [];
++  });
++}
++
++export function updateLoginSpaceBindingPolicy(bindings: ShopLoginSpaceBinding[], identifier: string, versionPolicy: ShopLoginSpaceVersionPolicy): ShopLoginSpaceBinding[] {
++  return bindings.map(binding => binding.identifier === identifier ? { ...binding, versionPolicy, available: undefined, error: undefined } : binding);
++}
++
++export function pinLoginSpaceBindingVersion(bindings: ShopLoginSpaceBinding[], identifier: string, versionId: string, options: ShopLoginSpaceBindingOption[]): ShopLoginSpaceBinding[] {
++  const option = options.find(item => item.key === identifier);
++  const selected = option?.versions.find(item => item.versionId === versionId);
++  if (!selected) return bindings;
++  return bindings.map(binding => binding.identifier === identifier ? {
++    ...binding,
++    versionId: selected.versionId,
++    version: selected.version,
++    runAt: selected.runAt,
++    versionPolicy: "pinned",
++    available: undefined,
++    error: undefined
++  } : binding);
++}
++
++/** Return resources whose saved policy currently cannot resolve to an exact release. */
++export function getUnavailableLoginSpaceBindingIdentifiers(scripts: ShopLoginSpaceBinding[], styles: ShopLoginSpaceBinding[]): string[] {
++  return [...scripts, ...styles]
++    .filter(binding => ((binding.versionPolicy ?? "pinned") === "latest_released" && binding.available === false) || !binding.versionId || !binding.version)
++    .map(binding => binding.identifier);
++}
++
++export function getIncompletePinnedLoginSpaceBindingIdentifiers(scripts: ShopLoginSpaceBinding[], styles: ShopLoginSpaceBinding[]): string[] {
++  return [...scripts, ...styles]
++    .filter(binding => (binding.versionPolicy ?? "pinned") === "pinned" && (!binding.versionId || !binding.version))
++    .map(binding => binding.identifier);
++}
++
++/** Strip server-only latest-resolution metadata before sending a strict PUT payload. */
++export function toLoginSpaceBindingUpdate(binding: ShopLoginSpaceBinding): ShopLoginSpaceBindingUpdate {
++  return {
++    identifier: binding.identifier,
++    versionId: binding.versionId,
++    version: binding.version,
++    versionPolicy: binding.versionPolicy,
++    urlMatchers: binding.urlMatchers,
++    runAt: binding.runAt,
++    sortOrder: binding.sortOrder
++  };
++}
++
++export function selectLoginSpaceBindings(mode: LoginSpaceOpenMode, scripts: ShopLoginSpaceBinding[], styles: ShopLoginSpaceBinding[], inheritDefaultResources = false): { scripts: ShopLoginSpaceBinding[]; styles: ShopLoginSpaceBinding[] } {
++  if (mode === "reuse" && !inheritDefaultResources) return { scripts: [], styles: [] };
++  return { scripts: [...scripts], styles: [...styles] };
++}
++
++export function toLoginSpaceRuntimeInput(scripts: ShopLoginSpaceBinding[], styles: ShopLoginSpaceBinding[]): LoginSpaceRuntimeInput {
++  return {
++    scriptSelectors: scripts.map(item => ({ identifier: item.identifier, version: item.version, runAt: item.runAt, priority: item.sortOrder, matchConfiguredUrlRules: true })),
++    styleSelectors: styles.map(item => ({ identifier: item.identifier, version: item.version, runAt: item.runAt, priority: item.sortOrder, matchConfiguredUrlRules: true }))
++  };
++}
+diff --git a/plugins/ky-shop-management/src/login-space-settings-load.ts b/plugins/ky-shop-management/src/login-space-settings-load.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9b00ad72af530ab279fbc7f443008967157bbe5a
+--- /dev/null
++++ b/plugins/ky-shop-management/src/login-space-settings-load.ts
+@@ -0,0 +1,71 @@
++export const LOGIN_SPACE_SETTINGS_LOAD_TIMEOUT_MS = 12_000;
++export const LOGIN_SPACE_WINDOW_COUNT_TIMEOUT_MS = 2_500;
++
++export class LoginSpaceSettingsLoadTimeoutError extends Error {
++  constructor() {
++    super("登录空间设置加载超时，请关闭后重试");
++    this.name = "LoginSpaceSettingsLoadTimeoutError";
++  }
++}
++
++export class LoginSpaceSettingsLoadCancelledError extends Error {
++  constructor() {
++    super("login_space_settings_load_cancelled");
++    this.name = "LoginSpaceSettingsLoadCancelledError";
++  }
++}
++
++export interface LoginSpaceSettingsLoadOptions {
++  timeoutMs?: number;
++  isCurrent: () => boolean;
++  setLoading: (loading: boolean) => void;
++}
++
++export interface LoginSpaceSettingsLoadHandle<T> {
++  promise: Promise<T>;
++  cancel: () => void;
++}
++
++/** Bound auxiliary drawer work; closing/reopening cannot leave a stale Spin or state write. */
++export function startLoginSpaceSettingsLoad<T>(
++  work: (signal: AbortSignal) => Promise<T>,
++  options: LoginSpaceSettingsLoadOptions
++): LoginSpaceSettingsLoadHandle<T> {
++  const controller = new AbortController();
++  const timeoutMs = options.timeoutMs ?? LOGIN_SPACE_SETTINGS_LOAD_TIMEOUT_MS;
++  let timeout: ReturnType<typeof setTimeout> | undefined;
++  let rejectAbort!: (error: Error) => void;
++  let rejectTimeout!: (error: Error) => void;
++  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
++  const timedOut = new Promise<never>((_, reject) => { rejectTimeout = reject; });
++  const onAbort = () => rejectAbort(new LoginSpaceSettingsLoadCancelledError());
++  controller.signal.addEventListener("abort", onAbort, { once: true });
++
++  if (options.isCurrent()) options.setLoading(true);
++  const workPromise = Promise.resolve().then(() => work(controller.signal));
++  timeout = setTimeout(() => {
++    rejectTimeout(new LoginSpaceSettingsLoadTimeoutError());
++    controller.abort();
++  }, timeoutMs);
++
++  const promise = Promise.race([workPromise, aborted, timedOut]).finally(() => {
++    if (timeout) clearTimeout(timeout);
++    controller.signal.removeEventListener("abort", onAbort);
++    controller.abort();
++    if (options.isCurrent()) options.setLoading(false);
++  });
++
++  return { promise, cancel: () => controller.abort() };
++}
++
++export function withLoginSpaceWindowCountTimeout<T>(work: Promise<T>, timeoutMs = LOGIN_SPACE_WINDOW_COUNT_TIMEOUT_MS): Promise<T> {
++  let timeout: ReturnType<typeof setTimeout> | undefined;
++  return Promise.race([
++    work,
++    new Promise<never>((_, reject) => {
++      timeout = setTimeout(() => reject(new LoginSpaceSettingsLoadTimeoutError()), timeoutMs);
++    })
++  ]).finally(() => {
++    if (timeout) clearTimeout(timeout);
++  });
++}
+diff --git a/plugins/ky-shop-management/src/pages/shop-management-page.tsx b/plugins/ky-shop-management/src/pages/shop-management-page.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..1c8bd455af9fbbf41247d05b08c14c9342a1b22f
+--- /dev/null
++++ b/plugins/ky-shop-management/src/pages/shop-management-page.tsx
+@@ -0,0 +1,677 @@
++import { ImageUpload, ImageView, clearMatrixAccountWebSpace, inspectMatrixAccountWebSpaceLocalData } from "@ky/admin-core";
++import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, ReloadOutlined, SettingOutlined } from "@ant-design/icons";
++import { useCallback, useEffect, useRef, useState } from "react";
++import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
++import { Alert, App, Button, Checkbox, ConfigProvider, Descriptions, Drawer, Form, Input, Modal, Progress, Segmented, Select, Space, Spin, Switch, Table, Tooltip, Typography } from "antd";
++import zhCN from "antd/locale/zh_CN";
++import { ListPageCard, createMatrixAccountWebSpaceLogin, openMatrixAccountWebSpace, syncMatrixAccountLoginSpace, onMatrixAccountLoginSpaceSyncProgress, onMatrixAccountLoginSpaceInfoChanged, getMatrixAccountLoginSpaceWindowCounts, hasMatrixAccountLoginSpaceInspectionCapability, hasMatrixAccountLoginSpaceSyncCapability, hasMatrixAccountWebSpaceDesktopCapability, useCurrentUser, useCurrentWorkspace, usePermissions, useRequestClient } from "@ky/admin-core";
++import type { ShopLoginSpace, ShopLoginSpaceBindingOption, ShopLoginSpaceConfig, ShopLoginSpacePrivateConfig, ShopLoginSpacePrivateConfigUpdate, ShopLoginSpaceProxyInput, ShopLoginSpaceUserAgentProfile, ShopLoginStatus, ShopLoginSpaceSyncProgress, ShopLoginSpaceSyncStatus, ShopManagementRecord, LoginSpaceAllocationMode } from "../api";
++import { clearLegacyLoginSpacePreferences, getIncompletePinnedLoginSpaceBindingIdentifiers, getLoginSpaceDisplayName, getUnavailableLoginSpaceBindingIdentifiers, hasUninitializedLoginSpacePreferences, importLegacyLoginSpacePreferences, isLoginSpaceCreationReady, selectLoginSpaceBindings, toLoginSpaceBindingUpdate, toLoginSpaceRuntimeInput } from "../login-space-resources";
++import { createShopLoginSpace, deleteShopLoginSpace, getShopLoginSpaceConfig, getShopLoginSpacePrivateConfig, getShopManagementRecord, listShopLoginSpaceBindingOptions, listShopLoginSpaces, listShopManagementRecords, updateShopLoginSpaceConfig, updateShopLoginSpacePrivateConfig } from "../api";
++import { LoginSpaceBindingSelector } from "../components/login-space-binding-selector";
++import { clampLoginSpaceDrawerWidth, getLoginSpaceDrawerWidthBounds, LOGIN_SPACE_DRAWER_DEFAULT_WIDTH, persistLoginSpaceDrawerWidthWhenIdle, readLoginSpaceDrawerWidth } from "../login-space-drawer-width";
++import { LOGIN_SPACE_SETTINGS_LOAD_TIMEOUT_MS, startLoginSpaceSettingsLoad, withLoginSpaceWindowCountTimeout } from "../login-space-settings-load";
++import { formatShopManagementError } from "../shop-management-error";
++import { applyLoginSpaceInfoUpdate, createLoginSpaceRefreshGate, LOGIN_SPACE_LIST_REFRESH_INTERVAL_MS, mapRefreshedLoginSpaces, mergeLoginSpaceInfoUpdates, type LoginSpaceInfoUpdate } from "../login-space-refresh";
++import { cloudSnapshotLabel, loginSpaceLocalDataLabel, toLoginSpaceLocalDataStatusMap, type ShopLoginSpaceLocalDataStatus } from "../login-space-local-data";
++import { normalizeShopLoginSpaceProtocolWhitelist } from "../login-space-protocol-whitelist";
++import { LoginSpaceProtocolWhitelistEditor } from "../login-space-protocol-whitelist-editor";
++
++interface Values { account: string; password?: string; name?: string; shopId?: string; city?: string; remark?: string; logoUrl?: string; logoImageId?: string }
++const imageValue = (id: string | null | undefined, url: string | null | undefined) => id ? `/api/v1/images/${id}` : (url ?? "");
++const unsynced = (v: unknown) => v === null || v === undefined || String(v).trim() === "" ? "未同步" : String(v);
++const time = (v: string | null) => v && Number.isFinite(Date.parse(v)) ? new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(v)) : "暂无记录";
++const safeError = formatShopManagementError;
++const safeSpaceConfigError = (e: unknown) => { const c = (e as { code?: string })?.code; return c === "conflict" ? "登录空间配置已被其他用户更新，请刷新后重试" : c === "validation_error" ? "登录空间配置或发布版本无效，请刷新后核对" : safeError(e); };
++const loginStatusLabels: Record<ShopLoginStatus, string> = { unknown: "未知", logging_in: "登录中", logged_in: "已登录", logged_out: "未登录", expired: "已过期", error: "异常" };
++const syncStatusLabels: Record<ShopLoginSpaceSyncStatus, string> = { not_synced: "云端无快照", preparing: "云端准备中", uploading: "云端上传中", verifying: "云端校验中", synced: "云端可恢复", failed: "云端同步失败", interrupted: "云端同步中断" };
++const initialSpaceDrawerWidth = () => {
++ const viewportWidth = typeof window === "undefined" ? 1024 : window.innerWidth;
++ try { return readLoginSpaceDrawerWidth(window.localStorage, viewportWidth); }
++ catch { return clampLoginSpaceDrawerWidth(LOGIN_SPACE_DRAWER_DEFAULT_WIDTH, viewportWidth); }
++};
++
++function formatLoginSpaceArchiveSize(value: number | null | undefined) {
++ if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value) || value <= 0) return "—";
++ if (value < 1024) return `${value} B`;
++ const units = ["KB", "MB", "GB"];
++ let size = value;
++ let unit = "B";
++ for (const nextUnit of units) {
++   size /= 1024;
++   unit = nextUnit;
++   if (size < 1024 || nextUnit === "GB") break;
++ }
++ return `${size.toFixed(1)} ${unit}`;
++}
++
++function renderLoginSpaceSyncStatus(space: ShopLoginSpace, localDataStatus: ShopLoginSpaceLocalDataStatus | undefined, localProgress?: ShopLoginSpaceSyncProgress, localFailed = false) {
++ const status = space.syncStatus ?? "not_synced";
++ const persistedProgress = space.syncProgress;
++ let statusView: ReactNode;
++ if (localFailed) {
++   statusView = syncStatusLabels.failed;
++ } else if (localProgress) {
++   const phase = localProgress.phase ?? "preparing";
++   const label = phase === "downloading" ? "本机下载中" : phase === "restoring" ? "本机恢复中" : syncStatusLabels[phase as ShopLoginSpaceSyncStatus] ?? "云端准备中";
++   const total = localProgress.totalBytes ?? localProgress.total ?? 0;
++   const transferred = localProgress.bytesTransferred ?? localProgress.bytes ?? 0;
++   if ((phase === "uploading" || phase === "downloading") && total > 0) {
++     const percent = Math.min(99, Math.max(0, Math.floor(transferred / total * 100)));
++     statusView = <div style={{ minWidth: 150 }}><div style={{ marginBottom: 4 }}>{label} {percent}%</div><Progress percent={percent} size="small" showInfo={false} /></div>;
++   } else {
++     statusView = <Space size={6}><Spin size="small" />{label}</Space>;
++   }
++ } else {
++   const total = persistedProgress?.totalBytes ?? persistedProgress?.total ?? 0;
++   const transferred = persistedProgress?.bytesTransferred ?? persistedProgress?.bytes ?? 0;
++   if (status === "uploading" && total > 0) {
++     const percent = Math.min(99, Math.max(0, Math.floor(transferred / total * 100)));
++     statusView = <div style={{ minWidth: 150 }}><div style={{ marginBottom: 4 }}>{syncStatusLabels[status]} {percent}%</div><Progress percent={percent} size="small" showInfo={false} /></div>;
++   } else if (status === "preparing" || status === "verifying" || status === "uploading") {
++     statusView = <Space size={6}><Spin size="small" />{syncStatusLabels[status]}</Space>;
++   } else {
++     statusView = syncStatusLabels[status];
++   }
++ }
++
++ const archiveSize = space.syncStatus === "synced" && space.archiveSha256 ? space.archiveSize : undefined;
++ const sizeLabel = formatLoginSpaceArchiveSize(archiveSize);
++ const exactSize = typeof archiveSize === "number" && Number.isFinite(archiveSize) && Number.isInteger(archiveSize) && archiveSize > 0 ? `${archiveSize} B` : undefined;
++ return <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
++   <div>{syncStatusLabels[status] ?? cloudSnapshotLabel(status)}</div>
++   {statusView !== syncStatusLabels[status] ? <div>{statusView}</div> : null}
++   <Tooltip title={exactSize} placement="top"><Typography.Text type="secondary" style={{ fontSize: 12 }}>云端文件大小：{sizeLabel}</Typography.Text></Tooltip>
++   <Typography.Text type="secondary" style={{ fontSize: 12 }}>{loginSpaceLocalDataLabel(localDataStatus)}</Typography.Text>
++ </div>;
++}
++
++export function ShopManagementPage() {
++ const client = useRequestClient(); const ws = useCurrentWorkspace(); const user = useCurrentUser(); const permissions = usePermissions(); const { message, modal } = App.useApp();
++ const isDesktopClient = typeof window !== "undefined" && typeof (window as unknown as { aicrm?: { app?: { getVersion?: unknown } } }).aicrm?.app?.getVersion === "function";
++ const can = (a: string) => permissions.can(`${ws?.type}.shop_management.${a}`);
++ const scope = `${user?.id}:${ws?.type}:${ws?.id}:${ws?.membershipId}:${can("view")}`;
++ const [rows, setRows] = useState<ShopManagementRecord[]>([]); const [total, setTotal] = useState(0); const [page, setPage] = useState(1); const [size, setSize] = useState(20); const [input, setInput] = useState(""); const [keyword, setKeyword] = useState(""); const [loading, setLoading] = useState(false); const [error, setError] = useState(""); const [tick, setTick] = useState(0);
++ const [editing, setEditing] = useState<ShopManagementRecord | "new" | null>(null); const [detail, setDetail] = useState<ShopManagementRecord | null>(null); const [saving, setSaving] = useState(false); const [uploading, setUploading] = useState(false); const [form] = Form.useForm<Values>(); const displayedScope = useRef(scope); const generation = useRef(0); const aliveScope = useRef(scope); aliveScope.current = scope;
++ const [spaceStore, setSpaceStore] = useState<ShopManagementRecord | null>(null); const [spaces, setSpaces] = useState<ShopLoginSpace[]>([]); const [spacesLoading, setSpacesLoading] = useState(false);
++ const [localLoginDataByUuid, setLocalLoginDataByUuid] = useState<Record<string, ShopLoginSpaceLocalDataStatus>>({}); const spaceDrawerGeneration = useRef(0);
++ const [spacesRefreshing, setSpacesRefreshing] = useState(false); const spaceStoreRef = useRef<ShopManagementRecord | null>(null); spaceStoreRef.current = spaceStore;
++ const spaceListRefreshGate = useRef(createLoginSpaceRefreshGate());
++ const loginSpaceInfoUpdates = useRef(new Map<string, LoginSpaceInfoUpdate>());
++ const [spaceDrawerWidth, setSpaceDrawerWidth] = useState(initialSpaceDrawerWidth); const [spaceDrawerResizing, setSpaceDrawerResizing] = useState(false);
++ const spaceDrawerResizeStart = useRef<{ pointerId: number; clientX: number; width: number } | null>(null);
++ const [syncProgressBySpace, setSyncProgressBySpace] = useState<Record<string, ShopLoginSpaceSyncProgress>>({}); const [syncFailedSpaceIds, setSyncFailedSpaceIds] = useState<Set<string>>(() => new Set());
++ const [creatingSpace, setCreatingSpace] = useState(false); const creatingSpaceRef = useRef(false);
++ const [defaultSpaceUrl, setDefaultSpaceUrl] = useState(""); const [spaceConfig, setSpaceConfig] = useState<ShopLoginSpaceConfig | null>(null); const [spaceSettingsOpen, setSpaceSettingsOpen] = useState(false); const [spaceConfigSaving, setSpaceConfigSaving] = useState(false);
++ const [spaceConfigDraft, setSpaceConfigDraft] = useState<ShopLoginSpaceConfig | null>(null); const spaceConfigBaseline = useRef(""); const [spaceSettingsTab, setSpaceSettingsTab] = useState<"基本设置" | "注入设置" | "分配规则">("基本设置");
++ const [defaultProxyUsername, setDefaultProxyUsername] = useState(""); const [defaultProxyPassword, setDefaultProxyPassword] = useState(""); const [clearDefaultProxyUsername, setClearDefaultProxyUsername] = useState(false); const [clearDefaultProxyPassword, setClearDefaultProxyPassword] = useState(false);
++ const [snapshotSpaceUuid, setSnapshotSpaceUuid] = useState<string>(); const [snapshotPrivateConfig, setSnapshotPrivateConfig] = useState<ShopLoginSpacePrivateConfig | null>(null); const [snapshotLoading, setSnapshotLoading] = useState(false); const snapshotRequest = useRef(0);
++ const [activeWindowCounts, setActiveWindowCounts] = useState<Record<string, number>>({});
++ const [privateConfigOpen, setPrivateConfigOpen] = useState(false); const [privateConfigSpace, setPrivateConfigSpace] = useState<ShopLoginSpace | null>(null); const [privateConfig, setPrivateConfig] = useState<ShopLoginSpacePrivateConfig | null>(null); const [privateConfigSaving, setPrivateConfigSaving] = useState(false); const [privateProxyUsername, setPrivateProxyUsername] = useState(""); const [privateProxyPassword, setPrivateProxyPassword] = useState(""); const [clearPrivateProxyUsername, setClearPrivateProxyUsername] = useState(false); const [clearPrivateProxyPassword, setClearPrivateProxyPassword] = useState(false);
++ const privateConfigRequest = useRef(0);
++ const [bindingOptions, setBindingOptions] = useState<{ scripts: ShopLoginSpaceBindingOption[]; styles: ShopLoginSpaceBindingOption[] }>({ scripts: [], styles: [] }); const [bindingOptionsLoading, setBindingOptionsLoading] = useState(false); const [spaceSettingsLoading, setSpaceSettingsLoading] = useState(false);
++ const settingsLoadGeneration = useRef(0); const settingsLoadCancel = useRef<(() => void) | null>(null);
++ useEffect(() => () => { settingsLoadGeneration.current++; settingsLoadCancel.current?.(); settingsLoadCancel.current = null; }, []);
++ const refresh = useCallback(() => setTick(v => v + 1), []);
++ const stopSpaceDrawerResize = () => { spaceDrawerResizeStart.current = null; setSpaceDrawerResizing(false); };
++ const startSpaceDrawerResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
++   if (event.button !== 0) return;
++   event.preventDefault();
++   spaceDrawerResizeStart.current = { pointerId: event.pointerId, clientX: event.clientX, width: spaceDrawerWidth };
++   setSpaceDrawerResizing(true);
++   try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* window listeners remain as a fallback */ }
++ };
++ const moveSpaceDrawerResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
++   const start = spaceDrawerResizeStart.current;
++   if (!start || start.pointerId !== event.pointerId) return;
++   setSpaceDrawerWidth(clampLoginSpaceDrawerWidth(start.width + start.clientX - event.clientX, window.innerWidth));
++ };
++ const handleSpaceDrawerResizeKey = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
++   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
++   event.preventDefault();
++   const step = event.shiftKey ? 64 : 16;
++   setSpaceDrawerWidth(current => clampLoginSpaceDrawerWidth(current + (event.key === "ArrowLeft" ? step : -step), window.innerWidth));
++ };
++ useEffect(() => {
++   const handleResize = () => setSpaceDrawerWidth(current => clampLoginSpaceDrawerWidth(current, window.innerWidth));
++   window.addEventListener("resize", handleResize);
++   return () => window.removeEventListener("resize", handleResize);
++ }, []);
++ useEffect(() => {
++   try { if (typeof window !== "undefined") persistLoginSpaceDrawerWidthWhenIdle(window.localStorage, spaceDrawerWidth, window.innerWidth, spaceDrawerResizing); }
++   catch { /* Keep the in-memory width when local storage is unavailable. */ }
++ }, [spaceDrawerWidth, spaceDrawerResizing]);
++ useEffect(() => {
++   if (!spaceDrawerResizing) return;
++   const stop = () => stopSpaceDrawerResize();
++   window.addEventListener("pointerup", stop);
++   window.addEventListener("pointercancel", stop);
++   window.addEventListener("blur", stop);
++   return () => {
++     window.removeEventListener("pointerup", stop);
++     window.removeEventListener("pointercancel", stop);
++     window.removeEventListener("blur", stop);
++     spaceDrawerResizeStart.current = null;
++   };
++ }, [spaceDrawerResizing]);
++ useEffect(() => onMatrixAccountLoginSpaceSyncProgress((payload) => {
++   setSyncProgressBySpace(current => ({ ...current, [payload.webSpaceId]: { phase: payload.phase, bytesTransferred: payload.bytesTransferred, totalBytes: payload.totalBytes, operationId: payload.operationId } }));
++ }), []);
++ useEffect(() => { invalidateSpaceSettingsLoad(); generation.current++; privateConfigRequest.current++; setRows([]); setTotal(0); setEditing(null); setDetail(null); setError(""); setPage(1); setPrivateConfig(null); setPrivateConfigOpen(false); setPrivateConfigSpace(null); form.resetFields(); displayedScope.current = scope; return () => { generation.current++; privateConfigRequest.current++; form.resetFields(); }; }, [scope, form]);
++ useEffect(() => { const g = ++generation.current; const controller = new AbortController(); if (!can("view")) return () => controller.abort(); setLoading(true); setError(""); listShopManagementRecords(client, { page, pageSize: size, platform: "douyin_shop", keyword }, controller.signal).then(r => { if (g === generation.current) { setRows(r.items); setTotal(r.pagination.total); } }).catch(e => { if (g === generation.current && !controller.signal.aborted) { setRows([]); setTotal(0); setError(safeError(e)); } }).finally(() => { if (g === generation.current) setLoading(false); }); return () => { generation.current++; controller.abort(); }; }, [client, scope, page, size, keyword, tick]);
++ const open = async (r: ShopManagementRecord, mode: "edit" | "detail") => { const captured = scope; try { const x = await getShopManagementRecord(client, r.id); if (aliveScope.current !== captured) return; if (mode === "detail") setDetail(x); else { form.resetFields(); form.setFieldsValue({ account: x.account, name: x.name ?? "", shopId: x.shopId ?? "", city: x.city, remark: x.remark ?? "", logoUrl: x.logoUrl ?? "", logoImageId: x.logoImageId ?? "" }); setEditing(x); } } catch (e) { if (aliveScope.current === captured) message.error(safeError(e)); } };
++ const save = async () => { if (uploading) return; let v: Values; try { v = await form.validateFields(); } catch { return; } if (!editing || aliveScope.current !== scope) return; const captured = scope; const creating = editing === "new"; setSaving(true); try { const body = { platform: "douyin_shop", account: v.account, name: v.name ?? "", shopId: v.shopId ?? "", city: v.city ?? "", remark: v.remark ?? "", logoUrl: v.logoUrl ?? "", logoImageId: v.logoImageId ?? "", ...(creating || can("password_update") ? { password: v.password ?? "" } : {}), revision: creating ? 0 : editing.revision }; await client.request(`/api/v1/shop-management/stores${creating ? "" : `/${editing.id}`}`, { method: creating ? "POST" : "PATCH", headers: { "Idempotency-Key": crypto.randomUUID() }, body }); if (aliveScope.current === captured) { form.resetFields(); setEditing(null); message.success(creating ? "店铺已新增" : "店铺已更新"); refresh(); } } catch(e) { if (aliveScope.current === captured) message.error(safeError(e)); } finally { setSaving(false); } };
++ const remove = (r: ShopManagementRecord) => { const captured = scope; modal.confirm({ title: "确认删除这条店铺记录？", content: "此操作为软删除，不会清除历史来源。删除后不再显示在普通列表中。", okText: "确认删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: async () => { if (aliveScope.current !== captured) throw new Error("工作区已变化，请重新操作"); try { await client.request(`/api/v1/shop-management/stores/${r.id}`, { method: "DELETE", headers: { "Idempotency-Key": crypto.randomUUID() }, body: { revision: r.revision } }); if (aliveScope.current === captured) { message.success("店铺已删除"); refresh(); } } catch(e) { if (aliveScope.current === captured) message.error(safeError(e)); throw new Error("删除失败"); } } }); };
++ const configInput = (config: ShopLoginSpaceConfig) => ({
++   defaultUrl: config.defaultUrl,
++   scheduleMode: config.scheduleMode,
++   protocolWhitelist: normalizeShopLoginSpaceProtocolWhitelist(config.protocolWhitelist),
++   inheritDefaultResources: config.inheritDefaultResources === true,
++   showWebViewDevTools: config.showWebViewDevTools === true,
++   showWebWindowDevTools: config.showWebWindowDevTools === true,
++   scripts: config.scripts.map(toLoginSpaceBindingUpdate),
++   styles: config.styles.map(toLoginSpaceBindingUpdate),
++   userAgentProfiles: config.userAgentProfiles ?? [],
++   defaultUserAgentProfileId: config.defaultUserAgentProfileId ?? null,
++   proxy: {
++     mode: config.proxy?.mode ?? "direct", protocol: config.proxy?.protocol, host: config.proxy?.host,
++     port: config.proxy?.port, bypassRules: config.proxy?.bypassRules ?? []
++   },
++   candidateSpaceUuids: config.candidateSpaceUuids ?? [],
++   allocationMode: config.allocationMode ?? "random"
++ });
++ const loadSpaceConfig = async (storeId: string) => {
++   const rawConfig = await getShopLoginSpaceConfig(client, storeId);
++   const config = { ...rawConfig, userAgentProfiles: rawConfig.userAgentProfiles ?? [], defaultUserAgentProfileId: rawConfig.defaultUserAgentProfileId ?? null, protocolWhitelist: rawConfig.protocolWhitelist ?? { navigation: ["http", "https", "blob", "data"], webSocket: ["ws", "wss"], external: ["mailto"] }, proxy: rawConfig.proxy ?? { mode: "direct" as const, bypassRules: [], usernameConfigured: false, passwordConfigured: false }, candidateSpaceUuids: rawConfig.candidateSpaceUuids ?? [], allocationMode: rawConfig.allocationMode ?? "random" as const };
++   if (!hasUninitializedLoginSpacePreferences(config)) return config;
++   if (!can("login_space.update")) return {
++     ...config,
++     inheritDefaultResources: config.inheritDefaultResources === true,
++     showWebViewDevTools: config.showWebViewDevTools === true,
++     showWebWindowDevTools: config.showWebWindowDevTools === true
++   };
++   const imported = importLegacyLoginSpacePreferences(config, window.localStorage, storeId);
++   let saved: ShopLoginSpaceConfig;
++   try {
++     saved = await updateShopLoginSpaceConfig(client, storeId, configInput(imported), config.revision);
++   } catch (error) {
++     // Another client may win the one-time local-to-server import at the same time.
++     try {
++       const concurrentRaw = await getShopLoginSpaceConfig(client, storeId);
++       const concurrentlySaved = { ...concurrentRaw, userAgentProfiles: concurrentRaw.userAgentProfiles ?? [], defaultUserAgentProfileId: concurrentRaw.defaultUserAgentProfileId ?? null };
++       if (!hasUninitializedLoginSpacePreferences(concurrentlySaved)) {
++         clearLegacyLoginSpacePreferences(window.localStorage, storeId);
++         return concurrentlySaved;
++       }
++     } catch {
++       // Keep the original save error when the follow-up read also fails.
++     }
++     throw error;
++   }
++   if (hasUninitializedLoginSpacePreferences(saved)) throw new Error("服务器未确认保存登录空间配置，请刷新后重试");
++   clearLegacyLoginSpacePreferences(window.localStorage, storeId);
++   return saved;
++ };
++ const refreshSpaceList = useCallback(async (storeId: string, manual = false, detectLocalData = manual) => {
++   const capturedGeneration = spaceDrawerGeneration.current;
++   await spaceListRefreshGate.current.run(async () => {
++     if (spaceStoreRef.current?.id !== storeId || spaceDrawerGeneration.current !== capturedGeneration) return;
++     setSpacesRefreshing(true);
++     try {
++       const result = await listShopLoginSpaces(client, storeId);
++       if (spaceStoreRef.current?.id !== storeId || spaceDrawerGeneration.current !== capturedGeneration) return;
++       const refreshedSpaces = mergeLoginSpaceInfoUpdates(mapRefreshedLoginSpaces(result.items), loginSpaceInfoUpdates.current);
++       setSpaces(refreshedSpaces);
++       if (detectLocalData) {
++         setLocalLoginDataByUuid(toLoginSpaceLocalDataStatusMap(refreshedSpaces, null));
++         if (isDesktopClient && hasMatrixAccountLoginSpaceInspectionCapability() && ws?.id && ws.type) {
++           try {
++             const inspection = await inspectMatrixAccountWebSpaceLocalData({
++               storeId,
++               workspaceId: ws.id,
++               workspaceType: ws.type,
++               platform: "douyin",
++               spaces: refreshedSpaces.filter(space => Boolean(space.uuid)).map(space => ({ webSpaceId: space.id, uuid: space.uuid }))
++             });
++             if (inspection.ok && inspection.data && spaceStoreRef.current?.id === storeId && spaceDrawerGeneration.current === capturedGeneration) {
++               setLocalLoginDataByUuid(toLoginSpaceLocalDataStatusMap(refreshedSpaces, inspection.data.items));
++             }
++           } catch {
++             // Unsupported or failed local inspection is deliberately shown as unknown.
++           }
++         }
++       }
++     } catch (error) {
++       // Background polling is intentionally quiet so active login/sync work continues.
++       if (manual && spaceStoreRef.current?.id === storeId) message.warning("登录空间列表刷新失败，当前内容仍可继续使用");
++     } finally {
++       if (spaceStoreRef.current?.id === storeId && spaceDrawerGeneration.current === capturedGeneration) {
++         setSpacesLoading(false);
++         setSpacesRefreshing(false);
++       }
++     }
++   });
++ }, [client, isDesktopClient, message, ws?.id, ws?.type]);
++ const invalidateSpaceSettingsLoad = () => { settingsLoadGeneration.current++; settingsLoadCancel.current?.(); settingsLoadCancel.current = null; setSpaceSettingsLoading(false); };
++ const openSpaces = (record: ShopManagementRecord) => { invalidateSpaceSettingsLoad(); spaceDrawerGeneration.current++; privateConfigRequest.current++; loginSpaceInfoUpdates.current.clear(); setLocalLoginDataByUuid({}); setPrivateConfigOpen(false); setPrivateConfig(null); setPrivateConfigSpace(null); setSpaceStore(record); setSpaceConfig(null); setDefaultSpaceUrl(""); setSpaces([]); setSyncProgressBySpace({}); setSyncFailedSpaceIds(new Set()); setSpacesLoading(true); setSpacesRefreshing(false); void loadSpaceConfig(record.id).then(config => { if (spaceStoreRef.current?.id === record.id) { setSpaceConfig(config); setDefaultSpaceUrl(config.defaultUrl); } }).catch(e => { if (spaceStoreRef.current?.id === record.id) message.error(safeSpaceConfigError(e)); }); };
++ useEffect(() => {
++   const storeId = spaceStore?.id;
++   if (!storeId) return;
++   let active = true;
++   const refresh = () => { if (active) void refreshSpaceList(storeId); };
++   void refreshSpaceList(storeId, true);
++   const timer = window.setInterval(refresh, LOGIN_SPACE_LIST_REFRESH_INTERVAL_MS);
++   return () => { active = false; window.clearInterval(timer); };
++ }, [spaceStore?.id, refreshSpaceList]);
++ useEffect(() => {
++   const storeId = spaceStore?.id;
++   if (!storeId) return;
++   const unsubscribe = onMatrixAccountLoginSpaceInfoChanged(payload => {
++     if (spaceStoreRef.current?.id !== storeId || payload.storeId !== storeId || !payload.uuid) return;
++     const update: LoginSpaceInfoUpdate = payload;
++     const known = loginSpaceInfoUpdates.current.get(update.uuid);
++     if (known && known.revision > update.revision) return;
++     loginSpaceInfoUpdates.current.set(update.uuid, update);
++     setSpaces(current => applyLoginSpaceInfoUpdate(current, update));
++     // The event triggers a fresh local probe; the remote loginStatus itself is
++     // never used as evidence that this device has local login data.
++     void refreshSpaceList(storeId, false, true);
++   });
++   return () => {
++     unsubscribe();
++     loginSpaceInfoUpdates.current.clear();
++   };
++ }, [spaceStore?.id, refreshSpaceList]);
++ const openSpaceSettings = async () => {
++   if (!spaceConfig || !spaceStore) return;
++   settingsLoadCancel.current?.();
++   const requestGeneration = ++settingsLoadGeneration.current;
++   const storeId = spaceStore.id;
++   const requestScope = scope;
++   const isCurrentRequest = () => requestGeneration === settingsLoadGeneration.current && spaceStoreRef.current?.id === storeId && aliveScope.current === requestScope;
++   const draft = structuredClone(spaceConfig);
++   setSpaceConfigDraft(draft); spaceConfigBaseline.current = JSON.stringify(draft); setSpaceSettingsTab("基本设置");
++   setDefaultProxyUsername(""); setDefaultProxyPassword(""); setClearDefaultProxyUsername(false); setClearDefaultProxyPassword(false);
++   setSnapshotSpaceUuid(undefined); setSnapshotPrivateConfig(null); setBindingOptions({ scripts: [], styles: [] }); setActiveWindowCounts({}); setSpaceSettingsOpen(true);
++   const uuids = spaces.filter(space => space.uuid && space.status === "active").map(space => space.uuid);
++   const load = startLoginSpaceSettingsLoad(async signal => {
++     const countsPromise = ws?.id && ws.type
++       ? withLoginSpaceWindowCountTimeout(getMatrixAccountLoginSpaceWindowCounts({ workspaceType: ws.type, workspaceId: ws.id, storeId, uuids }))
++       : Promise.resolve(undefined);
++     const [counts, scripts, styles] = await Promise.allSettled([
++       countsPromise,
++       listShopLoginSpaceBindingOptions(client, "script", signal),
++       listShopLoginSpaceBindingOptions(client, "style", signal)
++     ]);
++     return { counts, scripts, styles, uuids };
++   }, {
++     timeoutMs: LOGIN_SPACE_SETTINGS_LOAD_TIMEOUT_MS,
++     isCurrent: isCurrentRequest,
++     setLoading: setSpaceSettingsLoading
++   });
++   settingsLoadCancel.current = load.cancel;
++   try {
++     const result = await load.promise;
++     if (!isCurrentRequest()) return;
++     if (result.counts.status === "fulfilled" && result.counts.value?.ok && result.counts.value.data) {
++       setActiveWindowCounts(result.counts.value.data.counts);
++     } else {
++       setActiveWindowCounts(Object.fromEntries(result.uuids.map(uuid => [uuid, 0])));
++     }
++     const scripts = result.scripts.status === "fulfilled" ? result.scripts.value : [];
++     const styles = result.styles.status === "fulfilled" ? result.styles.value : [];
++     setBindingOptions({ scripts, styles });
++     if (result.scripts.status === "rejected" || result.styles.status === "rejected") {
++       const error = result.scripts.status === "rejected" ? result.scripts.reason : result.styles.status === "rejected" ? result.styles.reason : undefined;
++       message.error(`脚本/样式选项加载失败，已解除加载遮罩；关闭后可重新打开重试。${safeError(error)}`);
++     }
++   } catch (error) {
++     if (!isCurrentRequest()) return;
++     if (!(error instanceof Error && error.name === "LoginSpaceSettingsLoadCancelledError")) {
++       message.error(`${safeError(error)}；加载已结束，可关闭后重新打开重试`);
++     }
++   } finally {
++     if (settingsLoadCancel.current === load.cancel) settingsLoadCancel.current = null;
++   }
++ };
++ const clearSpaceSettingsSecrets = () => { setDefaultProxyUsername(""); setDefaultProxyPassword(""); setClearDefaultProxyUsername(false); setClearDefaultProxyPassword(false); };
++ const discardSpaceSettingsDraft = () => { invalidateSpaceSettingsLoad(); setSpaceConfigDraft(null); setSpaceSettingsOpen(false); clearSpaceSettingsSecrets(); };
++ const closeSpaceSettings = () => {
++   if (spaceConfigSaving) return;
++   const hasUnsavedChanges = (spaceConfigDraft && JSON.stringify(spaceConfigDraft) !== spaceConfigBaseline.current) || Boolean(defaultProxyUsername || defaultProxyPassword || clearDefaultProxyUsername || clearDefaultProxyPassword);
++   if (hasUnsavedChanges) {
++     modal.confirm({ title: "放弃未保存的登录空间设置？", content: "当前修改尚未保存。关闭后将丢弃本次草稿。", okText: "放弃修改", cancelText: "继续编辑", okButtonProps: { danger: true }, onOk: discardSpaceSettingsDraft });
++     return;
++   }
++   discardSpaceSettingsDraft();
++ };
++ const focusSpaceSettingsField = (tab: typeof spaceSettingsTab, field: string) => {
++   setSpaceSettingsTab(tab);
++   window.requestAnimationFrame(() => {
++     document.querySelector<HTMLElement>(`[data-settings-field="${field}"] input, [data-settings-field="${field}"] button, [data-settings-field="${field}"] [tabindex]`)?.focus();
++   });
++ };
++ const saveSpaceSettings = async () => {
++   const draft = spaceConfigDraft;
++   const value = draft?.defaultUrl.trim() ?? "";
++   if (!spaceStore || !spaceConfig || !draft) return;
++   if (value) { try { const url = new URL(value); if (!/^https?:$/.test(url.protocol)) throw new Error(); } catch { focusSpaceSettingsField("基本设置", "defaultUrl"); message.error("请输入有效的 http 或 https 网址"); return; } }
++   if (draft.proxy.mode === "fixed" && (!draft.proxy.protocol || !draft.proxy.host?.trim() || !Number.isInteger(draft.proxy.port) || draft.proxy.port! < 1 || draft.proxy.port! > 65535)) { focusSpaceSettingsField("基本设置", "defaultProxy"); message.error("请填写有效的代理协议、主机和 1–65535 端口"); return; }
++   const incompletePins = getIncompletePinnedLoginSpaceBindingIdentifiers(draft.scripts, draft.styles);
++   if (incompletePins.length) { focusSpaceSettingsField("注入设置", "resourceBindings"); message.error(`固定版本尚未选择具体发布版：${incompletePins.join("、")}。请先选择版本或移除绑定。`); return; }
++   if (draft.candidateSpaceUuids.some(uuid => !spaces.some(space => space.uuid === uuid && (space.status === "active")))) { focusSpaceSettingsField("分配规则", "candidateSpaces"); message.error("候选登录空间已失效，请刷新列表后重新选择"); return; }
++   if (draft.userAgentProfiles?.some(profile => !profile.name.trim() || !profile.userAgent.trim() || !profile.acceptLanguage.trim())) { focusSpaceSettingsField("基本设置", "userAgentProfiles"); message.error("请补全每个 UA 模板的名称、User-Agent 和 Accept-Language"); return; }
++   setSpaceConfigSaving(true);
++   try {
++     const proxy: ShopLoginSpaceProxyInput = { mode: draft.proxy.mode, protocol: draft.proxy.protocol, host: draft.proxy.host, port: draft.proxy.port, bypassRules: draft.proxy.bypassRules ?? [] };
++     if (clearDefaultProxyUsername) proxy.clearUsername = true; else if (defaultProxyUsername.trim()) proxy.username = defaultProxyUsername;
++     if (clearDefaultProxyPassword) proxy.clearPassword = true; else if (defaultProxyPassword) proxy.password = defaultProxyPassword;
++     const next = await updateShopLoginSpaceConfig(client, spaceStore.id, { ...configInput(draft), defaultUrl: value || "https://creator.douyin.com/", proxy }, spaceConfig.revision);
++     if (hasUninitializedLoginSpacePreferences(next)) throw new Error("服务器未确认保存登录空间配置，请刷新后重试");
++     clearLegacyLoginSpacePreferences(window.localStorage, spaceStore.id); setSpaceConfig(next); setSpaceConfigDraft(null); setDefaultSpaceUrl(next.defaultUrl); spaceConfigBaseline.current = JSON.stringify(next); setSpaceSettingsOpen(false); clearSpaceSettingsSecrets(); message.success("默认配置已保存到服务器");
++   } catch (e) { message.error(safeSpaceConfigError(e)); }
++   finally { setSpaceConfigSaving(false); }
++ };
++ const updateSpaceConfigDraft = (patch: Partial<ShopLoginSpaceConfig>) => setSpaceConfigDraft(current => current ? { ...current, ...patch } : current);
++ const addDefaultUserAgentProfile = () => setSpaceConfigDraft(current => current ? { ...current, userAgentProfiles: [...(current.userAgentProfiles ?? []), { id: crypto.randomUUID(), name: `UA 配置 ${(current.userAgentProfiles ?? []).length + 1}`, userAgent: "", acceptLanguage: "" }] } : current);
++ const updateDefaultUserAgentProfile = (id: string, patch: Partial<ShopLoginSpaceUserAgentProfile>) => setSpaceConfigDraft(current => current ? { ...current, userAgentProfiles: (current.userAgentProfiles ?? []).map(profile => profile.id === id ? { ...profile, ...patch } : profile) } : current);
++ const removeDefaultUserAgentProfile = (id: string) => setSpaceConfigDraft(current => current ? { ...current, userAgentProfiles: (current.userAgentProfiles ?? []).filter(profile => profile.id !== id), defaultUserAgentProfileId: current.defaultUserAgentProfileId === id ? null : current.defaultUserAgentProfileId } : current);
++ const loadSnapshotSpace = async (uuid?: string) => {
++   const request = ++snapshotRequest.current;
++   setSnapshotSpaceUuid(uuid); setSnapshotPrivateConfig(null);
++   if (!uuid || !spaceStore) return;
++   setSnapshotLoading(true);
++   try { const config = await getShopLoginSpacePrivateConfig(client, spaceStore.id, uuid); if (snapshotRequest.current === request) setSnapshotPrivateConfig(config); }
++   catch (e) { message.error(safeSpaceConfigError(e)); }
++   finally { if (snapshotRequest.current === request) setSnapshotLoading(false); }
++ };
++ const moveCandidateSpace = (uuid: string, delta: -1 | 1) => setSpaceConfigDraft(current => {
++   if (!current) return current;
++   const order = current.candidateSpaceUuids.length ? [...current.candidateSpaceUuids] : spaces.filter(space => space.uuid && (space.status === "active")).map(space => space.uuid);
++   const index = order.indexOf(uuid); const target = index + delta;
++   if (index < 0 || target < 0 || target >= order.length) return current;
++   [order[index], order[target]] = [order[target], order[index]];
++   return { ...current, candidateSpaceUuids: order };
++ });
++ const privateConfigUpdate = (config: ShopLoginSpacePrivateConfig): ShopLoginSpacePrivateConfigUpdate => {
++   const proxy: ShopLoginSpaceProxyInput = {
++     mode: config.proxy.mode, protocol: config.proxy.protocol, host: config.proxy.host,
++     port: config.proxy.port, bypassRules: config.proxy.bypassRules ?? []
++   };
++   if (clearPrivateProxyUsername) proxy.clearUsername = true;
++   else if (privateProxyUsername) proxy.username = privateProxyUsername;
++   if (clearPrivateProxyPassword) proxy.clearPassword = true;
++   else if (privateProxyPassword) proxy.password = privateProxyPassword;
++   return {
++     defaultUrl: config.defaultUrl,
++     scheduleMode: config.scheduleMode,
++     inheritDefaultResources: config.inheritDefaultResources === true,
++     showWebViewDevTools: config.showWebViewDevTools === true,
++     showWebWindowDevTools: config.showWebWindowDevTools === true,
++     scripts: config.scripts.map(toLoginSpaceBindingUpdate),
++     styles: config.styles.map(toLoginSpaceBindingUpdate),
++     protocolWhitelist: normalizeShopLoginSpaceProtocolWhitelist(config.protocolWhitelist),
++     proxy
++   };
++ };
++ const openPrivateSpaceConfig = async (space: ShopLoginSpace) => {
++   if (!spaceStore || !space.uuid) { message.warning("登录空间 UUID 尚未就绪，请刷新后重试"); return; }
++   if (!can("login_space.update")) { message.error("当前工作区无权修改登录空间配置"); return; }
++   const requestId = ++privateConfigRequest.current;
++   setPrivateConfigSpace(space); setPrivateConfig(null); setPrivateProxyUsername(""); setPrivateProxyPassword(""); setClearPrivateProxyUsername(false); setClearPrivateProxyPassword(false); setPrivateConfigOpen(true); setBindingOptionsLoading(true);
++   try {
++     const [config, scripts, styles] = await Promise.all([
++       getShopLoginSpacePrivateConfig(client, spaceStore.id, space.uuid),
++       listShopLoginSpaceBindingOptions(client, "script"),
++       listShopLoginSpaceBindingOptions(client, "style")
++     ]);
++     if (requestId === privateConfigRequest.current) { setPrivateConfig(config); setBindingOptions({ scripts, styles }); }
++   } catch (e) { if (requestId === privateConfigRequest.current) { message.error(safeSpaceConfigError(e)); setPrivateConfigOpen(false); } }
++   finally { if (requestId === privateConfigRequest.current) setBindingOptionsLoading(false); }
++ };
++ const savePrivateSpaceConfig = async () => {
++   if (!spaceStore || !privateConfigSpace?.uuid || !privateConfig) return;
++   try { const parsed = new URL(privateConfig.defaultUrl); if (!/^https?:$/.test(parsed.protocol)) throw new Error(); }
++   catch { message.error("请输入有效的 http 或 https 网址"); return; }
++   const incompletePins = getIncompletePinnedLoginSpaceBindingIdentifiers(privateConfig.scripts, privateConfig.styles);
++   if (incompletePins.length) { message.error(`固定版本尚未选择具体发布版：${incompletePins.join("、")}`); return; }
++   setPrivateConfigSaving(true);
++   try {
++     const saved = await updateShopLoginSpacePrivateConfig(client, spaceStore.id, privateConfigSpace.uuid, privateConfigUpdate(privateConfig), privateConfig.revision);
++     setPrivateConfig(saved); setPrivateProxyUsername(""); setPrivateProxyPassword(""); setClearPrivateProxyUsername(false); setClearPrivateProxyPassword(false); setPrivateConfigOpen(false);
++     message.success("登录空间私有配置已保存到服务器");
++   } catch (e) { message.error(safeSpaceConfigError(e)); }
++   finally { setPrivateConfigSaving(false); }
++ };
++ const openExistingSpace = async (space: ShopLoginSpace, options: { replaceLocalData?: boolean; applyLatestPrivateConfig?: boolean } = {}) => {
++   if (!spaceStore || !ws?.id || !ws.type || !space.uuid) { message.warning("当前工作区或登录空间未就绪"); return; }
++   if (!hasMatrixAccountWebSpaceDesktopCapability()) { message.error("当前运行环境不支持打开登录空间"); return; }
++   try {
++     // Every open resolves the current UUID-scoped configuration; no local private-config cache is reused.
++     const currentConfig = await getShopLoginSpacePrivateConfig(client, spaceStore.id, space.uuid);
++     const selected = selectLoginSpaceBindings("reuse", currentConfig.scripts, currentConfig.styles, currentConfig.inheritDefaultResources === true);
++     const unavailable = getUnavailableLoginSpaceBindingIdentifiers(selected.scripts, selected.styles);
++     if (unavailable.length) {
++       message.error(`以下绑定没有可用发布版本：${unavailable.join("、")}。请先调整店铺绑定后重试。`);
++       return;
++     }
++     const bindings = toLoginSpaceRuntimeInput(selected.scripts, selected.styles);
++     const result = await openMatrixAccountWebSpace({ webSpaceId: space.id, storeId: spaceStore.id, workspaceId: ws.id, workspaceType: ws.type, platform: "douyin", url: currentConfig.defaultUrl || "https://creator.douyin.com/", scheduleMode: currentConfig.scheduleMode === "strict_document_start" ? "strict_document_start" : "page_first", protocolWhitelist: normalizeShopLoginSpaceProtocolWhitelist(currentConfig.protocolWhitelist), showWindow: true, showWebViewDevTools: currentConfig.showWebViewDevTools === true, showWebWindowDevTools: currentConfig.showWebWindowDevTools === true, restoreCloudSnapshot: options.replaceLocalData === true, replaceLocalData: options.replaceLocalData, applyLatestPrivateConfig: options.applyLatestPrivateConfig, ...bindings });
++     if (!result.ok) throw new Error(result.error?.message ?? "打开登录空间失败");
++     const openedResult = result.data;
++     if (!openedResult) throw new Error("打开登录空间未返回结果");
++     if (openedResult.requiresPrivateConfigRestart) {
++       modal.confirm({ title: "登录空间配置已更新", content: "当前窗口仍使用旧配置。是否关闭后按服务器最新配置重新打开？", okText: "重新打开", cancelText: "稍后", onOk: () => openExistingSpace(space, { ...options, applyLatestPrivateConfig: true }) });
++       return;
++     }
++     if (openedResult.restoredFromCloud) {
++       setLocalLoginDataByUuid(current => ({ ...current, [space.uuid]: "has_data" }));
++       const validation = openedResult.restoreLoginValidation;
++       if (validation?.status === "logged_in") message.success("云端档案已恢复，页面级检查显示已进入业务页");
++       else if (validation?.status === "login_required") message.warning("云端档案已恢复，但目标站点要求重新登录");
++       else message.info("云端档案已恢复；页面暂未能确认登录状态，请检查空间窗口");
++     } else if (options.replaceLocalData) {
++       setLocalLoginDataByUuid(current => ({ ...current, [space.uuid]: "has_data" }));
++       message.success("已从云端恢复登录空间并覆盖本机数据");
++     }
++     void refreshSpaceList(spaceStore.id, true, true);
++   } catch (e) { message.error(e instanceof Error ? e.message : "打开登录空间失败"); }
++   finally { setSyncProgressBySpace(current => { if (!current[space.id] || !["downloading", "restoring"].includes(current[space.id].phase ?? "")) return current; const next = { ...current }; delete next[space.id]; return next; }); }
++ };
++ const restoreCloudSpace = (space: ShopLoginSpace) => {
++   if (space.syncStatus !== "synced") { message.info("该登录空间没有可恢复的云端快照"); return; }
++   if (!can("login_space.sync")) { message.error("当前工作区无权恢复登录空间快照"); return; }
++   if (!hasMatrixAccountWebSpaceDesktopCapability()) { message.error("当前运行环境不支持恢复登录空间"); return; }
++   modal.confirm({ title: "从云端恢复登录空间？", content: "将使用服务器快照覆盖本机该 UUID 的登录数据；如果空间窗口已打开，会先关闭窗口并在校验快照后替换数据。", okText: "恢复并覆盖", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => openExistingSpace(space, { replaceLocalData: true }) });
++ };
++ const runSpaceSync = async (space: ShopLoginSpace) => {
++   if (space.loginStatus !== "logged_in") { message.warning("请先完成登录，再同步登录空间"); return; }
++   if (!can("login_space.sync")) { message.error("当前工作区无权同步登录空间"); return; }
++   if (!hasMatrixAccountLoginSpaceSyncCapability()) { message.error("当前运行环境不支持登录空间云端同步"); return; }
++   if (!spaceStore || !ws?.id || !ws.type) { message.warning("当前工作区或登录空间未就绪"); return; }
++   const capturedScope = scope;
++   setSyncFailedSpaceIds(current => { const next = new Set(current); next.delete(space.id); return next; });
++   setSyncProgressBySpace(current => ({ ...current, [space.id]: { phase: "preparing", bytesTransferred: 0, totalBytes: 0 } }));
++   try {
++     const result = await syncMatrixAccountLoginSpace({
++       webSpaceId: space.id,
++       storeId: spaceStore.id,
++       workspaceId: ws.id,
++       workspaceType: ws.type,
++       platform: "douyin",
++       expectedRevision: space.revision
++     });
++     if (!result.ok || !result.data) throw new Error(result.error?.message ?? "登录空间同步失败");
++     if (aliveScope.current !== capturedScope) return;
++     setSpaces(current => current.map(item => item.id === space.id ? { ...item, syncStatus: "synced", syncProgress: null } : item));
++     setSyncFailedSpaceIds(current => { const next = new Set(current); next.delete(space.id); return next; });
++     if (result.data.sourceWindowResumed === false) message.warning("登录空间数据已同步，但原窗口未能自动恢复，请重新打开空间");
++     else message.success(result.data.alreadySynced ? "登录空间已是最新" : "登录空间已同步到服务器");
++     void refreshSpaceList(spaceStore.id, true, true);
++   } catch (e) {
++     if (aliveScope.current === capturedScope) {
++       setSyncFailedSpaceIds(current => new Set(current).add(space.id));
++       message.error(e instanceof Error ? e.message : "登录空间同步失败");
++     }
++   }
++   } finally {
++     setSyncProgressBySpace(current => { const next = { ...current }; delete next[space.id]; return next; });
++   }
++ };
++ const beginSpaceSync = (space: ShopLoginSpace) => {
++   if (space.loginStatus !== "logged_in") { message.warning("请先完成登录，再同步登录空间"); return; }
++   if (!can("login_space.sync")) { message.error("当前工作区无权同步登录空间"); return; }
++   if (!hasMatrixAccountLoginSpaceSyncCapability()) { message.error("当前运行环境不支持登录空间云端同步"); return; }
++   if (!spaceStore || !ws?.id || !ws.type) { message.warning("当前工作区或登录空间未就绪"); return; }
++   if (space.syncStatus === "synced") {
++     modal.confirm({ title: "覆盖服务器登录空间快照？", content: "继续后会用本机该 UUID 的完整 WebView 用户数据替换服务器快照。只有新档案完整上传并通过校验后，服务器才切换为最新版本并清理旧版；失败时旧快照保持可恢复。", okText: "覆盖并同步", cancelText: "取消", okButtonProps: { danger: true }, onOk: () => runSpaceSync(space) });
++     return;
++   }
++   void runSpaceSync(space);
++ };
++ const createSpace = async () => {
++   if (creatingSpaceRef.current) return;
++   const creationReady = isLoginSpaceCreationReady({ storeReady: Boolean(spaceStore), workspaceReady: Boolean(ws?.id && ws.type), spacesLoading, configReady: Boolean(spaceConfig && spaceStore && spaceConfig.storeId === spaceStore.id) });
++   if (!creationReady) { message.warning(spaceConfig ? "当前工作区或登录空间列表未就绪，暂时无法新增登录空间" : "登录空间默认配置尚未就绪，暂时无法新增登录空间"); return; }
++   if (!spaceStore || !ws?.id || !ws.type || !spaceConfig) return;
++   if (!can("login_space.create")) { message.error("当前工作区无权创建登录空间"); return; }
++   if (!hasMatrixAccountWebSpaceDesktopCapability()) { message.error("当前运行环境不支持新增登录空间"); return; }
++   creatingSpaceRef.current = true; setCreatingSpace(true);
++   try {
++     const currentConfig = await loadSpaceConfig(spaceStore.id);
++     setSpaceConfig(currentConfig);
++     setDefaultSpaceUrl(currentConfig.defaultUrl);
++     const unavailable = getUnavailableLoginSpaceBindingIdentifiers(currentConfig.scripts, currentConfig.styles);
++     if (unavailable.length) {
++       message.error(`以下绑定没有可用发布版本：${unavailable.join("、")}。请先调整店铺绑定后重试。`);
++       return;
++     }
++     const webSpaceId = crypto.randomUUID();
++     const persisted = await createShopLoginSpace(client, spaceStore.id, { webSpaceId, displayName: spaceStore.name || spaceStore.account || "未命名空间" });
++     setSpaces(current => [persisted, ...current.filter(item => item.id !== persisted.id)]);
++     const selected = selectLoginSpaceBindings("new", currentConfig.scripts ?? [], currentConfig.styles ?? []);
++     const bindings = toLoginSpaceRuntimeInput(selected.scripts, selected.styles);
++     const result = await createMatrixAccountWebSpaceLogin({ webSpaceId: persisted.id, storeId: spaceStore.id, workspaceId: ws.id, workspaceType: ws.type, platform: "douyin", url: currentConfig.defaultUrl || "https://creator.douyin.com/", scheduleMode: currentConfig.scheduleMode ?? "page_first", showWindow: true, showWebViewDevTools: currentConfig.showWebViewDevTools === true, showWebWindowDevTools: currentConfig.showWebWindowDevTools === true, inheritDefaultResources: true, ...bindings });
++     if (!result.ok) throw new Error(result.error?.message ?? "打开登录空间失败");
++     message.success("已打开新的登录空间，请完成登录后保存");
++     void refreshSpaceList(spaceStore.id, true);
++   } catch (e) { message.error(e instanceof Error ? e.message : "打开登录空间失败"); }
++   finally { creatingSpaceRef.current = false; setCreatingSpace(false); }
++ };
++ const removeSpace = (space: ShopLoginSpace) => { if (!spaceStore) return; modal.confirm({ title: "确认删除登录空间？", content: "此操作会删除服务器 UUID 私有配置与云端快照，并清理本机登录数据。", okText: "确认删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: async () => { await deleteShopLoginSpace(client, spaceStore.id, space); setSpaces(current => current.filter(item => item.id !== space.id)); setLocalLoginDataByUuid(current => { const next = { ...current }; delete next[space.uuid]; return next; }); try { const result = await clearMatrixAccountWebSpace({ webSpaceId: space.id, storeId: spaceStore.id, workspaceId: ws?.id ?? "", workspaceType: ws?.type ?? "platform", platform: "douyin" }); if (!result.ok) throw new Error(result.error?.message ?? "local cleanup failed"); message.success("登录空间、云端快照和本机数据已删除"); } catch { message.warning("服务器空间和云端快照已删除，但本机数据清理失败；请重新打开客户端后重试清理"); } } }); };
++ const copySpaceUuid = async (value?: string) => { if (!value) return; try { await navigator.clipboard.writeText(value); message.success("UUID 已复制"); } catch { message.error("复制失败，请检查剪贴板权限"); } };
++ if (displayedScope.current !== scope) return <Alert type="info" title="正在切换工作区" />;
++ if (!can("view")) return <Alert type="warning" title="当前工作区无权查看抖店店铺" />;
++ return <ConfigProvider locale={zhCN}><div className="shop-management-page">
++ <ListPageCard title="抖店店铺" subtitle="按登录账号建档，仅当前工作区可见；IP归属地为地域文本。本页不执行第三方登录。" toolbar={<div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}><Space wrap style={{ minWidth: 0 }}><Input value={input} onChange={e => setInput(e.target.value)} placeholder="店铺名称 / 账号 / 抖店ID" allowClear onPressEnter={() => { setPage(1); setKeyword(input); refresh(); }} style={{ width: 250 }} /><Button type="primary" onClick={() => { setPage(1); setKeyword(input); refresh(); }}>查询</Button><Button onClick={() => { setInput(""); setKeyword(""); setPage(1); refresh(); }}>重置</Button></Space><Space style={{ marginLeft: "auto", flexShrink: 0 }}><Button onClick={refresh}>刷新</Button>{can("create") && <Button type="primary" onClick={() => { form.resetFields(); setEditing("new"); }}>新增店铺</Button>}</Space></div>}>
++ {error ? <Alert type="error" title={error} showIcon style={{ marginBottom: 8 }} /> : null}
++ <Table<ShopManagementRecord> className="shop-management-table" rowKey="id" loading={loading} dataSource={displayedScope.current === scope ? rows : []} scroll={{ x: 1330 }} pagination={{ current: page, pageSize: size, total: displayedScope.current === scope ? total : 0, showSizeChanger: true, pageSizeOptions: [20,50,100], showTotal: n => `共 ${n} 条`, onChange: (p,n) => { setPage(n !== size ? 1 : p); setSize(n); } }} columns={[
++ { title: "LOGO", width: 72, align: "center", render: (_,r) => <div style={{ width: 40, margin: "0 auto" }}><ImageView value={imageValue(r.logoImageId, r.logoUrl)} size={40} /></div> },
++ { title: "店铺名称", dataIndex: "name", render: v => <div className="shop-management-content-cell shop-management-content-cell--name" title={unsynced(v)}>{unsynced(v)}</div> },
++ { title: "账号", dataIndex: "account", render: v => <div className="shop-management-content-cell shop-management-content-cell--account" title={v}>{v}</div> },
++ { title: "抖店ID", dataIndex: "shopId", width: 150, render: v => <div className="shop-management-content-cell shop-management-content-cell--shop-id" title={unsynced(v)}>{unsynced(v)}</div> },
++ { title: "归属地", dataIndex: "city", width: 130, ellipsis: true, render: v => v || "暂无记录" }, { title: "最后登陆", width: 190, render: (_,r) => time(r.lastLoginAt) },
++ { title: "备注", dataIndex: "remark", render: v => <div className="shop-management-content-cell shop-management-content-cell--remark" title={v || "—"}>{v || "—"}</div> },
++ { title: "操作", key: "actions", width: isDesktopClient ? 320 : 210, fixed: "right", className: "table-action-column", render: (_,r) => <div className="table-action-grid">{isDesktopClient && <Button type="link" size="small" onClick={() => openSpaces(r)}>指纹</Button>}{<Button type="link" size="small" onClick={() => void open(r,"detail")}>详情</Button>}{can("update") && <Button type="link" size="small" onClick={() => void open(r,"edit")}>修改</Button>}{can("delete") && <Button type="link" danger size="small" onClick={() => remove(r)}>删除</Button>}</div> }
++ ]} />
++ </ListPageCard>
++ <Drawer title={editing === "new" ? "新增抖店店铺" : "修改抖店店铺"} open={editing !== null && displayedScope.current === scope} width={520} destroyOnHidden onClose={() => { if (!saving) { setEditing(null); form.resetFields(); } }} extra={<Button type="primary" loading={saving} disabled={uploading} onClick={() => void save()}>保存</Button>}>
++ <Form form={form} layout="vertical" preserve={false}><Form.Item name="account" label="登录账号" rules={[{ required:true, message:"请输入账号" }, { max:128 }]}><Input autoComplete="off" maxLength={128} placeholder="请填写店铺登录账号" /></Form.Item>
++ {(editing === "new" || can("password_update")) && <Form.Item name="password" label={editing === "new" ? "登录密码" : "修改密码（留空保持原值）"} rules={[{ required:editing === "new", message:"请输入密码" }, { max:512 }, { validator: (_,v) => v === "********" || v === "••••••••" ? Promise.reject(new Error("不能提交掩码")) : Promise.resolve() }]}><Input.Password autoComplete="new-password" maxLength={512} placeholder={editing === "new" ? "请填写店铺登录密码" : "留空不修改密码"} /></Form.Item>}
++ <Form.Item name="name" label="店铺名称" rules={[{ max:128 }]}><Input maxLength={128} placeholder="请填写店铺名称（选填）" /></Form.Item><Form.Item name="shopId" label="抖店ID" rules={[{ max:64 }]}><Input maxLength={64} placeholder="请填写平台店铺ID（选填）" /></Form.Item><Form.Item name="city" label="IP归属地" rules={[{ max:64 }]}><Input maxLength={64} placeholder="请填写省份或城市，例如深圳（选填）" /></Form.Item><Form.Item name="logoUrl" label="LOGO"><ImageUpload contextType="shop" contextId={editing && editing !== "new" ? editing.id : undefined} onBusyChange={setUploading} /></Form.Item><Form.Item name="remark" label="备注" rules={[{ max:2000 }]}><Input.TextArea rows={4} maxLength={2000} showCount placeholder="请填写备注（选填）" /></Form.Item></Form>
++ </Drawer>
++ <Drawer title="抖店店铺详情" open={!!detail && displayedScope.current === scope} width={520} onClose={() => setDetail(null)} destroyOnHidden>{detail && <Descriptions column={1} bordered items={[
++ { key:"account",label:"账号",children:detail.account },{ key:"name",label:"店铺名称",children:unsynced(detail.name) },{ key:"shop",label:"抖店ID",children:unsynced(detail.shopId) },{ key:"password",label:"密码",children:detail.hasPassword ? "已设置（不提供明文读取）" : "未设置" },{ key:"city",label:"IP归属地",children:detail.city || "暂无记录" },{ key:"login",label:"最后登录（北京时间）",children:time(detail.lastLoginAt) },{ key:"remark",label:"备注",children:detail.remark || "—" },{ key:"revision",label:"数据版本",children:detail.revision }
++ ]} />}</Drawer>
++ <Drawer className="shop-login-space-drawer" title={`${spaceStore?.name || spaceStore?.account || "店铺"} 登录空间`} open={!!spaceStore} width={spaceDrawerWidth} styles={{ content: { position: "relative" } }} onClose={() => { stopSpaceDrawerResize(); if (!creatingSpace) { invalidateSpaceSettingsLoad(); spaceDrawerGeneration.current++; setSpaceStore(null); setLocalLoginDataByUuid({}); } }} extra={<Space><Button aria-label="刷新登录空间" title="刷新登录空间" icon={<ReloadOutlined />} loading={spacesRefreshing} disabled={!spaceStore} onClick={() => { if (spaceStore) void refreshSpaceList(spaceStore.id, true); }} /><Button aria-label="设置默认网址" title="设置默认网址" icon={<SettingOutlined />} disabled={spacesLoading || !spaceConfig} onClick={() => void openSpaceSettings()} /><Button type="primary" loading={creatingSpace} disabled={!can("login_space.create") || creatingSpace || !isLoginSpaceCreationReady({ storeReady: Boolean(spaceStore), workspaceReady: Boolean(ws?.id && ws.type), spacesLoading, configReady: Boolean(spaceConfig && spaceStore && spaceConfig.storeId === spaceStore.id) })} onClick={() => void createSpace()}>新增空间</Button></Space>}>
++ <button
++   type="button"
++   role="separator"
++   aria-label="调整登录空间窗口宽度"
++   aria-orientation="vertical"
++   aria-valuemin={getLoginSpaceDrawerWidthBounds(window.innerWidth).min}
++   aria-valuemax={getLoginSpaceDrawerWidthBounds(window.innerWidth).max}
++   aria-valuenow={spaceDrawerWidth}
++   aria-valuetext={`${spaceDrawerWidth} 像素`}
++   tabIndex={0}
++   onPointerDown={startSpaceDrawerResize}
++   onPointerMove={moveSpaceDrawerResize}
++   onPointerUp={stopSpaceDrawerResize}
++   onPointerCancel={stopSpaceDrawerResize}
++   onLostPointerCapture={stopSpaceDrawerResize}
++   onKeyDown={handleSpaceDrawerResizeKey}
++   style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 16, height: 72, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, border: 0, background: "transparent", color: "var(--ant-color-border-secondary, #bfbfbf)", cursor: "ew-resize", touchAction: "none" }}
++ >
++   <span aria-hidden="true" style={{ width: 3, height: 40, borderRadius: 2, background: "currentColor" }} />
++ </button>
++ <Table<ShopLoginSpace> rowKey="id" loading={spacesLoading} dataSource={spaces} pagination={false} tableLayout="auto" scroll={{ x: 900 }} locale={{ emptyText: "当前没有登录空间" }} columns={[
++   { title: "名称", dataIndex: "displayName", render: (value, space) => <div style={{ minWidth: 0 }}><div style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{getLoginSpaceDisplayName(value, spaceStore?.name, spaceStore?.account)}</div>{space.uuid ? <Space size={4} style={{ maxWidth: "100%" }}><Tooltip title={space.uuid} placement="top"><Typography.Text type="secondary">{space.uuid.slice(0, 8)}</Typography.Text></Tooltip><Button type="text" size="small" aria-label="复制登录空间 UUID" title="复制 UUID" icon={<CopyOutlined />} onClick={() => void copySpaceUuid(space.uuid!)} /></Space> : <Typography.Text type="secondary">—</Typography.Text>}</div> },
++   { title: "登录状态", dataIndex: "loginStatus", onCell: () => ({ style: { whiteSpace: "nowrap" } }), render: (value: ShopLoginStatus | undefined) => loginStatusLabels[value ?? "unknown"] },
++   { title: "云端快照", key: "syncStatus", onCell: () => ({ style: { whiteSpace: "nowrap" } }), render: (_, space) => renderLoginSpaceSyncStatus(space, localLoginDataByUuid[space.uuid], syncProgressBySpace[space.id], syncFailedSpaceIds.has(space.id)) },
++   { title: "创建时间", dataIndex: "createdAt", width: 190, render: time },
++   { title: "操作", key: "actions", width: 360, fixed: "right", className: "table-action-column", render: (_, space) => <div className="table-action-grid"><Button type="link" size="small" disabled={space.status !== "active" && space.status !== "available"} onClick={() => void openExistingSpace(space)}>打开</Button><Button type="link" danger size="small" onClick={() => removeSpace(space)}>删除</Button><Button type="link" size="small" disabled={!can("login_space.sync") || Boolean(syncProgressBySpace[space.id])} loading={Boolean(syncProgressBySpace[space.id] && ["preparing", "uploading", "verifying"].includes(syncProgressBySpace[space.id].phase ?? ""))} onClick={() => void beginSpaceSync(space)}>同步</Button><Button type="link" size="small" disabled={!can("login_space.update")} icon={<SettingOutlined />} onClick={() => void openPrivateSpaceConfig(space)}>配置</Button>{space.syncStatus === "synced" ? <Button type="link" size="small" disabled={!can("login_space.sync") || Boolean(syncProgressBySpace[space.id])} onClick={() => restoreCloudSpace(space)}>恢复</Button> : null}</div> }
++  ]} />
++ </Drawer>
++ <Drawer
++  className="shop-login-space-settings-drawer"
++  title={`${spaceStore?.name || spaceStore?.account || "店铺"} 登录空间设置`}
++  open={spaceSettingsOpen}
++  width={Math.min(760, typeof window === "undefined" ? 760 : window.innerWidth)}
++  destroyOnHidden
++  onClose={closeSpaceSettings}
++  extra={<Button type="primary" loading={spaceConfigSaving} disabled={!spaceConfigDraft || spaceSettingsLoading} onClick={() => void saveSpaceSettings()}>保存</Button>}
++  styles={{ header: { position: "sticky", top: 0, zIndex: 2 }, body: { overflow: "auto" } }}
++ >
++  <Spin spinning={spaceSettingsLoading}>
++   <Space direction="vertical" size={16} style={{ width: "100%" }}>
++    <Segmented className="list-status-segmented" block value={spaceSettingsTab} onChange={value => setSpaceSettingsTab(value as typeof spaceSettingsTab)} options={["基本设置", "注入设置", "分配规则"]} />
++    {!spaceConfigDraft ? <Alert type="info" showIcon title="正在读取店铺登录空间设置" /> : null}
++    {spaceConfigDraft && spaceSettingsTab === "基本设置" ? <Space direction="vertical" size={16} style={{ width: "100%" }}>
++     <div data-settings-field="defaultUrl"><Typography.Text strong>默认主页 URL</Typography.Text><Input value={spaceConfigDraft.defaultUrl} onChange={e => updateSpaceConfigDraft({ defaultUrl: e.target.value })} placeholder="例如：https://example.com/" autoFocus /></div>
++     <div data-settings-field="userAgentProfiles"><Typography.Text strong>新空间默认 UA / Accept-Language</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>配置模板只用于新建或首次初始化 UUID；首次初始化时复制为该 UUID 的固定快照。之后修改模板不会静默覆盖已有 UUID 的配置。</Typography.Paragraph><Select allowClear value={spaceConfigDraft.defaultUserAgentProfileId ?? undefined} placeholder="选择新空间默认使用的 UA 配置" options={(spaceConfigDraft.userAgentProfiles ?? []).map(profile => ({ value: profile.id, label: profile.name }))} onChange={value => updateSpaceConfigDraft({ defaultUserAgentProfileId: value ?? null })} style={{ width: "100%", marginBottom: 8 }} />
++      <Space direction="vertical" size={8} style={{ width: "100%" }}>{(spaceConfigDraft.userAgentProfiles ?? []).map(profile => <div key={profile.id} style={{ border: "1px solid var(--ant-color-border-secondary)", borderRadius: 4, padding: 10 }}><Space direction="vertical" size={6} style={{ width: "100%" }}><Space.Compact style={{ width: "100%" }}><Input value={profile.name} placeholder="配置名称" onChange={e => updateDefaultUserAgentProfile(profile.id, { name: e.target.value })} /><Button danger onClick={() => removeDefaultUserAgentProfile(profile.id)}>删除</Button></Space.Compact><Input.TextArea value={profile.userAgent} autoSize={{ minRows: 2, maxRows: 4 }} placeholder="User-Agent" onChange={e => updateDefaultUserAgentProfile(profile.id, { userAgent: e.target.value })} /><Input value={profile.acceptLanguage} placeholder="Accept-Language，例如 zh-CN,zh;q=0.9" onChange={e => updateDefaultUserAgentProfile(profile.id, { acceptLanguage: e.target.value })} /></Space></div>)}</Space>
++      <Button type="dashed" block onClick={addDefaultUserAgentProfile}>新增 UA 配置</Button>
++     </div>
++     <div data-settings-field="defaultProxy"><Typography.Text strong>店铺默认代理</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>仅供新建或首次初始化的 UUID 复制。已存在 UUID 保留自己的代理配置，不会被此模板覆盖。</Typography.Paragraph>
++      <Select value={spaceConfigDraft.proxy.mode} onChange={value => updateSpaceConfigDraft({ proxy: value === "fixed" ? { ...spaceConfigDraft.proxy, mode: value, protocol: spaceConfigDraft.proxy.protocol ?? "http" } : { ...spaceConfigDraft.proxy, mode: value, protocol: undefined, host: undefined, port: undefined, bypassRules: [] } })} options={[{ value: "direct", label: "直连" }, { value: "system", label: "使用系统代理" }, { value: "fixed", label: "固定代理" }]} style={{ width: "100%" }} />
++      {spaceConfigDraft.proxy.mode === "fixed" ? <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 8 }}><Space.Compact style={{ width: "100%" }}><Select value={spaceConfigDraft.proxy.protocol ?? "http"} onChange={value => updateSpaceConfigDraft({ proxy: { ...spaceConfigDraft.proxy, protocol: value } })} options={[{ value: "http", label: "HTTP" }, { value: "https", label: "HTTPS" }, { value: "socks5", label: "SOCKS5" }]} style={{ width: 120 }} /><Input value={spaceConfigDraft.proxy.host ?? ""} placeholder="代理主机名或 IP" onChange={e => updateSpaceConfigDraft({ proxy: { ...spaceConfigDraft.proxy, host: e.target.value } })} /><Input type="number" value={spaceConfigDraft.proxy.port ?? ""} placeholder="端口" style={{ width: 100 }} onChange={e => updateSpaceConfigDraft({ proxy: { ...spaceConfigDraft.proxy, port: Number(e.target.value) || 0 } })} /></Space.Compact><Input value={(spaceConfigDraft.proxy.bypassRules ?? []).join(", ")} placeholder="绕过规则，以逗号分隔" onChange={e => updateSpaceConfigDraft({ proxy: { ...spaceConfigDraft.proxy, bypassRules: e.target.value.split(",").map(rule => rule.trim()).filter(Boolean) } })} /><Input value={defaultProxyUsername} placeholder={spaceConfigDraft.proxy.usernameConfigured ? "账号已加密保存；留空保持不变" : "代理账号（可选）"} onChange={e => { setDefaultProxyUsername(e.target.value); setClearDefaultProxyUsername(false); }} /><Input.Password value={defaultProxyPassword} placeholder={spaceConfigDraft.proxy.passwordConfigured ? "密码已加密保存；留空保持不变" : "代理密码（可选）"} onChange={e => { setDefaultProxyPassword(e.target.value); setClearDefaultProxyPassword(false); }} /><Space><Button disabled={!spaceConfigDraft.proxy.usernameConfigured} onClick={() => setClearDefaultProxyUsername(value => !value)}>{clearDefaultProxyUsername ? "取消清除账号" : "清除已保存账号"}</Button><Button disabled={!spaceConfigDraft.proxy.passwordConfigured} onClick={() => setClearDefaultProxyPassword(value => !value)}>{clearDefaultProxyPassword ? "取消清除密码" : "清除已保存密码"}</Button></Space><Typography.Text type="secondary">账号和密码仅写入 keyring 加密信封；读取不会返回秘密值。</Typography.Text></Space> : null}
++     </div>
++     <div><Typography.Text strong>查看某个 UUID 的固定快照</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>按需读取单个 UUID；该视图只读，不会修改或批量请求其它空间。</Typography.Paragraph><Select allowClear showSearch optionFilterProp="label" value={snapshotSpaceUuid} onChange={uuid => void loadSnapshotSpace(uuid)} placeholder="选择当前店铺的登录空间" options={spaces.filter(space => space.uuid && (space.status === "active")).map(space => ({ value: space.uuid, label: `${getLoginSpaceDisplayName(space.displayName, spaceStore?.name, spaceStore?.account)} · ${space.uuid.slice(0, 8)}` }))} style={{ width: "100%" }} />
++      {snapshotSpaceUuid ? <Spin spinning={snapshotLoading}><div style={{ marginTop: 8 }}><Typography.Text strong>固定 UA / Accept-Language</Typography.Text><Input.TextArea value={snapshotPrivateConfig?.userAgent ?? "使用系统默认 User-Agent"} disabled autoSize={{ minRows: 2, maxRows: 4 }} /><Input value={snapshotPrivateConfig?.acceptLanguage ?? ""} disabled placeholder="系统默认 Accept-Language" style={{ marginTop: 8 }} /><Typography.Text strong style={{ display: "block", marginTop: 12 }}>该 UUID 当前代理模板</Typography.Text><Typography.Text type="secondary">{snapshotPrivateConfig ? `${snapshotPrivateConfig.proxy.mode}${snapshotPrivateConfig.proxy.mode === "fixed" ? ` · ${snapshotPrivateConfig.proxy.protocol}://${snapshotPrivateConfig.proxy.host}:${snapshotPrivateConfig.proxy.port}` : ""}；账号/密码不显示` : ""}</Typography.Text></div></Spin> : null}
++     </div>
++    </Space> : null}
++    {spaceConfigDraft && spaceSettingsTab === "注入设置" ? <Space direction="vertical" size={16} style={{ width: "100%" }}>
++     <div><Typography.Text strong>优先模式（注入）</Typography.Text><Select value={spaceConfigDraft.scheduleMode ?? "page_first"} onChange={value => updateSpaceConfigDraft({ scheduleMode: value })} options={[{ value: "page_first", label: "页面优先打开" }, { value: "strict_document_start", label: "严格保证 document_start 优先" }]} style={{ width: "100%", marginTop: 8 }} /><Typography.Paragraph type="secondary" style={{ margin: "4px 0 0" }}>页面优先打开会尽快开始导航；严格模式会等待资源校验和 document_start 注册，可能增加打开耗时，准备失败时不会打开目标页面。</Typography.Paragraph></div>
++     <div data-settings-field="resourceBindings"><LoginSpaceBindingSelector title="绑定脚本（可多选）" placeholder="可选：选择登录空间要注入的脚本" bindings={spaceConfigDraft.scripts ?? []} options={bindingOptions.scripts} onChange={scripts => updateSpaceConfigDraft({ scripts })} />
++     <LoginSpaceBindingSelector title="绑定样式（可多选）" placeholder="可选：选择登录空间要注入的样式" bindings={spaceConfigDraft.styles ?? []} options={bindingOptions.styles} onChange={styles => updateSpaceConfigDraft({ styles })} /></div>
++     <div><Typography.Text strong>打开已有空间时的资源</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>开启后，重新打开时会补充店铺绑定的默认脚本和样式。已打开空间不会热更新；修改会在新建或重新打开空间时生效。</Typography.Paragraph><Switch checked={spaceConfigDraft.inheritDefaultResources === true} onChange={value => updateSpaceConfigDraft({ inheritDefaultResources: value })} checkedChildren="继承默认资源" unCheckedChildren="不继承默认资源" /></div>
++     <div><Typography.Text strong>开发者工具</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>宿主窗口开发者工具适用于当前独立窗口；本设置不控制应用主窗口关闭行为。</Typography.Paragraph><Space direction="vertical" size={8} style={{ width: "100%" }}><Switch checked={spaceConfigDraft.showWebViewDevTools === true} onChange={value => updateSpaceConfigDraft({ showWebViewDevTools: value })} checkedChildren="WebView 开启" unCheckedChildren="WebView 关闭" /><Switch checked={spaceConfigDraft.showWebWindowDevTools === true} onChange={value => updateSpaceConfigDraft({ showWebWindowDevTools: value })} checkedChildren="宿主窗口开启" unCheckedChildren="宿主窗口关闭" /></Space></div>
++     <LoginSpaceProtocolWhitelistEditor value={spaceConfigDraft.protocolWhitelist} onChange={protocolWhitelist => updateSpaceConfigDraft({ protocolWhitelist })} />
++    </Space> : null}
++    {spaceConfigDraft && spaceSettingsTab === "分配规则" ? <Space direction="vertical" size={16} style={{ width: "100%" }}>
++     <Alert type="info" showIcon title="候选池为空时使用当前店铺全部可用 UUID" description="配置仅影响后续首次分配或明确重新分配；已打开登录空间不热更新。" />
++     <div><Typography.Text strong>分配方式</Typography.Text><Select value={spaceConfigDraft.allocationMode ?? "random"} onChange={value => updateSpaceConfigDraft({ allocationMode: value as LoginSpaceAllocationMode })} options={[{ value: "random", label: "随机" }, { value: "sequential", label: "按顺序轮转" }, { value: "balanced", label: "按本机活动窗口均衡" }]} style={{ width: "100%", marginTop: 8 }} /></div>
++     <div data-settings-field="candidateSpaces"><Typography.Text strong>可选登录空间</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>只列出当前店铺、当前工作区可用的 UUID。顺序模式使用下方已选列表顺序。</Typography.Paragraph><Checkbox.Group value={spaceConfigDraft.candidateSpaceUuids.length ? spaceConfigDraft.candidateSpaceUuids : spaces.filter(space => space.uuid && (space.status === "active")).map(space => space.uuid)} options={spaces.filter(space => space.uuid && (space.status === "active")).map(space => ({ value: space.uuid, label: `${getLoginSpaceDisplayName(space.displayName, spaceStore?.name, spaceStore?.account)} · ${space.uuid.slice(0, 8)}` }))} onChange={values => { const activeUuids = spaces.filter(space => space.uuid && (space.status === "active")).map(space => space.uuid); updateSpaceConfigDraft({ candidateSpaceUuids: values.length === activeUuids.length ? [] : values as string[] }); }} /></div>
++     <div><Typography.Text strong>候选顺序与本机活动窗口</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>均衡模式只统计此桌面进程内仍存活且属于当前工作区/店铺/UUID 的受控窗口；普通浏览器无桌面桥接时按 0 负载处理。</Typography.Paragraph><Space direction="vertical" size={6} style={{ width: "100%", marginTop: 8 }}>{(spaceConfigDraft.candidateSpaceUuids.length ? spaceConfigDraft.candidateSpaceUuids : spaces.filter(space => space.uuid && (space.status === "active")).map(space => space.uuid)).map((uuid, index, order) => <Space key={uuid} style={{ width: "100%", justifyContent: "space-between", border: "1px solid var(--ant-color-border-secondary)", borderRadius: 4, padding: "6px 8px" }}><Typography.Text>{index + 1}. {spaces.find(space => space.uuid === uuid)?.displayName || "登录空间"} · {uuid.slice(0, 8)}{spaceConfigDraft.allocationMode === "balanced" ? ` · 本机活动窗口 ${activeWindowCounts[uuid] ?? 0}` : ""}</Typography.Text><Space size={4}><Button aria-label={`上移 ${uuid}`} icon={<ArrowUpOutlined />} size="small" disabled={index === 0} onClick={() => moveCandidateSpace(uuid, -1)} /><Button aria-label={`下移 ${uuid}`} icon={<ArrowDownOutlined />} size="small" disabled={index === order.length - 1} onClick={() => moveCandidateSpace(uuid, 1)} /></Space></Space>)}</Space></div>
++    </Space> : null}
++   </Space>
++  </Spin>
++ </Drawer>
++ <Drawer title={privateConfigSpace ? `配置登录空间 · ${getLoginSpaceDisplayName(privateConfigSpace.displayName, spaceStore?.name, spaceStore?.account)}` : "配置登录空间"} open={privateConfigOpen} onClose={() => { if (!privateConfigSaving) { privateConfigRequest.current++; setPrivateConfigOpen(false); } }} width={Math.min(640, typeof window === "undefined" ? 640 : window.innerWidth)} destroyOnClose footer={<Space style={{ display: "flex", justifyContent: "flex-end" }}><Button disabled={privateConfigSaving} onClick={() => { privateConfigRequest.current++; setPrivateConfigOpen(false); }}>取消</Button><Button type="primary" loading={privateConfigSaving} disabled={!privateConfig} onClick={() => void savePrivateSpaceConfig()}>保存</Button></Space>}>
++  <Spin spinning={bindingOptionsLoading}>
++   {privateConfig ? <Space direction="vertical" size={16} style={{ width: "100%" }}>
++    <div><Typography.Text strong>默认 URL</Typography.Text><Input value={privateConfig.defaultUrl} onChange={e => setPrivateConfig(current => current ? { ...current, defaultUrl: e.target.value } : current)} placeholder="https://example.com/login" /></div>
++    <div><Typography.Text strong>优先模式（注入）</Typography.Text><Select value={privateConfig.scheduleMode} onChange={value => setPrivateConfig(current => current ? { ...current, scheduleMode: value } : current)} options={[{ value: "page_first", label: "页面优先打开" }, { value: "strict_document_start", label: "严格保证 document_start 优先" }]} style={{ width: "100%", marginTop: 8 }} /></div>
++    <LoginSpaceBindingSelector title="绑定脚本（可多选）" placeholder="选择该登录空间要注入的脚本" bindings={privateConfig.scripts ?? []} options={bindingOptions.scripts} disabled={!privateConfig} onChange={scripts => setPrivateConfig(current => current ? { ...current, scripts } : current)} />
++    <LoginSpaceBindingSelector title="绑定样式（可多选）" placeholder="选择该登录空间要注入的样式" bindings={privateConfig.styles ?? []} options={bindingOptions.styles} disabled={!privateConfig} onChange={styles => setPrivateConfig(current => current ? { ...current, styles } : current)} />
++    <div><Typography.Text strong>已有空间资源继承与开发者工具</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>继承开关控制重新打开时是否附加店铺默认脚本和样式；已打开窗口不会热更新。</Typography.Paragraph><Space direction="vertical" size={8} style={{ width: "100%" }}><Switch checked={privateConfig.inheritDefaultResources === true} onChange={value => setPrivateConfig(current => current ? { ...current, inheritDefaultResources: value } : current)} checkedChildren="继承店铺默认资源" unCheckedChildren="不继承店铺默认资源" /><Switch checked={privateConfig.showWebViewDevTools === true} onChange={value => setPrivateConfig(current => current ? { ...current, showWebViewDevTools: value } : current)} checkedChildren="WebView 开启" unCheckedChildren="WebView 关闭" /><Switch checked={privateConfig.showWebWindowDevTools === true} onChange={value => setPrivateConfig(current => current ? { ...current, showWebWindowDevTools: value } : current)} checkedChildren="宿主窗口开启" unCheckedChildren="宿主窗口关闭" /></Space></div>
++    <LoginSpaceProtocolWhitelistEditor value={normalizeShopLoginSpaceProtocolWhitelist(privateConfig.protocolWhitelist)} onChange={protocolWhitelist => setPrivateConfig(current => current ? { ...current, protocolWhitelist } : current)} />
++    <div><Typography.Text strong>固定 UA / Accept-Language</Typography.Text><Typography.Paragraph type="secondary" style={{ margin: "4px 0 8px" }}>以下配置为创建空间时保存的 UUID 固定快照，不可在此修改。{privateConfig.userAgentProfileName ? `当前模板：${privateConfig.userAgentProfileName}` : "当前未绑定自定义模板，使用系统默认值。"}</Typography.Paragraph><Input.TextArea value={privateConfig.userAgent || "使用系统默认 User-Agent"} disabled autoSize={{ minRows: 2, maxRows: 4 }} /><Input value={privateConfig.acceptLanguage ?? ""} disabled placeholder="系统默认 Accept-Language" style={{ marginTop: 8 }} /></div>
++    <div><Typography.Text strong>代理</Typography.Text><Select value={privateConfig.proxy.mode} onChange={value => setPrivateConfig(current => current ? { ...current, proxy: value === "fixed" ? { ...current.proxy, mode: value, protocol: current.proxy.protocol ?? "http" } : { mode: value, bypassRules: [], usernameConfigured: current.proxy.usernameConfigured, passwordConfigured: current.proxy.passwordConfigured } } : current)} options={[{ value: "direct", label: "直连" }, { value: "system", label: "使用系统代理" }, { value: "fixed", label: "固定代理" }]} style={{ width: "100%", marginTop: 8 }} />
++     {privateConfig.proxy.mode === "fixed" ? <Space direction="vertical" size={8} style={{ width: "100%", marginTop: 8 }}><Space.Compact style={{ width: "100%" }}><Select value={privateConfig.proxy.protocol ?? "http"} onChange={value => setPrivateConfig(current => current ? { ...current, proxy: { ...current.proxy, protocol: value } } : current)} options={[{ value: "http", label: "HTTP" }, { value: "https", label: "HTTPS" }, { value: "socks5", label: "SOCKS5" }]} style={{ width: 120 }} /><Input value={privateConfig.proxy.host ?? ""} placeholder="代理主机名或 IP" onChange={e => setPrivateConfig(current => current ? { ...current, proxy: { ...current.proxy, host: e.target.value } } : current)} /><Input type="number" value={privateConfig.proxy.port ?? ""} placeholder="端口" style={{ width: 100 }} onChange={e => setPrivateConfig(current => current ? { ...current, proxy: { ...current.proxy, port: Number(e.target.value) || 0 } } : current)} /></Space.Compact><Input value={(privateConfig.proxy.bypassRules ?? []).join(", ")} placeholder="绕过规则，以逗号分隔" onChange={e => setPrivateConfig(current => current ? { ...current, proxy: { ...current.proxy, bypassRules: e.target.value.split(",").map(rule => rule.trim()).filter(Boolean) } } : current)} /><Input value={privateProxyUsername} placeholder="代理账号（留空保持不变）" onChange={e => { setPrivateProxyUsername(e.target.value); setClearPrivateProxyUsername(false); }} /><Input.Password value={privateProxyPassword} placeholder={privateConfig.proxy.passwordConfigured ? "已保存密码；留空保持不变" : "代理密码（可选）"} onChange={e => { setPrivateProxyPassword(e.target.value); setClearPrivateProxyPassword(false); }} /><Space><Button disabled={!privateConfig.proxy.passwordConfigured} onClick={() => { setPrivateProxyPassword(""); setClearPrivateProxyPassword(value => !value); }}>{clearPrivateProxyPassword ? "取消清除密码" : "清除已保存密码"}</Button><Button disabled={!privateConfig.proxy.usernameConfigured} onClick={() => setClearPrivateProxyUsername(value => !value)}>{clearPrivateProxyUsername ? "取消清除账号" : "清除已保存账号"}</Button></Space><Typography.Text type="secondary">普通读取不会返回代理账号或密码；留空保留已有值，保存时可选择清除。</Typography.Text></Space> : null}
++    </div>
++   </Space> : <Alert type="info" showIcon title="正在读取该登录空间的服务器配置" />}
++  </Spin>
++ </Drawer>
++ </div></ConfigProvider>;
++}
+diff --git a/plugins/ky-shop-management/src/shop-management-error.ts b/plugins/ky-shop-management/src/shop-management-error.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2c75c72cd139cc2c8429fa87114808b247fe25ea
+--- /dev/null
++++ b/plugins/ky-shop-management/src/shop-management-error.ts
+@@ -0,0 +1,42 @@
++const SAFE_ERROR_CODES = new Set([
++  "conflict",
++  "permission_denied",
++  "validation_error",
++  "not_found",
++  "idempotency_key_reused",
++  "rate_limited",
++  "audit_pending",
++  "credential_unavailable",
++  "archive_cleanup_pending",
++  "login_required",
++  "internal_error",
++  "request_failed",
++  "invalid_response",
++  "client_upgrade_required"
++]);
++
++const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
++
++type ErrorShape = { code?: unknown; requestId?: unknown };
++
++function errorShape(value: unknown): ErrorShape {
++  return typeof value === "object" && value !== null ? value as ErrorShape : {};
++}
++
++function diagnostic(value: unknown): string {
++  const error = errorShape(value);
++  const code = typeof error.code === "string" && SAFE_ERROR_CODES.has(error.code) ? error.code : "request_failed";
++  const requestId = typeof error.requestId === "string" && REQUEST_ID_PATTERN.test(error.requestId)
++    ? error.requestId
++    : "";
++  return `（错误码 ${code}${requestId ? `，请求编号 ${requestId}` : ""}）`;
++}
++
++/** Formats shop-management errors without exposing server messages, details, or request data. */
++export function formatShopManagementError(value: unknown): string {
++  const code = errorShape(value).code;
++  if (code === "conflict") return "账号已存在（含已删除记录），或记录已被他人修改，请刷新核对";
++  if (code === "permission_denied") return "当前工作区无权执行此操作";
++  if (code === "validation_error") return "输入内容不符合要求，请核对";
++  return `操作失败，请刷新后重试${diagnostic(value)}`;
++}
