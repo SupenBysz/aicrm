@@ -7,6 +7,7 @@ import {
   BellOutlined,
   BookOutlined,
   ClearOutlined,
+  CodeOutlined,
   FileSearchOutlined,
   IdcardOutlined,
   KeyOutlined,
@@ -147,10 +148,12 @@ const MENU_ICONS: Record<string, ReactNode> = {
   BookOutlined: <BookOutlined />,
   ApiOutlined: <ApiOutlined />,
   RobotOutlined: <RobotOutlined />,
+  CodeOutlined: <CodeOutlined />,
   StarOutlined: <StarOutlined />
 };
 
 const MENU_GROUP_ICONS: Record<string, ReactNode> = {
+  脚本管理: <CodeOutlined />,
   组织管理: <ApartmentOutlined />,
   身份管理: <TeamOutlined />,
   权限中心: <SafetyCertificateOutlined />,

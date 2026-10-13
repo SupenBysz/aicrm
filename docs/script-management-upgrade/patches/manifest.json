@@ -758,7 +758,7 @@
     "desktopCrossContractTest": "40/40 plugin tests pass with runtime-reference source fixture",
     "databaseExecuted": false,
     "realElectronUIVerified": false,
-    "currentWorkspaceBusinessCodeApplied": false,
+    "currentWorkspaceBusinessCodeApplied": true,
     "runtimePureTests": "42 pass; 1 source test fails because reference deleted preload/public-script-api.ts",
     "desktopTypecheck": "Not accepted; runtime reference dependencies and consumer integration remain outside main patch",
     "freshApplyAndReverseClean": true,

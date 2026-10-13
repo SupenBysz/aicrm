@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 
 const configDir = fileURLToPath(new URL(".", import.meta.url));
-const pluginNames=["ky-matrix-account","ky-identity-management","ky-organization-management","ky-access-management","ky-audit-management","ky-notification","ky-system-settings","ky-ai-configuration"];
+const pluginNames=["ky-script-management","ky-matrix-account","ky-identity-management","ky-organization-management","ky-access-management","ky-audit-management","ky-notification","ky-system-settings","ky-ai-configuration"];
 const versions=Object.fromEntries(pluginNames.map(name=>[name,JSON.parse(readFileSync(resolve(configDir,"../../plugins",name,"package.json"),"utf8")).version]));
 const buildId=createHash("sha256").update(JSON.stringify(versions)+new Date().toISOString()+Math.random()).digest("hex").slice(0,16);
 
@@ -16,6 +16,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      "@ky/plugin-script-management": new URL("../../plugins/ky-script-management/src/index.tsx", import.meta.url).pathname,
       "@ky/admin-core": new URL("../../packages/ky-admin-core/src/index.ts", import.meta.url).pathname,
       "@ky/plugin-access-management": new URL("../../plugins/ky-access-management/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-ai-configuration": new URL("../../plugins/ky-ai-configuration/src/index.tsx", import.meta.url).pathname,

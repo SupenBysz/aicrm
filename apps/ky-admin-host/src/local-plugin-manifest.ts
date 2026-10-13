@@ -1,3 +1,4 @@
+import { scriptManagementPlugin } from "@ky/plugin-script-management";
 import type { AdminPlugin } from "@ky/admin-core";
 import { accessManagementPlugin } from "@ky/plugin-access-management";
 import { aiConfigurationPlugin } from "@ky/plugin-ai-configuration";
@@ -9,6 +10,7 @@ import { organizationManagementPlugin } from "@ky/plugin-organization-management
 import { systemSettingsPlugin } from "@ky/plugin-system-settings";
 
 export const localPlugins: AdminPlugin[] = [
+  scriptManagementPlugin,
   matrixAccountPlugin,
   identityManagementPlugin,
   organizationManagementPlugin,

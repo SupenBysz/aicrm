@@ -2739,3 +2739,994 @@ button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outl
 .system-settings-hub-tab-content {
   padding-top: 16px;
 }
+
+/* 脚本编辑器使用单一 flex 高度链，避免 Tabs 包装层互相覆盖尺寸。 */
+.script-asset-editor-drawer .ant-drawer-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.script-asset-editor-content-drawer .ant-drawer-body,
+.script-asset-editor-content-drawer .script-asset-editor-direct-layer {
+  padding: 0;
+}
+
+.script-asset-editor-drawer .ant-drawer-header {
+  position: relative;
+}
+
+.script-asset-editor-header-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-right: 220px;
+}
+
+.script-asset-editor-header-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-asset-editor-header-tabs-anchor {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(560px, calc(100% - 320px));
+  max-width: calc(100% - 320px);
+  transform: translate(-50%, -50%);
+}
+
+.script-asset-editor-header-tabs {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  height: 38px;
+  padding: 0;
+  overflow: hidden;
+  background: #f5ede3;
+  border: 1px solid #eadfd2;
+  border-radius: 999px;
+  isolation: isolate;
+}
+
+.script-asset-editor-header-tabs-slider {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: calc(100% / 4);
+  box-sizing: border-box;
+  pointer-events: none;
+  background: #ffffff;
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(90, 62, 30, 0.12);
+  transition: transform 220ms ease-in-out;
+  will-change: transform;
+}
+
+.script-asset-editor-header-tabs button {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 8px;
+  color: var(--admin-text, #34281a);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.script-asset-editor-header-tabs button.script-asset-editor-history-tab {
+  min-width: 88px;
+  text-overflow: clip;
+}
+
+.script-asset-editor-header-tabs button:hover,
+.script-asset-editor-header-tabs button:focus-visible {
+  background: rgba(152, 102, 38, 0.08);
+  outline: none;
+}
+
+.script-asset-editor-header-tabs button:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(138, 90, 22, 0.45);
+}
+
+.script-asset-editor-header-tabs button.is-active {
+  color: var(--admin-primary, #8a5a16);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-header-tabs {
+  background: #252526;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-header-tabs-slider {
+  background: #37332d;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-header-tabs button {
+  color: var(--admin-text-secondary, #a7a7a7);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-header-tabs button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-header-tabs button:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(244, 194, 122, 0.55);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-header-tabs button.is-active {
+  color: var(--admin-primary, #f4c27a);
+}
+
+@media (max-width: 760px) {
+  .script-asset-editor-header-title {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-right: 0;
+  }
+
+  .script-asset-editor-header-label {
+    flex: 1 1 100%;
+  }
+
+  .script-asset-editor-header-tabs-anchor {
+    position: static;
+    width: min(420px, 100%);
+    max-width: 100%;
+    margin: 2px auto 0;
+    transform: none;
+  }
+}
+
+.public-script-tab {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--admin-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.public-script-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 18px; }
+.public-script-tab small { overflow: hidden; color: var(--admin-text-tertiary); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 15px; }
+.public-script-tab:hover { background: rgba(152, 102, 38, 0.08); }
+.public-script-tab.is-active { color: var(--admin-primary); background: var(--admin-primary-soft, rgba(152, 102, 38, 0.12)); border-color: var(--admin-primary-border, rgba(152, 102, 38, 0.22)); }
+:root[data-admin-theme="dark"] .public-script-tab:hover { background: rgba(255,255,255,.06); }
+
+.public-scripts-panel .script-editor-root {
+  border: 0;
+}
+
+.public-scripts-panel .script-editor-surface {
+  border-color: var(--admin-border-color);
+}
+
+.public-scripts-panel .script-editor-status-bar {
+  flex-basis: 28px;
+  min-height: 28px;
+  padding-inline: 8px;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+:root:not([data-admin-theme="dark"]) .public-scripts-panel,
+:root:not([data-admin-theme="dark"]) .public-scripts-panel > section,
+:root:not([data-admin-theme="dark"]) .public-scripts-panel > section > div:first-child {
+  background: #f7efe4 !important;
+}
+
+:root:not([data-admin-theme="dark"]) .public-scripts-panel > .public-scripts-tabs,
+:root:not([data-admin-theme="dark"]) .public-scripts-panel .script-editor-surface {
+  background: #ffffff !important;
+}
+
+.script-editor-root,
+.script-editor-wrapper {
+  --script-editor-font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --script-editor-font-size: 13px;
+  --script-editor-font-weight: 400;
+  --script-editor-line-height: 22px;
+  --script-editor-letter-spacing: normal;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.script-editor-line-numbers,
+.script-editor-highlight-layer,
+.script-editor-source-input,
+.script-editor-source-input textarea {
+  box-sizing: border-box;
+  font-family: var(--script-editor-font-family) !important;
+  font-size: var(--script-editor-font-size) !important;
+  font-weight: var(--script-editor-font-weight) !important;
+  letter-spacing: var(--script-editor-letter-spacing) !important;
+  line-height: var(--script-editor-line-height) !important;
+}
+.script-editor-source-input {
+  padding: 8px 10px !important;
+}
+.script-editor-source-input textarea {
+  scrollbar-width: none;
+}
+.script-editor-highlight-layer,
+.script-editor-line-numbers {
+  scrollbar-width: none;
+}
+.script-editor-highlight-layer::-webkit-scrollbar,
+.script-editor-line-numbers::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+.script-editor-source-input textarea::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+
+/* Monaco 自己维护代码、选区、光标和滚动视图，不再依赖旧的三层文本覆盖布局。 */
+.monaco-source-editor-root {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.monaco-source-editor {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--admin-bg-color, #fff);
+}
+
+.monaco-source-editor .monaco-editor,
+.monaco-source-editor .monaco-editor .overflow-guard {
+  width: 100%;
+  height: 100%;
+}
+
+.monaco-source-editor .monaco-editor .margin {
+  background: rgba(127, 127, 127, 0.08);
+}
+
+/* 仅收紧脚本编辑器原生菜单的快捷键列，保留 Monaco 菜单文本、子菜单箭头和焦点背景。 */
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label:not(.separator) {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 10px;
+  padding-right: 6px;
+}
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .keybinding {
+  flex: 0 0 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: 2px;
+  padding-right: 4px;
+}
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-item,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-menu-item {
+  width: 100%;
+  min-width: 0;
+}
+/* ContextMenuController 为带快捷键的动作使用通用 ActionViewItem，不能直接读取 command.icon；
+   使用原生菜单标签的语义前缀补上 Codicon，避免改写菜单文本或替换原生菜单。 */
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="撤销"]::before,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="重做"]::before,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="剪切"]::before,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="复制"]::before,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="粘贴"]::before,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="全选"]::before {
+  display: inline-block;
+  width: 16px;
+  margin-right: 8px;
+  font-family: codicon;
+  font-size: 16px;
+  line-height: 1;
+  text-align: center;
+  vertical-align: -2px;
+}
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="撤销"]::before { content: "\ea82"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="重做"]::before { content: "\ebb0"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="剪切"]::before { content: "\ec7f"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="复制"]::before { content: "\ebcc"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="粘贴"]::before { content: "\ec11"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="全选"]::before { content: "\eb85"; }
+
+/* 子菜单动作的 ARIA 标识放在 action-label 上；原生标签保留事件名，说明作为第二列右对齐。 */
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="documentStart"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="domReady"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="pageLoad"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="routeChange"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="userAction"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="waitForRequest"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="waitForResponse"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="interceptRequest"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="interceptResponse"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="subscribeRequest"],
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="subscribeResponse"] {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  white-space: nowrap;
+}
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="documentStart"]::after { content: "文档开始解析时执行"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="domReady"]::after { content: "DOM 就绪时执行"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="pageLoad"]::after { content: "页面加载完成时执行"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="routeChange"]::after { content: "SPA 路由变化时执行"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="userAction"]::after { content: "用户操作触发时执行"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="waitForRequest"]::after { content: "等待一次匹配请求"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="waitForResponse"]::after { content: "等待一次匹配响应"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="interceptRequest"]::after { content: "拦截并修改请求"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="interceptResponse"]::after { content: "拦截并改写响应"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="subscribeRequest"]::after { content: "观察匹配的请求"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="subscribeResponse"]::after { content: "观察匹配的响应"; }
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="documentStart"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="domReady"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="pageLoad"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="routeChange"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="userAction"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="waitForRequest"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="waitForResponse"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="interceptRequest"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="interceptResponse"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="subscribeRequest"]::after,
+body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu .monaco-action-bar.vertical .action-label[aria-label^="subscribeResponse"]::after {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground, var(--admin-text-muted));
+  font-size: 12px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.script-asset-editor-direct-layer .script-editor-wrapper,
+.script-asset-editor-direct-layer .script-editor-root {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.script-editor-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 42px;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-top: 1px solid var(--admin-border-color, var(--admin-divider));
+  flex-wrap: wrap;
+}
+
+.script-editor-status-left,
+.script-editor-status-center,
+.script-editor-status-right {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.script-editor-status-center {
+  display: flex;
+  justify-content: center;
+}
+
+.script-editor-status-right {
+  display: flex;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .script-editor-status-bar {
+    flex-basis: auto;
+    min-height: 42px;
+    padding: 0 8px;
+  }
+
+  .script-editor-status-left,
+  .script-editor-status-center,
+  .script-editor-status-right {
+    flex: 1 1 100%;
+  }
+
+  .script-editor-status-center {
+    justify-content: flex-start;
+  }
+
+  .script-editor-status-right {
+    justify-content: flex-start;
+    text-align: left;
+  }
+}
+
+.script-asset-editor-direct-layer .script-editor-completion-popup {
+  max-height: min(260px, calc(100% - 52px));
+  overflow: hidden;
+  border: 1px solid #faf1e8 !important;
+  border-radius: 0 !important;
+  box-sizing: border-box;
+  background-color: #fffcf6 !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  isolation: isolate;
+}
+
+.script-editor-root {
+  isolation: isolate;
+}
+
+.script-editor-context-menu {
+  --script-editor-context-bg: #fffdf9;
+  --script-editor-context-border: rgba(120, 90, 55, 0.12);
+  --script-editor-context-shadow: rgba(0, 0, 0, 0.09);
+  background: var(--script-editor-context-bg);
+  border: 1px solid var(--script-editor-context-border);
+  box-shadow: 0 0 3px var(--script-editor-context-shadow);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.script-editor-context-menu-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  justify-content: center;
+}
+
+.script-editor-context-menu > button { display:flex; width:100%; min-height:32px; align-items:center; justify-content:space-between; padding:5px 10px; border:0; border-radius:2px; background:transparent; color:var(--admin-text,#34281a); font:inherit; text-align:left; cursor:pointer; }
+.script-editor-context-menu > button:hover:not(:disabled) { background:#f9eedc; }
+.script-editor-context-menu > button:disabled { color:var(--admin-text-tertiary,#b6aa9b); cursor:default; }
+.script-editor-context-separator { height:1px; margin:4px 6px; background:var(--admin-border-color,#ead9c5); }
+
+.script-editor-context-submenu {
+  min-width: 300px;
+  max-height: min(360px, calc(100vh - 16px));
+  overflow-y: auto;
+}
+
+.script-editor-context-submenu > button {
+  min-height: 44px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+}
+
+.script-editor-context-submenu > button small {
+  color: var(--admin-text-tertiary, #8c7a63);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.script-editor-context-submenu-wrapper {
+  position: relative;
+}
+
+.script-editor-lifecycle-submenu {
+  position: absolute;
+  z-index: 9;
+  top: -5px;
+  left: calc(100% + 4px);
+  width: 248px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid var(--script-editor-context-border);
+  border-radius: 3px;
+  background: var(--script-editor-context-bg);
+  box-shadow: 0 0 3px var(--script-editor-context-shadow);
+}
+
+.script-editor-lifecycle-submenu.is-left {
+  right: calc(100% + 4px);
+  left: auto;
+}
+
+.script-editor-lifecycle-submenu.is-bottom {
+  top: auto;
+  bottom: -5px;
+}
+
+.script-editor-lifecycle-submenu .ant-btn {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: flex-start !important;
+  padding: 6px 8px;
+  text-align: left !important;
+  white-space: normal;
+}
+
+.script-editor-lifecycle-submenu .ant-btn.is-active,
+.script-editor-lifecycle-submenu .ant-btn:hover {
+  background: var(--admin-hover-bg, rgba(127, 127, 127, 0.12));
+}
+
+.script-editor-lifecycle-submenu-label {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.script-editor-lifecycle-submenu-event {
+  color: var(--admin-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.script-editor-lifecycle-submenu-description {
+  color: var(--admin-text-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.script-editor-lifecycle-submenu .ant-btn .script-editor-lifecycle-description,
+.script-editor-lifecycle-submenu .ant-btn:hover .script-editor-lifecycle-description,
+.script-editor-lifecycle-submenu .ant-btn.is-active .script-editor-lifecycle-description {
+  color: #8c8c8c !important;
+  font-size: 12px;
+  font-weight: 400;
+  -webkit-text-fill-color: #8c8c8c;
+}
+
+:root[data-admin-theme="dark"] .script-editor-lifecycle-submenu .ant-btn .script-editor-lifecycle-description,
+:root[data-admin-theme="dark"] .script-editor-lifecycle-submenu .ant-btn:hover .script-editor-lifecycle-description,
+:root[data-admin-theme="dark"] .script-editor-lifecycle-submenu .ant-btn.is-active .script-editor-lifecycle-description {
+  color: #a6a6a6 !important;
+  -webkit-text-fill-color: #a6a6a6;
+}
+
+@media (max-width: 720px) {
+  .script-editor-lifecycle-submenu {
+    top: calc(100% + 4px);
+    right: auto;
+    left: 0;
+    bottom: auto;
+  }
+}
+
+:root[data-admin-theme="dark"] .script-editor-context-menu {
+  --script-editor-context-bg: #1f1f1f;
+  --script-editor-context-border: rgba(255, 255, 255, 0.1);
+  --script-editor-context-shadow: rgba(0, 0, 0, 0.32);
+}
+
+:root[data-admin-theme="dark"] .script-asset-editor-direct-layer .script-editor-completion-popup {
+  background-color: #111111 !important;
+}
+
+.script-asset-preview-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 历史版本预览与脚本内容页保持一致，代码区贴合 Drawer 内容边界。 */
+.script-asset-preview-drawer .ant-drawer-body,
+.script-asset-preview-drawer .script-asset-preview-body {
+  padding: 0;
+}
+
+/* 编辑器由高亮层绘制字形，输入层仅保留光标、选区与交互。 */
+.script-editor-source-input,
+.script-editor-source-input textarea {
+  box-sizing: border-box !important;
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  caret-color: var(--script-editor-caret-color, #34281a) !important;
+  line-height: var(--script-editor-line-height) !important;
+  margin: 0 !important;
+  padding: 8px 10px !important;
+  border-radius: 0 !important;
+}
+.script-editor-source-input {
+  padding: 8px 10px !important;
+}
+.script-editor-source-input textarea {
+  scrollbar-width: none;
+}
+.script-editor-source-input textarea::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+.script-editor-source-input.is-native-selection,
+.script-editor-source-input.is-native-selection textarea {
+  color: var(--admin-text, #34281a) !important;
+  -webkit-text-fill-color: var(--admin-text, #34281a) !important;
+}
+
+.script-editor-surface {
+  border-radius: 0 !important;
+}
+
+:root[data-admin-theme="dark"] .script-editor-root {
+  --script-editor-caret-color: #f4c27a;
+}
+
+.script-editor-highlight-layer {
+  color: var(--admin-text, #34281a) !important;
+}
+
+.script-editor-highlight-layer mark {
+  color: #9a3412 !important;
+  -webkit-text-fill-color: #9a3412 !important;
+}
+
+.script-editor-completion-popup,
+.script-editor-completion-popup .ant-btn,
+.script-editor-completion-popup .ant-typography {
+  color: #34281a !important;
+}
+
+.script-editor-completion-popup {
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: 1px solid #faf1e8 !important;
+  border-radius: 0 !important;
+  box-sizing: border-box;
+  background-color: #fffcf6 !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  z-index: 1000 !important;
+}
+
+.script-editor-completion-popup .script-editor-completion-inner,
+.script-editor-completion-popup .ant-btn {
+  background-color: #fffcf6 !important;
+  background-image: none !important;
+}
+
+.script-editor-completion-popup .script-editor-completion-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: #fffcf6 !important;
+  background-image: none !important;
+  opacity: 1 !important;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.script-editor-completion-popup .ant-btn[aria-selected="true"] {
+  background-color: #f9eedc !important;
+}
+
+.script-editor-completion-popup .ant-btn:hover,
+.script-editor-completion-popup .ant-btn:focus-visible {
+  background-color: #fffcf6 !important;
+}
+
+.script-editor-completion-popup .ant-btn[aria-selected="true"],
+.script-editor-completion-popup .ant-btn[aria-selected="true"]:hover,
+.script-editor-completion-popup .ant-btn[aria-selected="true"]:focus-visible {
+  background-color: #f9eedc !important;
+}
+
+:root[data-admin-theme="dark"] .script-editor-completion-popup,
+:root[data-admin-theme="dark"] .script-editor-completion-popup .script-editor-completion-inner,
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn,
+:root[data-admin-theme="dark"] .script-editor-completion-popup .script-editor-completion-backdrop {
+  background-color: #111111 !important;
+  background-image: none !important;
+  color: #f5f5f5 !important;
+}
+
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"] {
+  background-color: #f9eedc !important;
+  color: #34281a !important;
+}
+
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn:hover,
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn:focus-visible {
+  background-color: #111111 !important;
+  color: #f5f5f5 !important;
+}
+
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"],
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"]:hover,
+:root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"]:focus-visible {
+  background-color: #f9eedc !important;
+  color: #34281a !important;
+}
+
+.script-editor-completion-inner {
+  border: 0;
+  border-radius: 0;
+  box-sizing: border-box;
+}
+
+:root[data-admin-theme="dark"] .script-editor-completion-popup,
+:root[data-admin-theme="dark"] .script-asset-editor-direct-layer .script-editor-completion-popup {
+  border-color: #555555 !important;
+}
+
+.script-editor-completion-popup mark {
+  color: #9a3412 !important;
+  -webkit-text-fill-color: #9a3412 !important;
+}
+
+/* 脚本编写帮助：目录与正文在宽屏并列，小屏纵向堆叠。 */
+.script-editor-empty-hint {
+  position: absolute;
+  z-index: 2;
+  inset: 50% 16px auto;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 6px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  text-align: center;
+}
+
+.script-writing-help-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.script-writing-help-title .ant-btn {
+  flex: 0 0 auto;
+}
+
+.script-writing-help-resize-handle {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  width: 16px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.script-writing-help-resize-handle::after {
+  position: absolute;
+  top: 50%;
+  left: 7px;
+  width: 2px;
+  height: 48px;
+  border-radius: 2px;
+  background: var(--admin-border-color, var(--admin-divider));
+  content: "";
+  opacity: 0.55;
+  transform: translateY(-50%);
+}
+
+.script-writing-help-drawer.is-resizing,
+.script-writing-help-drawer.is-resizing .ant-drawer-content-wrapper,
+.script-writing-help-drawer.is-resizing .ant-drawer-content,
+.script-writing-help-drawer.is-resizing .ant-drawer-body {
+  transition: none !important;
+  user-select: none;
+}
+
+.script-writing-help-drawer.is-fullscreen .script-writing-help-resize-handle {
+  display: none;
+  pointer-events: none;
+}
+
+.script-writing-help {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 100%;
+  gap: 20px;
+  overflow: hidden;
+}
+
+.script-writing-help-outline {
+  display: flex;
+  flex: 0 0 226px;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 16px;
+  border-right: 1px solid var(--admin-border-color, var(--admin-divider));
+}
+
+.script-writing-help-outline-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.script-writing-help-outline-heading {
+  padding: 0 8px 2px;
+  color: var(--admin-text-muted, var(--admin-text-secondary));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+}
+
+.script-writing-help-outline-items {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--admin-divider);
+}
+
+.script-writing-help-outline button {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--admin-text-secondary, var(--admin-text));
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 18px;
+  text-align: left;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.script-writing-help-outline button:hover,
+.script-writing-help-outline button:focus-visible {
+  border-color: var(--admin-border-color, var(--admin-divider));
+  color: var(--admin-primary);
+  background: var(--admin-hover-bg, rgba(127, 127, 127, 0.1));
+  outline: none;
+}
+
+.script-writing-help-outline button.is-active {
+  border-color: var(--admin-primary);
+  color: var(--admin-primary);
+  background: var(--admin-primary-bg, rgba(22, 119, 255, 0.08));
+}
+
+.script-writing-help-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  color: var(--admin-text);
+  line-height: 1.7;
+}
+
+.script-writing-help-content .ant-typography {
+  max-width: 760px;
+}
+
+.script-writing-help-content pre {
+  display: block;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--admin-border-color, var(--admin-divider));
+  border-radius: 3px;
+  color: var(--admin-text);
+  background: var(--admin-bg-color, #fff);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
+.script-writing-help-content pre code {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.script-writing-help-content :not(pre) > code {
+  display: inline;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--admin-hover-bg, rgba(127, 127, 127, 0.1));
+  white-space: normal;
+}
+
+.script-writing-help-content ul,
+.script-writing-help-content ol {
+  max-width: 760px;
+  padding-left: 24px;
+}
+
+.script-writing-help-content table {
+  border-collapse: collapse;
+  margin: 8px 0 16px;
+  max-width: 100%;
+}
+
+.script-writing-help-content th,
+.script-writing-help-content td {
+  padding: 6px 10px;
+  border: 1px solid var(--admin-border-color, var(--admin-divider));
+  text-align: left;
+}
+
+.script-writing-help-content .ant-tag {
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .script-writing-help {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .script-writing-help-outline {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+    overflow-x: auto;
+    padding-right: 0;
+    padding-bottom: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--admin-border-color, var(--admin-divider));
+  }
+
+  .script-writing-help-outline-group {
+    flex: 0 0 auto;
+    min-width: max-content;
+  }
+
+  .script-writing-help-outline-items {
+    flex-direction: row;
+    gap: 6px;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .script-writing-help-outline button {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+}
