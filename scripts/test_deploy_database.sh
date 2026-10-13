@@ -38,6 +38,12 @@ if [[ "$if_count" != "$endif_count" ]]; then
   fail "unbalanced psql conditionals: if=$if_count endif=$endif_count"
 fi
 
+[[ "$rendered" == *"cfbedcddfa4e7a9b5721d5e542dae4548c586a8d9da85be2fb17f3499d8348d4"* ]] || fail "legacy 052 checksum guard missing"
+[[ "$rendered" == *"平台插件管理菜单"* ]] || fail "legacy 052 body was not included"
+if grep -Eq '^\\ir .*052_plugin_management_permissions.sql$' <<<"$rendered"; then
+  fail "legacy 052 was included with its nested transaction"
+fi
+
 fixture_root="$(mktemp -d)"
 trap 'rm -rf "$fixture_root"' EXIT
 mkdir -p "$fixture_root/scripts" "$fixture_root/ops/db"
@@ -52,6 +58,14 @@ future_rendered="$(KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/d
 printf '%s\n' 'BEGIN;' 'SELECT 1;' 'COMMIT;' >"$fixture_root/ops/db/035_future_test.sql"
 if KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null 2>&1; then
   fail "future migration with transaction control was accepted"
+fi
+
+rm "$fixture_root/ops/db/035_future_test.sql"
+cp "$ROOT_DIR/ops/db/052_plugin_management_permissions.sql" "$fixture_root/ops/db/052_plugin_management_permissions.sql"
+KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null || fail "known legacy 052 was rejected"
+printf '\n-- changed legacy migration\n' >>"$fixture_root/ops/db/052_plugin_management_permissions.sql"
+if KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null 2>&1; then
+  fail "modified legacy 052 with transaction control was accepted"
 fi
 
 echo "deploy database tests passed"

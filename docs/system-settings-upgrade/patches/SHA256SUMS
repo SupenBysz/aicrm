@@ -1,0 +1,4 @@
+98eee377b06cc553dc8634b9552711fddce6d6386c9ddbd7c28d23661e881941  01-system-settings.patch
+33626aede9cfe2dcd9f40cf2788245dd5c331fbb0ce33b07e0400db40061b6e4  02-image-consumer.reference.patch
+81b783daa71403279cbcaa75fb7314dc7caa29997fe15f90b2e9ef0400b6f8d8  03-database-runner-compatibility.patch
+ee4aac0d14bad3b51ba239265236e524a37811973bf9a35db398178a3a1230cf  manifest.json

@@ -1,4 +1,5 @@
-import { Card, Skeleton, Space, Table, Tag, Typography } from "antd";
+import { useEffect, useState } from "react";
+import { Skeleton, Table, Tabs, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useQuery } from "@tanstack/react-query";
 import { ListPageCard, useRequestClient } from "@ky/admin-core";
@@ -7,6 +8,22 @@ import { listDictionaries, type Dictionary, type DictionaryItem } from "../api";
 export function DictionariesPage() {
   const client = useRequestClient();
   const { data, isLoading } = useQuery({ queryKey: ["dictionaries"], queryFn: () => listDictionaries(client) });
+  const [activeKey, setActiveKey] = useState("");
+  const [compactTabs, setCompactTabs] = useState(false);
+
+  useEffect(() => {
+    const dictionaries = data ?? [];
+    if (dictionaries.some((dictionary) => dictionary.id === activeKey)) return;
+    setActiveKey(dictionaries[0]?.id ?? "");
+  }, [activeKey, data]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 640px)");
+    const update = () => setCompactTabs(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const itemColumns: ColumnsType<DictionaryItem> = [
     { title: "标签", dataIndex: "label", key: "label" },
@@ -26,32 +43,39 @@ export function DictionariesPage() {
       <div style={{ padding: 16 }}>
         {isLoading ? (
           <Skeleton active />
+        ) : (data ?? []).length === 0 ? (
+          <Typography.Text type="secondary">暂无字典。</Typography.Text>
         ) : (
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            {(data ?? []).map((dict: Dictionary) => (
-              <Card
-                key={dict.id}
-                size="small"
-                title={
-                  <Space>
-                    <Typography.Text strong>{dict.name}</Typography.Text>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      {dict.code}
-                    </Typography.Text>
-                  </Space>
-                }
-              >
-                <Table<DictionaryItem>
-                  rowKey={(item) => `${dict.id}:${item.value}`}
-                  columns={itemColumns}
-                  dataSource={dict.items}
-                  pagination={false}
-                  size="small"
-                />
-              </Card>
-            ))}
-            {(data ?? []).length === 0 ? <Typography.Text type="secondary">暂无字典。</Typography.Text> : null}
-          </Space>
+          <Tabs
+            className="system-settings-tabs"
+            activeKey={activeKey}
+            onChange={setActiveKey}
+            tabPosition={compactTabs ? "top" : "left"}
+            style={{ width: "100%" }}
+            tabBarStyle={compactTabs ? undefined : { minWidth: 168 }}
+            items={(data ?? []).map((dict: Dictionary) => ({
+              key: dict.id,
+              label: (
+                <span className="system-settings-dictionary-tab-label">
+                  <Typography.Text>{dict.name || dict.code}</Typography.Text>
+                  <Typography.Text type="secondary" className="system-settings-dictionary-tab-code">
+                    {dict.code}
+                  </Typography.Text>
+                </span>
+              ),
+              children: (
+                <div style={{ width: "100%", padding: "0 16px" }}>
+                  <Table<DictionaryItem>
+                    rowKey={(item) => `${dict.id}:${item.value}`}
+                    columns={itemColumns}
+                    dataSource={dict.items}
+                    pagination={false}
+                    size="small"
+                  />
+                </div>
+              )
+            }))}
+          />
         )}
       </div>
     </ListPageCard>

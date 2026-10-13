@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -38,6 +39,13 @@ func (s *Server) Run(ctx context.Context) error {
 		if opened, err := store.Open(ctx, s.cfg.DatabaseURL); err == nil {
 			s.store = opened
 			defer opened.Close()
+			if settings, settingsErr := s.store.GetStorageSettings(ctx); settingsErr != nil {
+				return fmt.Errorf("读取对象存储配置失败: %w", settingsErr)
+			} else if settings.ActiveStorageProvider == "local" {
+				if localErr := ensureLocalStorageDirectory(settings.Providers["local"].LocalDirectory); localErr != nil {
+					return fmt.Errorf("本地存储目录不可用: %w", localErr)
+				}
+			}
 		}
 	}
 
@@ -116,6 +124,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// 对象存储设置 (object storage)
 	mux.HandleFunc("GET /api/v1/platform/storage-setting", s.ws("platform", perms("platform.storage.view"), s.getStorageSetting))
 	mux.HandleFunc("PATCH /api/v1/platform/storage-setting", s.ws("platform", perms("platform.storage.update"), s.updateStorageSetting))
+	mux.HandleFunc("POST /api/v1/platform/storage-setting/activate", s.ws("platform", perms("platform.storage.update"), s.activateStorageProvider))
 	mux.HandleFunc("POST /api/v1/platform/storage-setting/rotate-secret", s.ws("platform", perms("platform.storage.update"), s.rotateStorageSecret))
 	mux.HandleFunc("POST /api/v1/platform/storage-setting/test", s.ws("platform", perms("platform.storage.test"), s.testStorageSetting))
 

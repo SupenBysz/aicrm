@@ -1,0 +1,280 @@
+{
+  "baseCommit": "a9d1269f24b3ca4a97f87a78f62bb5c89ca7a740",
+  "referenceCommit": "5ddcf15b08d07a2cafd66c5ef3d584a34dae3332",
+  "referenceAncestorVerified": true,
+  "sourceCommits": [
+    "ec009b9601aca32999b7be6892f22223509b14ae",
+    "b11581d50ed64bfad8d53c00470ccd42bf26d31a",
+    "5261e003b9a5c14b9f25870ad6443ae6abbad789"
+  ],
+  "patch": "01-system-settings.patch",
+  "patchSha256": "98eee377b06cc553dc8634b9552711fddce6d6386c9ddbd7c28d23661e881941",
+  "exactReferenceFiles": [
+    "plugins/ky-system-settings/src/api.ts",
+    "apps/ky-admin-host/src/platform-profile.tsx",
+    "plugins/ky-system-settings/src/pages/settings-hub-page.tsx",
+    "plugins/ky-system-settings/src/pages/settings-page.tsx",
+    "plugins/ky-system-settings/src/pages/basic-info-page.tsx",
+    "plugins/ky-system-settings/src/pages/dictionaries-page.tsx",
+    "plugins/ky-system-settings/src/pages/notification-templates-page.tsx",
+    "plugins/ky-system-settings/src/pages/storage-page.tsx",
+    "plugins/ky-system-settings/src/pages/sms-page.tsx",
+    "plugins/ky-system-settings/src/pages/email-page.tsx",
+    "plugins/ky-system-settings/src/pages/app-version-page.tsx",
+    "services/ky-org-service/internal/server/settings_handlers.go",
+    "services/ky-org-service/internal/server/settings_route_test.go",
+    "services/ky-org-service/internal/store/settings_store.go",
+    "services/ky-org-service/internal/server/platform_profile_handlers.go",
+    "services/ky-org-service/internal/server/platform_profile_handlers_test.go",
+    "services/ky-org-service/internal/store/platform_profile_store.go",
+    "services/ky-org-service/internal/server/storage_setting_handlers.go",
+    "services/ky-org-service/internal/store/storage_setting_store.go",
+    "ops/db/078_platform_logo_typography.sql",
+    "ops/db/080_storage_project_directory.sql",
+    "ops/db/081_storage_activation_default.sql"
+  ],
+  "adaptedFiles": [
+    "services/ky-org-service/internal/server/server.go",
+    "apps/ky-admin-host/src/app.tsx",
+    "apps/ky-admin-host/src/styles.css",
+    "ops/db/079_storage_providers.sql",
+    "ops/native/ky-admin-host.nginx.conf"
+  ],
+  "changedFiles": [
+    "apps/ky-admin-host/src/app.tsx",
+    "apps/ky-admin-host/src/platform-profile.tsx",
+    "apps/ky-admin-host/src/styles.css",
+    "ops/db/078_platform_logo_typography.sql",
+    "ops/db/079_storage_providers.sql",
+    "ops/db/080_storage_project_directory.sql",
+    "ops/db/081_storage_activation_default.sql",
+    "ops/native/ky-admin-host.nginx.conf",
+    "plugins/ky-system-settings/src/api.ts",
+    "plugins/ky-system-settings/src/pages/app-version-page.tsx",
+    "plugins/ky-system-settings/src/pages/basic-info-page.tsx",
+    "plugins/ky-system-settings/src/pages/dictionaries-page.tsx",
+    "plugins/ky-system-settings/src/pages/email-page.tsx",
+    "plugins/ky-system-settings/src/pages/notification-templates-page.tsx",
+    "plugins/ky-system-settings/src/pages/settings-hub-page.tsx",
+    "plugins/ky-system-settings/src/pages/settings-page.tsx",
+    "plugins/ky-system-settings/src/pages/sms-page.tsx",
+    "plugins/ky-system-settings/src/pages/storage-page.tsx",
+    "services/ky-org-service/internal/server/platform_profile_handlers.go",
+    "services/ky-org-service/internal/server/platform_profile_handlers_test.go",
+    "services/ky-org-service/internal/server/server.go",
+    "services/ky-org-service/internal/server/settings_handlers.go",
+    "services/ky-org-service/internal/server/settings_route_test.go",
+    "services/ky-org-service/internal/server/storage_setting_handlers.go",
+    "services/ky-org-service/internal/store/platform_profile_store.go",
+    "services/ky-org-service/internal/store/settings_store.go",
+    "services/ky-org-service/internal/store/storage_setting_store.go"
+  ],
+  "validation": {
+    "applyCheck": true,
+    "freshBaselineApplyAndReverse": true,
+    "exactReferenceContentVerified": true,
+    "coreBuild": true,
+    "pluginTypecheck": true,
+    "pluginBuild": true,
+    "hostTypecheck": true,
+    "hostBuild": true,
+    "goTests": true,
+    "databaseMigration": false,
+    "runtimeUI": false,
+    "cloudStorage": false,
+    "realSMSOrEmail": false,
+    "workspaceBusinessPatchApplied": true,
+    "notes": [
+      "Initial plugin typecheck needed Core dist; passed after Core build.",
+      "Host bundle size warning retained.",
+      "Consumer supplement passed text apply check only; requires integration adaptations."
+    ]
+  },
+  "consumerReferencePatch": {
+    "path": "02-image-consumer.reference.patch",
+    "sha256": "33626aede9cfe2dcd9f40cf2788245dd5c331fbb0ce33b07e0400db40061b6e4",
+    "files": [
+      "ops/db/075_image_resources.sql",
+      "ops/db/082_image_resource_storage_provider.sql",
+      "ops/db/083_image_binding_uuid.sql",
+      "ops/db/084_image_legacy_logo_map.sql",
+      "ops/db/085_logo_image_id.sql",
+      "packages/ky-admin-core/src/image-source.test.mjs",
+      "packages/ky-admin-core/src/image-source.ts",
+      "packages/ky-admin-core/src/image-upload.tsx",
+      "services/ky-image-service/cmd/server/main.go",
+      "services/ky-image-service/go.mod",
+      "services/ky-image-service/go.sum",
+      "services/ky-image-service/internal/server/decision_test.go",
+      "services/ky-image-service/internal/server/gc.go",
+      "services/ky-image-service/internal/server/http_integration_test.go",
+      "services/ky-image-service/internal/server/image_integration_test.go",
+      "services/ky-image-service/internal/server/scope_test.go",
+      "services/ky-image-service/internal/server/server.go",
+      "services/ky-image-service/internal/storage/provider.go",
+      "services/ky-image-service/internal/storage/provider_test.go",
+      "shared/image/files.go",
+      "shared/image/files_test.go"
+    ],
+    "status": "reference extraction only; deployment and shop dependencies unresolved"
+  },
+  "fileContentChecks": [
+    {
+      "path": "apps/ky-admin-host/src/app.tsx",
+      "targetSha256": "28d4cdbf46bbf3f7052da8086c25fd1710e16b98993a54260a07239077266b11",
+      "source": "current-project-adaptation"
+    },
+    {
+      "path": "apps/ky-admin-host/src/platform-profile.tsx",
+      "targetSha256": "a054b926b7db2f2b1fcf4b2b2c7eedb1bb729d41a94b108456f25ea7ddb6ae3b",
+      "source": "reference-exact"
+    },
+    {
+      "path": "apps/ky-admin-host/src/styles.css",
+      "targetSha256": "12247cb7ef7fad92b6e8941a975a0502ca4be0d4f14c3edc63e79d5f03533f41",
+      "source": "current-project-adaptation"
+    },
+    {
+      "path": "ops/db/078_platform_logo_typography.sql",
+      "targetSha256": "d004486b8c79bf28cacbb25e53042454295bee818bd5a108add32d0d6d670480",
+      "source": "reference-exact"
+    },
+    {
+      "path": "ops/db/079_storage_providers.sql",
+      "targetSha256": "0ccd84a1210137df1b1a6d5d8ba717ad19d7e0da096f2c07116cf072ce3b5542",
+      "source": "current-project-adaptation"
+    },
+    {
+      "path": "ops/db/080_storage_project_directory.sql",
+      "targetSha256": "fbc5634c563e8e76c2f7ea9d3e0c8fd41e09d070f913dc35c237a78d10485e0e",
+      "source": "reference-exact"
+    },
+    {
+      "path": "ops/db/081_storage_activation_default.sql",
+      "targetSha256": "60e28ce02d9be00feb8d348d06cd5c55cf9c8771b84a6c39e2f251247ab2ab4a",
+      "source": "reference-exact"
+    },
+    {
+      "path": "ops/native/ky-admin-host.nginx.conf",
+      "targetSha256": "23ee19951b7b9817b6de21f605cf7e437f0463fcd4487c70ab41b7cbfe7e8fb1",
+      "source": "current-project-adaptation"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/api.ts",
+      "targetSha256": "b7ad1f885804ac2fcbb207597337df7cf034ccf014b0651876aad693cf589b02",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/app-version-page.tsx",
+      "targetSha256": "53d846b1db851a332c5c2510d5564cd75a16ac813d2e4128e83d25e3cde40853",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/basic-info-page.tsx",
+      "targetSha256": "422dd2978a6f8b1f3142cc058129614e51c073d5943dec43948a300c3b6e4d71",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/dictionaries-page.tsx",
+      "targetSha256": "8d04bf6f5bc01fdd7c0b810d2eb01051c7dcd5def0556e82e8fa611e6917ede4",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/email-page.tsx",
+      "targetSha256": "4e96de0ed0eadeea1baab4065ed870e6cccd15ad9e11a53651acea47ba307fe6",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/notification-templates-page.tsx",
+      "targetSha256": "9c29b7cab0ee721f55659da2891b02772c05015d49742b5a6dbbb680b3c39612",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/settings-hub-page.tsx",
+      "targetSha256": "e891e6008e1876cfa92640598b1333cc742aef4f97dd64b8fd7d60a4453c6c1c",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/settings-page.tsx",
+      "targetSha256": "5cad35d00d50928b8e33d9286dc2a7230c563c98d18387c7482f9f3e1b69c444",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/sms-page.tsx",
+      "targetSha256": "18578b41959fb27dcb2e883b2e625635ed54467f277038d320840ca34f7d81d1",
+      "source": "reference-exact"
+    },
+    {
+      "path": "plugins/ky-system-settings/src/pages/storage-page.tsx",
+      "targetSha256": "1f1788a02ac14dd423caca5e8ca6f716549cf97e8759a6f61458453683cdb19d",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/server/platform_profile_handlers.go",
+      "targetSha256": "5b97f0f8cf371865dac1c1126cca0f17b7744ab5c44dd7c197330114e2abbda5",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/server/platform_profile_handlers_test.go",
+      "targetSha256": "ce9aa89509efc92f738286ce48b5d009e4076e1b19684e949b566a407bfa24a3",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/server/server.go",
+      "targetSha256": "4706207b5d6b28cd108818df7d65f2f81b602c6c53babb8d1bd644ea46a0f7c4",
+      "source": "current-project-adaptation"
+    },
+    {
+      "path": "services/ky-org-service/internal/server/settings_handlers.go",
+      "targetSha256": "b1ea77ac143509443309d257eb412b5cbcbfcadd426d3963871491b6e935a047",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/server/settings_route_test.go",
+      "targetSha256": "0f81adee5cea053596e6350d115cfdd8e31422a2b82907af6aa61f333b1e9a16",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/server/storage_setting_handlers.go",
+      "targetSha256": "8853712794ef09366229ebc21cee0b0b24deffa175d8b6ce5c39836db8522ae0",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/store/platform_profile_store.go",
+      "targetSha256": "fbd00f35ddae504d9da15476785a80d2b17404bbcf89acc95d4d676bc3a142e7",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/store/settings_store.go",
+      "targetSha256": "9976d9b4109211f9e6bcb30432f51994288258c2f22f7a2d0b27d0c1992e0f05",
+      "source": "reference-exact"
+    },
+    {
+      "path": "services/ky-org-service/internal/store/storage_setting_store.go",
+      "targetSha256": "ffa257c802e6c86227c6868ff7eb905a6853e9fd08e41d8e6290b4f88c1e6aa5",
+      "source": "reference-exact"
+    }
+  ],
+  "workspaceApplication": {
+    "date": "2026-10-13",
+    "mainPatchFileHashVerification": "27/27 PASS",
+    "runtimeDeployed": false,
+    "databaseMigrationsApplied": false,
+    "frontendBuild": true,
+    "pluginBuild": true,
+    "orgTests": true,
+    "orgNativeBuild": true,
+    "databaseRunnerTests": true,
+    "additionalCompatibilityPatch": "03-database-runner-compatibility.patch",
+    "legacySQLChecksumUnchanged": true
+  },
+  "compatibilityPatch": {
+    "path": "03-database-runner-compatibility.patch",
+    "sha256": "81b783daa71403279cbcaa75fb7314dc7caa29997fe15f90b2e9ef0400b6f8d8",
+    "files": [
+      "scripts/deploy_database.sh",
+      "scripts/test_deploy_database.sh"
+    ],
+    "source": "Existing same-baseline runner compatibility; tests cover fixed checksum acceptance and checksum drift rejection"
+  }
+}

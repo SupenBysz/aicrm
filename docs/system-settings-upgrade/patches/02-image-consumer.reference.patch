@@ -1,0 +1,2076 @@
+diff --git a/ops/db/075_image_resources.sql b/ops/db/075_image_resources.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..f6e1ed30ab9edb2827eb951a24f5e00305841942
+--- /dev/null
++++ b/ops/db/075_image_resources.sql
+@@ -0,0 +1,39 @@
++-- 公共图片资源与业务关联；由迁移账本在事务中执行，不修改历史表。
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++DO $$ BEGIN IF current_database()<>'kwwcrm' THEN RAISE EXCEPTION 'wrong_database'; END IF; END $$;
++CREATE SCHEMA IF NOT EXISTS ky_image AUTHORIZATION CURRENT_USER;
++CREATE TABLE IF NOT EXISTS ky_image.resource (
++ id text PRIMARY KEY CHECK (id ~ '^[0-9a-f]{32}$'),
++ workspace_type text NOT NULL CHECK (workspace_type IN ('platform','agency','enterprise')),
++ workspace_id text NOT NULL,
++ uploader_user_id text NOT NULL,
++ uploader_membership_id text NOT NULL,
++ context_type text NOT NULL CHECK (context_type IN ('agency','enterprise','shop')),
++ context_id text,
++ purpose text NOT NULL CHECK (purpose IN ('logo')),
++ path text NOT NULL UNIQUE,
++ mime text NOT NULL CHECK (mime IN ('image/png','image/jpeg')),
++ byte_size integer NOT NULL CHECK (byte_size>0 AND byte_size<=2097152),
++ width integer NOT NULL CHECK (width>0 AND width<=1024),
++ height integer NOT NULL CHECK (height>0 AND height<=1024),
++ sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
++ status text NOT NULL CHECK (status IN ('temporary','bound','expired','deleting','deleted')),
++ expires_at timestamptz NOT NULL,
++ created_at timestamptz NOT NULL DEFAULT now(),
++ updated_at timestamptz NOT NULL DEFAULT now()
++);
++CREATE TABLE IF NOT EXISTS ky_image.binding (
++ resource_id text NOT NULL REFERENCES ky_image.resource(id),
++ business_type text NOT NULL CHECK (business_type IN ('agency','enterprise','shop')),
++ business_id text NOT NULL,
++ slot text NOT NULL CHECK (slot='logo'),
++ display_order integer NOT NULL DEFAULT 0,
++ created_at timestamptz NOT NULL DEFAULT now(),
++ PRIMARY KEY (business_type,business_id,slot),
++ UNIQUE (resource_id,business_type,business_id,slot)
++);
++CREATE INDEX IF NOT EXISTS ky_image_resource_scope_idx ON ky_image.resource(workspace_type,workspace_id,status,expires_at);
++CREATE INDEX IF NOT EXISTS ky_image_resource_gc_idx ON ky_image.resource(status,expires_at);
++GRANT USAGE ON SCHEMA ky_image TO CURRENT_USER;
++GRANT SELECT,INSERT,UPDATE ON ky_image.resource,ky_image.binding TO CURRENT_USER;
+diff --git a/ops/db/082_image_resource_storage_provider.sql b/ops/db/082_image_resource_storage_provider.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..510cc854ae03c65dfa69b284c7c8f0aca7e736b1
+--- /dev/null
++++ b/ops/db/082_image_resource_storage_provider.sql
+@@ -0,0 +1,9 @@
++-- 统一图片资源记录实际存储 provider；旧资源按 local 兼容。
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++DO $$ BEGIN IF current_database()<>'kwwcrm' THEN RAISE EXCEPTION 'wrong_database'; END IF; END $$;
++ALTER TABLE ky_image.resource
++  ADD COLUMN IF NOT EXISTS storage_provider text NOT NULL DEFAULT 'local'
++  CHECK (storage_provider IN ('local','minio','oss'));
++CREATE INDEX IF NOT EXISTS ky_image_resource_provider_idx
++  ON ky_image.resource(storage_provider,status,expires_at);
+diff --git a/ops/db/083_image_binding_uuid.sql b/ops/db/083_image_binding_uuid.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..64615458fd6d30bec636ecc36ee241cb24c44fb8
+--- /dev/null
++++ b/ops/db/083_image_binding_uuid.sql
+@@ -0,0 +1,8 @@
++-- 为图片绑定补充稳定 bindingId，保留旧业务唯一约束。
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++DO $$ BEGIN IF current_database()<>'kwwcrm' THEN RAISE EXCEPTION 'wrong_database'; END IF; END $$;
++ALTER TABLE ky_image.binding ADD COLUMN IF NOT EXISTS binding_id text;
++UPDATE ky_image.binding SET binding_id=substr(md5(resource_id||':'||business_type||':'||business_id||':'||slot),1,8)||'-'||substr(md5(resource_id||':'||business_type||':'||business_id||':'||slot),9,4)||'-'||substr(md5(resource_id||':'||business_type||':'||business_id||':'||slot),13,4)||'-'||substr(md5(resource_id||':'||business_type||':'||business_id||':'||slot),17,4)||'-'||substr(md5(resource_id||':'||business_type||':'||business_id||':'||slot),21,12) WHERE binding_id IS NULL;
++ALTER TABLE ky_image.binding ALTER COLUMN binding_id SET NOT NULL;
++CREATE UNIQUE INDEX IF NOT EXISTS ky_image_binding_id_uq ON ky_image.binding(binding_id);
+diff --git a/ops/db/084_image_legacy_logo_map.sql b/ops/db/084_image_legacy_logo_map.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..b0fd6b0e7582a377524c8dc5ca7f245a90aaa171
+--- /dev/null
++++ b/ops/db/084_image_legacy_logo_map.sql
+@@ -0,0 +1,10 @@
++-- 统一旧店铺 Logo 读取映射；只保存不敏感的旧ID与新资源ID。
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++DO $$ BEGIN IF current_database()<>'kwwcrm' THEN RAISE EXCEPTION 'wrong_database'; END IF; END $$;
++CREATE TABLE IF NOT EXISTS ky_image.legacy_logo_map (
++  old_logo_id text PRIMARY KEY,
++  resource_id text NOT NULL REFERENCES ky_image.resource(id) ON DELETE RESTRICT,
++  created_at timestamptz NOT NULL DEFAULT now()
++);
++GRANT SELECT, INSERT ON ky_image.legacy_logo_map TO CURRENT_USER;
+diff --git a/ops/db/085_logo_image_id.sql b/ops/db/085_logo_image_id.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..1dfb98836e6583fdffd0e92e528d74522acb6f59
+--- /dev/null
++++ b/ops/db/085_logo_image_id.sql
+@@ -0,0 +1,16 @@
++-- Logo 的统一资源 ID 主字段；旧 logo_url 仅保留兼容回退。
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++DO $$ BEGIN IF current_database()<>'kwwcrm' THEN RAISE EXCEPTION 'wrong_database'; END IF; END $$;
++ALTER TABLE ky_agency ADD COLUMN IF NOT EXISTS logo_image_id text CHECK (logo_image_id IS NULL OR logo_image_id ~ '^[0-9a-f]{32}$');
++ALTER TABLE ky_enterprise ADD COLUMN IF NOT EXISTS logo_image_id text CHECK (logo_image_id IS NULL OR logo_image_id ~ '^[0-9a-f]{32}$');
++ALTER TABLE ky_shop_management.ky_shop_store ADD COLUMN IF NOT EXISTS logo_image_id text CHECK (logo_image_id IS NULL OR logo_image_id ~ '^[0-9a-f]{32}$');
++UPDATE ky_agency SET logo_image_id=substring(logo_url FROM '/api/v1/images/([0-9a-f]{32})$') WHERE logo_image_id IS NULL AND logo_url ~ '/api/v1/images/[0-9a-f]{32}$';
++UPDATE ky_enterprise SET logo_image_id=substring(logo_url FROM '/api/v1/images/([0-9a-f]{32})$') WHERE logo_image_id IS NULL AND logo_url ~ '/api/v1/images/[0-9a-f]{32}$';
++UPDATE ky_shop_management.ky_shop_store SET logo_image_id=substring(logo_url FROM '/api/v1/images/([0-9a-f]{32})$') WHERE logo_image_id IS NULL AND logo_url ~ '/api/v1/images/[0-9a-f]{32}$';
++CREATE INDEX IF NOT EXISTS ky_agency_logo_image_idx ON ky_agency(logo_image_id) WHERE logo_image_id IS NOT NULL;
++CREATE INDEX IF NOT EXISTS ky_enterprise_logo_image_idx ON ky_enterprise(logo_image_id) WHERE logo_image_id IS NOT NULL;
++CREATE INDEX IF NOT EXISTS ky_shop_store_logo_image_idx ON ky_shop_management.ky_shop_store(logo_image_id) WHERE logo_image_id IS NOT NULL;
++GRANT SELECT (logo_image_id) ON ky_agency, ky_enterprise TO CURRENT_USER;
++GRANT INSERT (logo_image_id), UPDATE (logo_image_id) ON ky_agency, ky_enterprise TO CURRENT_USER;
++GRANT SELECT (logo_image_id), INSERT (logo_image_id), UPDATE (logo_image_id) ON ky_shop_management.ky_shop_store TO CURRENT_USER;
+diff --git a/packages/ky-admin-core/src/image-source.test.mjs b/packages/ky-admin-core/src/image-source.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..5f70b52042316b4acc6572af66b10ba0508e1378
+--- /dev/null
++++ b/packages/ky-admin-core/src/image-source.test.mjs
+@@ -0,0 +1,10 @@
++import assert from "node:assert/strict";
++import { resolveImageSource } from "../dist/image-source.js";
++
++const protectedURL = resolveImageSource("https://api.kww.org.cn/api/v1/shop-management/logos/0123456789abcdef0123456789abcdef");
++assert.equal(protectedURL.path, "/api/v1/shop-management/logos/0123456789abcdef0123456789abcdef");
++assert.equal(protectedURL.legacy, null);
++assert.equal(resolveImageSource("https://api.kww.org.cn/not-an-image").legacy, null);
++assert.equal(resolveImageSource("https://cdn.example.test/assets/logo.png").legacy, "https://cdn.example.test/assets/logo.png");
++assert.equal(resolveImageSource("http://cdn.example.test/logo.png").legacy, null);
++assert.equal(resolveImageSource("https://user:pass@example.test/logo.png").legacy, null);
+diff --git a/packages/ky-admin-core/src/image-source.ts b/packages/ky-admin-core/src/image-source.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0405e7bc0a5e64288b8ea9d40d0e0234294a377c
+--- /dev/null
++++ b/packages/ky-admin-core/src/image-source.ts
+@@ -0,0 +1,27 @@
++export function imagePath(value?: string | null): string | null {
++  if (!value) return null;
++  if (/^\/api\/v1\/images\/[0-9a-f]{32}(?:\?.*)?$/.test(value) || /^\/api\/v1\/shop-management\/logos\/[0-9a-f]{32}(?:\?.*)?$/.test(value)) return value;
++  try {
++    const url = new URL(value);
++    return ["api.kww.org.cn", "console.kww.org.cn"].includes(url.hostname) && url.protocol === "https:" && (/^\/api\/v1\/images\/[0-9a-f]{32}$/.test(url.pathname) || /^\/api\/v1\/shop-management\/logos\/[0-9a-f]{32}$/.test(url.pathname)) ? `${url.pathname}${url.search}` : null;
++  } catch {
++    return null;
++  }
++}
++
++export function legacyImageURL(value?: string | null): string | null {
++  if (!value) return null;
++  try {
++    const url = new URL(value);
++    if (url.protocol !== "https:" || url.username || url.password) return null;
++    if (["api.kww.org.cn", "console.kww.org.cn"].includes(url.hostname)) return null;
++    return url.href;
++  } catch {
++    return null;
++  }
++}
++
++export function resolveImageSource(value?: string | null) {
++  const path = imagePath(value);
++  return { path, legacy: path ? null : legacyImageURL(value) };
++}
+diff --git a/packages/ky-admin-core/src/image-upload.tsx b/packages/ky-admin-core/src/image-upload.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..e6723c8ed6e00bf49e9093f4be35f83bca179a7f
+--- /dev/null
++++ b/packages/ky-admin-core/src/image-upload.tsx
+@@ -0,0 +1,32 @@
++import { useEffect, useRef, useState } from "react";
++import { Alert, Button, Image as AntImage, Progress, Space, Spin, theme, Typography } from "antd";
++import { useRequestClient } from "./request-context";
++import { useCurrentUser } from "./user-context";
++import { useCurrentWorkspace } from "./workspace-context";
++import { resolveImageSource } from "./image-source";
++
++const limit = 2 * 1024 * 1024;
++
++export function ImageView({ value, size = 64 }: { value?: string | null; size?: number }) {
++  const { token } = theme.useToken(); const client = useRequestClient(); const user = useCurrentUser(); const workspace = useCurrentWorkspace(); const [src, setSrc] = useState<string>(); const [renderedKey, setRenderedKey] = useState(""); const [failed, setFailed] = useState(false); const key = `${user?.id ?? ""}:${workspace?.type ?? ""}:${workspace?.id ?? ""}:${workspace?.membershipId ?? ""}:${value ?? ""}`;
++  const { path, legacy } = resolveImageSource(value);
++  useEffect(() => { let live = true; setSrc(undefined); setRenderedKey(""); setFailed(false); if (!path) return; const ctrl = new AbortController(); let objectUrl = "";
++    client.request<{ mime: string; base64: string }>(path, { signal: ctrl.signal }).then(result => { if (!live || !/^image\/(png|jpeg)$/.test(result.mime)) throw new Error("invalid_image"); const raw = atob(result.base64); if (raw.length > limit || !live) throw new Error("invalid_image"); objectUrl = URL.createObjectURL(new Blob([Uint8Array.from(raw, ch => ch.charCodeAt(0))], { type: result.mime })); if (live) { setSrc(objectUrl); setRenderedKey(key); setFailed(false); } }).catch(() => { if (live && !ctrl.signal.aborted) setFailed(true); });
++    return () => { live = false; ctrl.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
++  }, [client, key, value, path]);
++  const frameStyle = { width: size, height: size, boxSizing: "border-box" as const, border: "1px solid var(--admin-image-frame-border, #d9d9d9)", background: "var(--admin-image-frame-bg, #fafafa)", borderRadius: token.borderRadius, overflow: "hidden" as const, display: "grid", placeItems: "center" };
++  if (legacy) return failed ? <button type="button" onClick={() => setFailed(false)} style={{ ...frameStyle, color: token.colorTextSecondary }}>重试</button> : <AntImage key={`${key}:legacy`} width={size} height={size} src={legacy} referrerPolicy="no-referrer" preview={{ mask: "查看大图" }} style={{ ...frameStyle, objectFit: "contain" }} onError={() => setFailed(true)} />;
++  return src && renderedKey === key ? <AntImage width={size} height={size} src={src} preview={{ mask: "查看大图" }} style={{ ...frameStyle, objectFit: "contain" }} /> : <div style={{ ...frameStyle, color: "var(--admin-image-frame-icon, #8c8c8c)" }}>{failed ? "失败" : <svg aria-hidden="true" width={Math.max(18, Math.round(size * 0.34))} height={Math.max(18, Math.round(size * 0.34))} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m5 17 4-4 3 3 2-2 5 5" /></svg>}</div>;
++}
++
++export function ImageUpload({ value, onChange, contextType, contextId, onBusyChange }: { value?: string; onChange?: (value: string) => void; contextType: "agency" | "enterprise" | "shop"; contextId?: string; onBusyChange?: (busy: boolean) => void }) {
++  const client = useRequestClient(); const user = useCurrentUser(); const workspace = useCurrentWorkspace(); const identityKey = `${user?.id ?? ""}:${workspace?.type ?? ""}:${workspace?.id ?? ""}:${workspace?.membershipId ?? ""}`; const input = useRef<HTMLInputElement>(null); const readerRef = useRef<FileReader | null>(null); const requestRef = useRef<AbortController | null>(null); const serial = useRef(0); const [busy, setBusy] = useState(false); const [progress, setProgress] = useState(0); const [phase, setPhase] = useState<"读取" | "上传">("读取"); const [error, setError] = useState("");
++  const setBusyState = (next: boolean) => { setBusy(next); onBusyChange?.(next); };
++  const upload = async (file?: File) => { if (!file) return; setError(""); setPhase("读取"); setProgress(0); if (file.size > limit || !["image/png", "image/jpeg"].includes(file.type)) { setError("请选择2MiB以内的PNG或JPEG图片"); return; } const current = ++serial.current; setBusyState(true);
++    try { const encoded = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); readerRef.current = reader; reader.onprogress = event => { if (event.lengthComputable && current === serial.current) setProgress(Math.round(event.loaded / event.total * 100)); }; reader.onerror = () => reject(new Error("read_failed")); reader.onabort = () => reject(new Error("cancelled")); reader.onload = () => resolve(String(reader.result).split(",", 2)[1]); reader.readAsDataURL(file); }); if (current !== serial.current) return; setPhase("上传"); setProgress(0); requestRef.current = new AbortController();
++      const result = await client.request<{ imageId: string }>("/api/v1/images", { method: "POST", body: { mime: file.type, base64: encoded, contextType, contextId: contextId ?? "", purpose: "logo" }, signal: requestRef.current.signal }); if (current !== serial.current || !/^[0-9a-f]{32}$/.test(result.imageId)) throw new Error("invalid_response"); onChange?.(`/api/v1/images/${result.imageId}`);
++    } catch (error) { if (current === serial.current) { const code = (error as { code?: string })?.code; setError(code === "forbidden" ? "当前对象没有图片权限。" : code === "validation_error" ? "图片格式、尺寸或大小不符合要求。" : code === "unauthorized" ? "登录已失效，请重新登录。" : code === "permission_unavailable" ? "图片权限服务暂不可用，请稍后重试。原图片保持不变。" : code === "storage_unavailable" || code === "overloaded" ? "图片存储服务暂不可用，请稍后重试。原图片保持不变。" : "图片上传请求失败，请稍后重试。原图片保持不变。"); } } finally { if (current === serial.current) setBusyState(false); if (input.current) input.current.value = ""; }
++  };
++  useEffect(() => () => { serial.current++; readerRef.current?.abort(); requestRef.current?.abort(); setBusyState(false); }, [contextType, contextId, identityKey, client]);
++  return <div><Space wrap align="center"><ImageView value={value} /><input ref={input} type="file" accept="image/png,image/jpeg" hidden onChange={event => void upload(event.target.files?.[0])} /><Button disabled={busy} onClick={() => input.current?.click()}>{value ? "替换图片" : "选择图片上传"}</Button>{value ? <Button disabled={busy} onClick={() => { onChange?.(""); setError(""); }}>移除</Button> : null}</Space>{busy ? <Progress percent={phase === "读取" ? progress : undefined} format={percent => phase === "读取" ? `读取 ${percent ?? 0}%` : "上传中"} /> : null}{busy ? <Space><Spin size="small" /><Typography.Text>{phase === "读取" ? "正在读取图片…" : "正在上传并校验图片…"}</Typography.Text></Space> : null}{error ? <Alert style={{ marginTop: 12 }} type="error" title={error} showIcon /> : null}</div>;
++}
+diff --git a/services/ky-image-service/cmd/server/main.go b/services/ky-image-service/cmd/server/main.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..ffd1ad2cfa4d4663757afedcbca6827627621781
+--- /dev/null
++++ b/services/ky-image-service/cmd/server/main.go
+@@ -0,0 +1,18 @@
++package main
++
++import (
++	"context"
++	"github.com/Kysion/KyaiCRM/services/ky-image-service/internal/server"
++	"log"
++	"os"
++	"os/signal"
++	"syscall"
++)
++
++func main() {
++	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++	defer stop()
++	if e := server.Run(ctx); e != nil {
++		log.Fatal(e)
++	}
++}
+diff --git a/services/ky-image-service/go.mod b/services/ky-image-service/go.mod
+new file mode 100644
+index 0000000000000000000000000000000000000000..8bb3accfbcfae7e60a35692cbdd3d1ba843f2ad8
+--- /dev/null
++++ b/services/ky-image-service/go.mod
+@@ -0,0 +1,37 @@
++module github.com/Kysion/KyaiCRM/services/ky-image-service
++
++go 1.25.0
++
++require github.com/jackc/pgx/v5 v5.7.2
++
++require github.com/minio/minio-go/v7 v7.2.0
++
++require github.com/Kysion/KyaiCRM/shared v0.0.0
++
++require (
++	github.com/cespare/xxhash/v2 v2.3.0 // indirect
++	github.com/dustin/go-humanize v1.0.1 // indirect
++	github.com/google/uuid v1.6.0 // indirect
++	github.com/jackc/pgpassfile v1.0.0 // indirect
++	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
++	github.com/jackc/puddle/v2 v2.2.2 // indirect
++	github.com/klauspost/compress v1.18.6 // indirect
++	github.com/klauspost/cpuid/v2 v2.2.11 // indirect
++	github.com/klauspost/crc32 v1.3.0 // indirect
++	github.com/kr/text v0.2.0 // indirect
++	github.com/minio/crc64nvme v1.1.1 // indirect
++	github.com/minio/md5-simd v1.1.2 // indirect
++	github.com/philhofer/fwd v1.2.0 // indirect
++	github.com/rs/xid v1.6.0 // indirect
++	github.com/tinylib/msgp v1.6.1 // indirect
++	github.com/zeebo/xxh3 v1.1.0 // indirect
++	go.yaml.in/yaml/v3 v3.0.4 // indirect
++	golang.org/x/crypto v0.51.0 // indirect
++	golang.org/x/net v0.53.0 // indirect
++	golang.org/x/sync v0.20.0 // indirect
++	golang.org/x/sys v0.44.0 // indirect
++	golang.org/x/text v0.37.0 // indirect
++	gopkg.in/ini.v1 v1.67.2 // indirect
++)
++
++replace github.com/Kysion/KyaiCRM/shared => ../../shared
+diff --git a/services/ky-image-service/go.sum b/services/ky-image-service/go.sum
+new file mode 100644
+index 0000000000000000000000000000000000000000..45ea43f2aa3444f7c2bd76b2d50a88bb8f3e74bf
+--- /dev/null
++++ b/services/ky-image-service/go.sum
+@@ -0,0 +1,80 @@
++github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
++github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
++github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
++github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
++github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
++github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
++github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
++github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
++github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
++github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
++github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
++github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
++github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
++github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=
++github.com/jackc/pgx/v5 v5.7.2 h1:mLoDLV6sonKlvjIEsV56SkWNCnuNv531l94GaIzO+XI=
++github.com/jackc/pgx/v5 v5.7.2/go.mod h1:ncY89UGWxg82EykZUwSpUKEfccBGGYq1xjrOpsbsfGQ=
++github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=
++github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
++github.com/klauspost/compress v1.18.6 h1:2jupLlAwFm95+YDR+NwD2MEfFO9d4z4Prjl1XXDjuao=
++github.com/klauspost/compress v1.18.6/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
++github.com/klauspost/cpuid/v2 v2.0.1/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
++github.com/klauspost/cpuid/v2 v2.2.11 h1:0OwqZRYI2rFrjS4kvkDnqJkKHdHaRnCm68/DY4OxRzU=
++github.com/klauspost/cpuid/v2 v2.2.11/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
++github.com/klauspost/crc32 v1.3.0 h1:sSmTt3gUt81RP655XGZPElI0PelVTZ6YwCRnPSupoFM=
++github.com/klauspost/crc32 v1.3.0/go.mod h1:D7kQaZhnkX/Y0tstFGf8VUzv2UofNGqCjnC3zdHB0Hw=
++github.com/kr/pretty v0.3.0 h1:WgNl7dwNpEZ6jJ9k1snq4pZsg7DOEN8hP9Xw0Tsjwk0=
++github.com/kr/pretty v0.3.0/go.mod h1:640gp4NfQd8pI5XOwp5fnNeVWj67G7CFk/SaSQn7NBk=
++github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
++github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
++github.com/minio/crc64nvme v1.1.1 h1:8dwx/Pz49suywbO+auHCBpCtlW1OfpcLN7wYgVR6wAI=
++github.com/minio/crc64nvme v1.1.1/go.mod h1:eVfm2fAzLlxMdUGc0EEBGSMmPwmXD5XiNRpnu9J3bvg=
++github.com/minio/md5-simd v1.1.2 h1:Gdi1DZK69+ZVMoNHRXJyNcxrMA4dSxoYHZSQbirFg34=
++github.com/minio/md5-simd v1.1.2/go.mod h1:MzdKDxYpY2BT9XQFocsiZf/NKVtR7nkE4RoEpN+20RM=
++github.com/minio/minio-go/v7 v7.2.0 h1:RCJM0R1XOsRs+A3x3UCaf3ZYbByDaLjFeAi+YCQEPhs=
++github.com/minio/minio-go/v7 v7.2.0/go.mod h1:EU9hENAStx/xXduNdrGO5e4X5vk19NtgB+RIPjZO8o0=
++github.com/philhofer/fwd v1.2.0 h1:e6DnBTl7vGY+Gz322/ASL4Gyp1FspeMvx1RNDoToZuM=
++github.com/philhofer/fwd v1.2.0/go.mod h1:RqIHx9QI14HlwKwm98g9Re5prTQ6LdeRQn+gXJFxsJM=
++github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
++github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
++github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
++github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
++github.com/rs/xid v1.6.0 h1:fV591PaemRlL6JfRxGDEPl69wICngIQ3shQtzfy2gxU=
++github.com/rs/xid v1.6.0/go.mod h1:7XoLgs4eV+QndskICGsho+ADou8ySMSjJKDIan90Nz0=
++github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
++github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
++github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
++github.com/stretchr/objx v0.5.2/go.mod h1:FRsXN1f5AsAjCGJKqEizvkpNtU+EGNCLh3NxZ/8L+MA=
++github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
++github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
++github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
++github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
++github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
++github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
++github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
++github.com/tinylib/msgp v1.6.1 h1:ESRv8eL3u+DNHUoSAAQRE50Hm162zqAnBoGv9PzScPY=
++github.com/tinylib/msgp v1.6.1/go.mod h1:RSp0LW9oSxFut3KzESt5Voq4GVWyS+PSulT77roAqEA=
++github.com/zeebo/assert v1.3.0 h1:g7C04CbJuIDKNPFHmsk4hwZDO5O+kntRxzaUoNXj+IQ=
++github.com/zeebo/assert v1.3.0/go.mod h1:Pq9JiuJQpG8JLJdtkwrJESF0Foym2/D9XMU5ciN/wJ0=
++github.com/zeebo/xxh3 v1.1.0 h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=
++github.com/zeebo/xxh3 v1.1.0/go.mod h1:IisAie1LELR4xhVinxWS5+zf1lA4p0MW4T+w+W07F5s=
++go.yaml.in/yaml/v3 v3.0.4 h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=
++go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
++golang.org/x/crypto v0.51.0 h1:IBPXwPfKxY7cWQZ38ZCIRPI50YLeevDLlLnyC5wRGTI=
++golang.org/x/crypto v0.51.0/go.mod h1:8AdwkbraGNABw2kOX6YFPs3WM22XqI4EXEd8g+x7Oc8=
++golang.org/x/net v0.53.0 h1:d+qAbo5L0orcWAr0a9JweQpjXF19LMXJE8Ey7hwOdUA=
++golang.org/x/net v0.53.0/go.mod h1:JvMuJH7rrdiCfbeHoo3fCQU24Lf5JJwT9W3sJFulfgs=
++golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
++golang.org/x/sync v0.20.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
++golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
++golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
++golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
++golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
++gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
++gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
++gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
++gopkg.in/ini.v1 v1.67.2 h1:JtOSMb9OuaCZKr7h5D/h6iii14sK0hLbplTc6frx4Ss=
++gopkg.in/ini.v1 v1.67.2/go.mod h1:x/cyOwCgZqOkJoDIJ3c1KNHMo10+nLGAhh+kn3Zizss=
++gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
++gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
++gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+diff --git a/services/ky-image-service/internal/server/decision_test.go b/services/ky-image-service/internal/server/decision_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..85b3df50dbbdfb2bb0c17e6ea2bbd9e79eb58784
+--- /dev/null
++++ b/services/ky-image-service/internal/server/decision_test.go
+@@ -0,0 +1,36 @@
++package server
++
++import (
++	"context"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++func TestAccessDecisionDistinguishesDeniedAndInvalidResponses(t *testing.T) {
++	tests := []struct {
++		name    string
++		body    string
++		wantOK  bool
++		wantErr bool
++	}{
++		{name: "explicit denied", body: `{"data":{"allowed":false}}`, wantOK: false},
++		{name: "missing allowed", body: `{"data":{}}`, wantErr: true},
++		{name: "null allowed", body: `{"data":{"allowed":null}}`, wantErr: true},
++		{name: "missing grant", body: `{"data":{"allowed":true,"actorId":"u1","workspaceType":"enterprise","workspaceId":"e1","membershipId":"m1","grantedRequiredPermissions":[],"dataScopes":[{"scopeType":"all"}]}}`, wantErr: true},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
++				w.Header().Set("Content-Type", "application/json")
++				_, _ = w.Write([]byte(tt.body))
++			}))
++			defer srv.Close()
++			s := &service{c: cfg{membershipURL: srv.URL, internalToken: "fixture"}}
++			_, ok, _, err := s.accessDecision(context.Background(), "u1", "s1", "enterprise", "e1", []string{"enterprise.profile.view"})
++			if ok != tt.wantOK || (err != nil) != tt.wantErr {
++				t.Fatalf("ok=%v err=%v, want ok=%v err=%v", ok, err, tt.wantOK, tt.wantErr)
++			}
++		})
++	}
++}
+diff --git a/services/ky-image-service/internal/server/gc.go b/services/ky-image-service/internal/server/gc.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..895a392ddd1c3b95b47c6b82d01b00e118f8ce2b
+--- /dev/null
++++ b/services/ky-image-service/internal/server/gc.go
+@@ -0,0 +1,85 @@
++package server
++
++import (
++	"context"
++	"errors"
++	"os"
++	"path/filepath"
++	"time"
++
++	imagestorage "github.com/Kysion/KyaiCRM/services/ky-image-service/internal/storage"
++)
++
++// collect removes only expired temporary resources with no binding. Bound
++// resources are never selected by this job; the database binding is authoritative.
++func (s *service) collect(ctx context.Context, now time.Time, limit int) (int, error) {
++	if limit <= 0 || limit > 200 {
++		limit = 200
++	}
++	tx, err := s.db.BeginTx(ctx, nil)
++	if err != nil {
++		return 0, err
++	}
++	defer tx.Rollback()
++	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.path,r.storage_provider FROM ky_image.resource r LEFT JOIN ky_image.binding b ON b.resource_id=r.id WHERE r.status IN('temporary','expired','deleting') AND r.expires_at <= $1 AND b.resource_id IS NULL ORDER BY r.created_at LIMIT $2 FOR UPDATE OF r SKIP LOCKED`, now, limit)
++	if err != nil {
++		return 0, err
++	}
++	defer rows.Close()
++	type victim struct{ id, path, provider string }
++	victims := []victim{}
++	for rows.Next() {
++		var v victim
++		if err = rows.Scan(&v.id, &v.path, &v.provider); err != nil {
++			return 0, err
++		}
++		victims = append(victims, v)
++	}
++	if err = rows.Err(); err != nil {
++		return 0, err
++	}
++	for _, v := range victims {
++		if _, err = tx.ExecContext(ctx, `UPDATE ky_image.resource SET status='deleting',updated_at=now() WHERE id=$1 AND status IN('temporary','expired','deleting')`, v.id); err != nil {
++			return 0, err
++		}
++	}
++	if err = tx.Commit(); err != nil {
++		return 0, err
++	}
++	completed := 0
++	var firstErr error
++	for _, v := range victims {
++		var removeErr error
++		if v.provider == "" || v.provider == "local" {
++			removeErr = os.Remove(filepath.Join(s.c.dir, v.path))
++		} else {
++			_, provider, loadErr := imagestorage.LoadProvider(ctx, s.db, s.c.dir, s.c.storageSecret, v.provider)
++			if loadErr == nil {
++				removeErr = provider.Delete(ctx, v.path)
++			} else {
++				removeErr = loadErr
++			}
++		}
++		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
++			if firstErr == nil {
++				firstErr = removeErr
++			}
++			continue
++		}
++		result, err := s.db.ExecContext(ctx, `DELETE FROM ky_image.resource WHERE id=$1 AND status='deleting'`, v.id)
++		if err != nil {
++			if firstErr == nil {
++				firstErr = err
++			}
++			continue
++		}
++		if affected, err := result.RowsAffected(); err != nil {
++			if firstErr == nil {
++				firstErr = err
++			}
++		} else if affected == 1 {
++			completed++
++		}
++	}
++	return completed, firstErr
++}
+diff --git a/services/ky-image-service/internal/server/http_integration_test.go b/services/ky-image-service/internal/server/http_integration_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..d9a30cd6d41093f9541f382f4ab9f9fc35c3dfb1
+--- /dev/null
++++ b/services/ky-image-service/internal/server/http_integration_test.go
+@@ -0,0 +1,105 @@
++//go:build integration
++
++package server
++
++import (
++	"bytes"
++	"context"
++	"database/sql"
++	"encoding/base64"
++	"encoding/json"
++	"image"
++	"image/png"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/Kysion/KyaiCRM/shared/auth"
++	_ "github.com/jackc/pgx/v5/stdlib"
++)
++
++func TestImageHTTPPermissionMatrix(t *testing.T) {
++	dsn := os.Getenv("KWW_IMAGE_TEST_DSN")
++	if dsn == "" {
++		t.Fatal("KWW_IMAGE_TEST_DSN is required")
++	}
++	testDB, err := sql.Open("pgx", dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = testDB.Close() })
++	ctx := context.Background()
++	_, _ = testDB.ExecContext(ctx, `DELETE FROM ky_role_permission; DELETE FROM ky_membership_role; DELETE FROM ky_permission; DELETE FROM ky_role; DELETE FROM ky_user_session; DELETE FROM ky_membership; DELETE FROM ky_user WHERE id IN ('u1','up','u2','u3'); DELETE FROM ky_enterprise`)
++	for _, q := range []string{
++		`INSERT INTO ky_user(id,username,display_name,status) VALUES('u1','image-it','图片测试','normal')`,
++		`INSERT INTO ky_user(id,username,display_name,status) VALUES('up','image-platform','平台图片测试','normal'),('u2','image-reader','企业图片测试','normal'),('u3','image-other','其他企业测试','normal')`,
++		`INSERT INTO ky_membership(id,user_id,workspace_type,workspace_id,display_name,status) VALUES('m1','u1','enterprise','e1','图片测试','active')`,
++		`INSERT INTO ky_membership(id,user_id,workspace_type,workspace_id,display_name,status) VALUES('mp','up','platform','platform_root','平台图片测试','active'),('m2','u2','enterprise','e1','企业图片测试','active'),('m3','u3','enterprise','e2','其他企业测试','active')`,
++		`INSERT INTO ky_user_session(id,user_id,token_id,status,expires_at) VALUES('s1','u1','token-image-it','active',now()+interval '1 hour')`,
++		`INSERT INTO ky_user_session(id,user_id,token_id,status,expires_at) VALUES('sp','up','token-image-platform','active',now()+interval '1 hour'),('s2','u2','token-image-reader','active',now()+interval '1 hour'),('s3','u3','token-image-other','active',now()+interval '1 hour')`,
++		`INSERT INTO ky_role(id,workspace_type,workspace_id,name,code,is_system,status) VALUES('r1','enterprise','e1','图片测试','image_it',false,'normal')`,
++		`INSERT INTO ky_role(id,workspace_type,workspace_id,name,code,is_system,status) VALUES('rp','platform','platform_root','平台图片测试','image_platform',false,'normal'),('r2','enterprise','e1','企业图片读取','image_reader',false,'normal'),('r3','enterprise','e2','其他企业读取','image_other',false,'normal')`,
++		`INSERT INTO ky_permission(id,code,name,category,status) VALUES('p1','enterprise.profile.update','图片编辑','action','normal')`,
++		`INSERT INTO ky_permission(id,code,name,category,status) VALUES('pp1','platform.enterprises.create','平台创建图片','action','normal'),('pp2','platform.enterprises.view','平台读取图片','page','normal'),('p2','enterprise.profile.view','企业读取图片','page','normal')`,
++		`INSERT INTO ky_membership_role(id,membership_id,role_id,workspace_type,workspace_id) VALUES('mr1','m1','r1','enterprise','e1')`,
++		`INSERT INTO ky_membership_role(id,membership_id,role_id,workspace_type,workspace_id) VALUES('mrp','mp','rp','platform','platform_root'),('mr2','m2','r2','enterprise','e1'),('mr3','m3','r3','enterprise','e2')`,
++		`INSERT INTO ky_role_permission(id,role_id,permission_id) VALUES('rp1','r1','p1')`,
++		`INSERT INTO ky_role_permission(id,role_id,permission_id) VALUES('rpp1','rp','pp1'),('rpp2','rp','pp2'),('rr2','r2','p2')`,
++		`INSERT INTO ky_enterprise(id,agency_id,name,code,status,created_by,updated_by) VALUES('e1',NULL,'图片企业','IMAGE-IT','normal','u1','u1')`,
++	} {
++		if _, err := testDB.ExecContext(ctx, q); err != nil {
++			t.Fatal(err)
++		}
++	}
++	dir := t.TempDir()
++	if err := os.Chmod(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	authorizer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		w.Header().Set("Content-Type", "application/json")
++		_, _ = w.Write([]byte(`{"data":{"allowed":true,"actorId":"u1","workspaceType":"enterprise","workspaceId":"e1","membershipId":"m1","grantedRequiredPermissions":["enterprise.profile.update","enterprise.profile.view"],"dataScopes":[{"scopeType":"all"}]}}`))
++	}))
++	t.Cleanup(authorizer.Close)
++	s := &service{c: cfg{secret: "secret", dir: dir, membershipURL: authorizer.URL, internalToken: "fixture"}, db: testDB}
++	tok, err := auth.SignToken("secret", auth.TokenPayload{UserID: "u1", SessionID: "s1", Exp: time.Now().Add(time.Hour).Unix()})
++	if err != nil {
++		t.Fatal(err)
++	}
++	mux := http.NewServeMux()
++	mux.HandleFunc("POST /api/v1/images", s.upload)
++	mux.HandleFunc("GET /api/v1/images/{id}", s.read)
++	unauth := httptest.NewRequest(http.MethodPost, "/api/v1/images", strings.NewReader(`{}`))
++	rr := httptest.NewRecorder()
++	mux.ServeHTTP(rr, unauth)
++	if rr.Code != http.StatusUnauthorized {
++		t.Fatalf("unauth=%d", rr.Code)
++	}
++	var imageBuf bytes.Buffer
++	_ = png.Encode(&imageBuf, image.NewNRGBA(image.Rect(0, 0, 1, 1)))
++	body := `{"mime":"image/png","base64":"` + base64.StdEncoding.EncodeToString(imageBuf.Bytes()) + `","contextType":"enterprise","purpose":"logo"}`
++	var probe uploadInput
++	if err := json.Unmarshal([]byte(body), &probe); err != nil || probe.Purpose != "logo" || probe.ContextType != "enterprise" {
++		t.Fatalf("body_contract=%v", err)
++	}
++	req := httptest.NewRequest(http.MethodPost, "/api/v1/images", strings.NewReader(body))
++	req.Header.Set("Authorization", "Bearer "+tok)
++	req.Header.Set("X-KY-Workspace-Type", "enterprise")
++	req.Header.Set("X-KY-Workspace-Id", "e1")
++	rr = httptest.NewRecorder()
++	mux.ServeHTTP(rr, req)
++	if rr.Code != http.StatusOK {
++		t.Fatalf("authorized=%d body=%s", rr.Code, rr.Body.String())
++	}
++	bad := httptest.NewRequest(http.MethodPost, "/api/v1/images", strings.NewReader(body))
++	bad.Header.Set("Authorization", "Bearer "+tok)
++	bad.Header.Set("X-KY-Workspace-Type", "enterprise")
++	bad.Header.Set("X-KY-Workspace-Id", "e2")
++	rr = httptest.NewRecorder()
++	mux.ServeHTTP(rr, bad)
++	if rr.Code != http.StatusForbidden {
++		t.Fatalf("wrong_workspace=%d", rr.Code)
++	}
++}
+diff --git a/services/ky-image-service/internal/server/image_integration_test.go b/services/ky-image-service/internal/server/image_integration_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..5bf7c2bbb6314f2d8445ab19aac9ef2f08f15502
+--- /dev/null
++++ b/services/ky-image-service/internal/server/image_integration_test.go
+@@ -0,0 +1,204 @@
++//go:build integration
++
++package server
++
++import (
++	"context"
++	"database/sql"
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++
++	sharedimage "github.com/Kysion/KyaiCRM/shared/image"
++	_ "github.com/jackc/pgx/v5/stdlib"
++)
++
++func TestImageGCIntegration(t *testing.T) {
++	dsn := os.Getenv("KWW_IMAGE_TEST_DSN")
++	if dsn == "" {
++		t.Fatal("KWW_IMAGE_TEST_DSN is required")
++	}
++	db, err := sql.Open("pgx", dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = db.Close() })
++	ctx := context.Background()
++	_, _ = db.ExecContext(ctx, `DELETE FROM ky_image.binding; DELETE FROM ky_image.resource`)
++	dir := t.TempDir()
++	if err := os.Chmod(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	id := "cccccccccccccccccccccccccccccccc"
++	if _, err = db.ExecContext(ctx, `INSERT INTO ky_image.resource(id,workspace_type,workspace_id,uploader_user_id,uploader_membership_id,context_type,purpose,path,mime,byte_size,width,height,sha256,status,expires_at) VALUES($1,'enterprise','e1','u1','m1','enterprise','logo',$2,'image/png',1,1,1,repeat('c',64),'temporary',now()-interval '1 second')`, id, id+".image"); err != nil {
++		t.Fatal(err)
++	}
++	if err = os.WriteFile(filepath.Join(dir, id+".image"), []byte{1}, 0600); err != nil {
++		t.Fatal(err)
++	}
++	s1 := &service{c: cfg{dir: dir}, db: db}
++	s2 := &service{c: cfg{dir: dir}, db: db}
++	results := make(chan int, 2)
++	go func() { n, _ := s1.collect(ctx, time.Now().UTC(), 10); results <- n }()
++	go func() { n, _ := s2.collect(ctx, time.Now().UTC(), 10); results <- n }()
++	a, b := <-results, <-results
++	if a+b != 1 {
++		t.Fatalf("gc concurrent completed=%d+%d", a, b)
++	}
++	var n int
++	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM ky_image.resource WHERE id=$1`, id).Scan(&n); err != nil || n != 0 {
++		t.Fatalf("gc row count=%d err=%v", n, err)
++	}
++	lockedID := "dddddddddddddddddddddddddddddddd"
++	if _, err = db.ExecContext(ctx, `INSERT INTO ky_image.resource(id,workspace_type,workspace_id,uploader_user_id,uploader_membership_id,context_type,purpose,path,mime,byte_size,width,height,sha256,status,expires_at) VALUES($1,'enterprise','e1','u1','m1','enterprise','logo',$2,'image/png',1,1,1,repeat('d',64),'temporary',now()-interval '1 second')`, lockedID, lockedID+".image"); err != nil {
++		t.Fatal(err)
++	}
++	if err = os.WriteFile(filepath.Join(dir, lockedID+".image"), []byte{1}, 0600); err != nil {
++		t.Fatal(err)
++	}
++	lockTx, err := db.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = lockTx.QueryRowContext(ctx, `SELECT id FROM ky_image.resource WHERE id=$1 FOR UPDATE`, lockedID).Scan(&lockedID); err != nil {
++		t.Fatal(err)
++	}
++	if n, err = s1.collect(ctx, time.Now().UTC(), 10); err != nil || n != 0 {
++		t.Fatalf("locked gc completed=%d err=%v", n, err)
++	}
++	if err = lockTx.Rollback(); err != nil {
++		t.Fatal(err)
++	}
++	if n, err = s1.collect(ctx, time.Now().UTC(), 10); err != nil || n != 1 {
++		t.Fatalf("released gc completed=%d err=%v", n, err)
++	}
++	deletingID := "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
++	if _, err = db.ExecContext(ctx, `INSERT INTO ky_image.resource(id,workspace_type,workspace_id,uploader_user_id,uploader_membership_id,context_type,purpose,path,mime,byte_size,width,height,sha256,status,expires_at) VALUES($1,'enterprise','e1','u1','m1','enterprise','logo',$2,'image/png',1,1,1,repeat('e',64),'deleting',now()+interval '1 hour')`, deletingID, deletingID+".image"); err != nil {
++		t.Fatal(err)
++	}
++	bindTx, err := db.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = sharedimage.BindTx(ctx, bindTx, deletingID, sharedimage.Actor{UserID: "u1", MembershipID: "m1", WorkspaceType: "enterprise", WorkspaceID: "e1"}, "enterprise", "e1"); err == nil {
++		t.Fatal("deleting resource was bindable")
++	}
++	_ = bindTx.Rollback()
++}
++
++// This test is run only against a disposable database prepared from
++// ops/db/075_image_resources.sql. It never targets the application database.
++func TestImageBindingIntegration(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
++	defer cancel()
++	dsn := os.Getenv("KWW_IMAGE_TEST_DSN")
++	if dsn == "" {
++		t.Fatal("KWW_IMAGE_TEST_DSN is required")
++	}
++	db, err := sql.Open("pgx", dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = db.Close() })
++	tx, err := db.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer tx.Rollback()
++	_, err = tx.ExecContext(ctx, `INSERT INTO ky_image.resource(id,workspace_type,workspace_id,uploader_user_id,uploader_membership_id,context_type,context_id,purpose,path,mime,byte_size,width,height,sha256,status,expires_at) VALUES('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','enterprise','e1','u1','m1','enterprise','e1','logo','a.image','image/png',4,1,1,repeat('a',64),'temporary',now()+interval '24 hours')`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	actor := sharedimage.Actor{UserID: "u1", MembershipID: "m1", WorkspaceType: "enterprise", WorkspaceID: "e1"}
++	if err = sharedimage.BindTx(ctx, tx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", actor, "enterprise", "e1"); err != nil {
++		t.Fatal("bind:", err)
++	}
++	_, err = tx.ExecContext(ctx, `INSERT INTO ky_image.resource(id,workspace_type,workspace_id,uploader_user_id,uploader_membership_id,context_type,context_id,purpose,path,mime,byte_size,width,height,sha256,status,expires_at) VALUES('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','enterprise','e1','u1','m1','enterprise','e1','logo','b.image','image/png',4,1,1,repeat('b',64),'temporary',now()+interval '24 hours')`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = sharedimage.BindTx(ctx, tx, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", sharedimage.Actor{UserID: "other", MembershipID: "m2", WorkspaceType: "enterprise", WorkspaceID: "e1"}, "enterprise", "e1b"); err == nil {
++		t.Fatal("cross-user temporary accepted")
++	}
++	if err = sharedimage.BindTx(ctx, tx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", actor, "enterprise", "e1"); err != nil {
++		t.Fatal("idempotent:", err)
++	}
++	if err = sharedimage.BindTx(ctx, tx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sharedimage.Actor{UserID: "other", MembershipID: "m2", WorkspaceType: "enterprise", WorkspaceID: "e1"}, "enterprise", "e1"); err != nil {
++		t.Fatal("bound idempotent editor:", err)
++	}
++	if err = sharedimage.UnbindTx(ctx, tx, actor, "enterprise", "e1"); err != nil {
++		t.Fatal("unbind:", err)
++	}
++	var status string
++	if err = tx.QueryRowContext(ctx, `SELECT status FROM ky_image.resource WHERE id=$1`, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").Scan(&status); err != nil {
++		t.Fatal(err)
++	}
++	if status != "expired" {
++		t.Fatalf("status=%s", status)
++	}
++	if err = tx.Rollback(); err != nil {
++		t.Fatal(err)
++	}
++	var count int
++	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM ky_image.resource WHERE id=$1`, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").Scan(&count); err != nil {
++		t.Fatal(err)
++	}
++	if count != 0 {
++		t.Fatalf("rollback left rows=%d", count)
++	}
++}
++
++func TestBoundObjectScopeMatrixIntegration(t *testing.T) {
++	ctx := context.Background()
++	dsn := os.Getenv("KWW_IMAGE_TEST_DSN")
++	if dsn == "" {
++		t.Fatal("KWW_IMAGE_TEST_DSN is required")
++	}
++	db, err := sql.Open("pgx", dsn)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = db.Close() })
++	_, _ = db.ExecContext(ctx, `DELETE FROM ky_shop_management.ky_shop_store; DELETE FROM ky_enterprise`)
++	if _, err = db.ExecContext(ctx, `INSERT INTO ky_enterprise(id,agency_id,name,code,status,created_by,updated_by) VALUES('e1',NULL,'矩阵企业1','MATRIX-1','normal','u1','u1'),('e2',NULL,'矩阵企业2','MATRIX-2','normal','u1','u1')`); err != nil {
++		t.Fatal(err)
++	}
++	if _, err = db.ExecContext(ctx, `INSERT INTO ky_shop_management.ky_shop_store(id,workspace_type,workspace_id,owner_membership_id,account,city,status) VALUES('11111111-1111-1111-1111-111111111111','enterprise','e1','m2','matrix-shop','','active')`); err != nil {
++		t.Fatal(err)
++	}
++	s := &service{db: db}
++	owner := identity{user: "u2", membership: "m2", wsType: "enterprise", wsID: "e1", scopes: []string{"self"}}
++	visible, err := s.boundObjectVisible(ctx, owner, "shop", "11111111-1111-1111-1111-111111111111")
++	if err != nil || !visible {
++		t.Fatalf("shop self owner visible=%v err=%v", visible, err)
++	}
++	other := owner
++	other.user, other.membership, other.scopes = "u3", "m3", []string{"self"}
++	visible, err = s.boundObjectVisible(ctx, other, "shop", "11111111-1111-1111-1111-111111111111")
++	if err != nil || visible {
++		t.Fatalf("shop self other visible=%v err=%v", visible, err)
++	}
++	unknown := owner
++	unknown.scopes = []string{"all", "future_scope"}
++	visible, err = s.boundObjectVisible(ctx, unknown, "shop", "11111111-1111-1111-1111-111111111111")
++	if err != nil || visible {
++		t.Fatalf("shop mixed scope visible=%v err=%v", visible, err)
++	}
++	cross := other
++	cross.wsID, cross.scopes = "e2", []string{"all"}
++	visible, err = s.boundObjectVisible(ctx, cross, "shop", "11111111-1111-1111-1111-111111111111")
++	if err != nil || visible {
++		t.Fatalf("shop cross workspace visible=%v err=%v", visible, err)
++	}
++	platform := identity{user: "up", membership: "mp", wsType: "platform", wsID: "platform_root", scopes: []string{"all"}}
++	visible, err = s.boundObjectVisible(ctx, platform, "enterprise", "e1")
++	if err != nil || !visible {
++		t.Fatalf("platform enterprise visible=%v err=%v", visible, err)
++	}
++	enterpriseOther := identity{user: "u3", membership: "m3", wsType: "enterprise", wsID: "e2", scopes: []string{"all"}}
++	visible, err = s.boundObjectVisible(ctx, enterpriseOther, "enterprise", "e1")
++	if err != nil || visible {
++		t.Fatalf("other enterprise visible=%v err=%v", visible, err)
++	}
++}
+diff --git a/services/ky-image-service/internal/server/scope_test.go b/services/ky-image-service/internal/server/scope_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b5f9fd6247223682d447e6ff15d9b301fc42395
+--- /dev/null
++++ b/services/ky-image-service/internal/server/scope_test.go
+@@ -0,0 +1,29 @@
++package server
++
++import "testing"
++
++func TestValidScopeListUsesWorkspaceTypeAndRejectsMixedUnknown(t *testing.T) {
++	tests := []struct {
++		name string
++		ws   string
++		in   []string
++		want bool
++	}{
++		{name: "all platform", ws: "platform", in: []string{"all"}, want: true},
++		{name: "self enterprise", ws: "enterprise", in: []string{"self"}, want: true},
++		{name: "self agency", ws: "agency", in: []string{"self"}, want: true},
++		{name: "agency current", ws: "agency", in: []string{"current_agency"}, want: true},
++		{name: "enterprise current", ws: "enterprise", in: []string{"current_enterprise"}, want: true},
++		{name: "empty", ws: "enterprise", in: nil, want: false},
++		{name: "all plus unknown", ws: "enterprise", in: []string{"all", "future_scope"}, want: false},
++		{name: "wrong agency scope", ws: "enterprise", in: []string{"current_agency"}, want: false},
++		{name: "wrong enterprise scope", ws: "agency", in: []string{"current_enterprise"}, want: false},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			if got := validScopeList(tt.ws, tt.in); got != tt.want {
++				t.Fatalf("validScopeList(%q,%v)=%v, want %v", tt.ws, tt.in, got, tt.want)
++			}
++		})
++	}
++}
+diff --git a/services/ky-image-service/internal/server/server.go b/services/ky-image-service/internal/server/server.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..5eb80554960a77c27f4bdef8443f7201fd62eb27
+--- /dev/null
++++ b/services/ky-image-service/internal/server/server.go
+@@ -0,0 +1,685 @@
++package server
++
++import (
++	"bytes"
++	"context"
++	"crypto/rand"
++	"database/sql"
++	"encoding/base64"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"io"
++	"net/http"
++	"net/url"
++	"os"
++	"path/filepath"
++	"strings"
++	"time"
++
++	imagestorage "github.com/Kysion/KyaiCRM/services/ky-image-service/internal/storage"
++	"github.com/Kysion/KyaiCRM/shared/auth"
++	sharedimage "github.com/Kysion/KyaiCRM/shared/image"
++	_ "github.com/jackc/pgx/v5/stdlib"
++)
++
++type cfg struct{ addr, dsn, secret, dir, membershipURL, internalToken, shopURL, storageSecret string }
++type service struct {
++	c  cfg
++	db *sql.DB
++}
++
++var errAccessDecisionInvalid = errors.New("access decision unavailable")
++
++var imageSlots = make(chan struct{}, 4)
++
++type identity struct {
++	user, session, membership, wsType, wsID string
++	scopes                                  []string
++}
++type uploadInput struct {
++	MIME        string `json:"mime"`
++	Base64      string `json:"base64"`
++	ContextType string `json:"contextType"`
++	ContextID   string `json:"contextId"`
++	Purpose     string `json:"purpose"`
++}
++
++func env(k, d string) string {
++	if v := os.Getenv(k); v != "" {
++		return v
++	}
++	return d
++}
++func Run(ctx context.Context) error {
++	c := cfg{addr: env("KY_IMAGE_SERVICE_HTTP_ADDR", ":18104"), dsn: os.Getenv("KY_TENANT_DATABASE_URL"), secret: os.Getenv("KY_AUTH_TOKEN_SECRET"), dir: env("KY_IMAGE_DIR", "/var/lib/kww/image-service/images"), membershipURL: env("KY_MEMBERSHIP_SERVICE_URL", "http://127.0.0.1:18083"), internalToken: os.Getenv("KY_INTERNAL_SERVICE_TOKEN"), shopURL: env("KY_SHOP_SERVICE_URL", "http://127.0.0.1:18102"), storageSecret: firstNonEmpty(os.Getenv("KY_SECRET_KEY"), os.Getenv("KY_AI_SECRET_KEY"))}
++	if c.dsn == "" || c.secret == "" || c.internalToken == "" || c.membershipURL == "" {
++		return errors.New("image service configuration incomplete")
++	}
++	if err := os.MkdirAll(c.dir, 0700); err != nil {
++		return err
++	}
++	db, err := sql.Open("pgx", c.dsn)
++	if err != nil {
++		return err
++	}
++	defer db.Close()
++	if err = db.PingContext(ctx); err != nil {
++		return err
++	}
++	s := &service{c: c, db: db}
++	go func() {
++		ticker := time.NewTicker(10 * time.Minute)
++		defer ticker.Stop()
++		for {
++			select {
++			case now := <-ticker.C:
++				_, _ = s.collect(ctx, now.UTC(), 200)
++			case <-ctx.Done():
++				return
++			}
++		}
++	}()
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /readyz", s.readyz)
++	mux.HandleFunc("POST /api/v1/images", s.upload)
++	mux.HandleFunc("GET /api/v1/images/{id}", s.read)
++	mux.HandleFunc("POST /api/v1/images/{id}/bindings", s.bind)
++	mux.HandleFunc("DELETE /api/v1/images/{id}/bindings/{bindingId}", s.unbind)
++	return (&http.Server{Addr: c.addr, Handler: mux}).ListenAndServe()
++}
++
++type bindingInput struct {
++	BusinessType string `json:"businessType"`
++	BusinessID   string `json:"businessId"`
++}
++
++func (s *service) bind(w http.ResponseWriter, r *http.Request) {
++	id, code := s.identify(r)
++	if code != 0 {
++		http.Error(w, `{"error":{"code":"unauthorized"}}`, code)
++		return
++	}
++	var in bindingInput
++	d := json.NewDecoder(io.LimitReader(r.Body, 65537))
++	d.DisallowUnknownFields()
++	if d.Decode(&in) != nil || d.Decode(new(any)) != io.EOF || !validBindingType(in.BusinessType) || in.BusinessID == "" {
++		http.Error(w, `{"error":{"code":"validation_error"}}`, 400)
++		return
++	}
++	allowed, err := s.allowed(r.Context(), id, in.BusinessType, in.BusinessID)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"permission_unavailable"}}`, 503)
++		return
++	}
++	if !allowed {
++		http.Error(w, `{"error":{"code":"forbidden"}}`, 403)
++		return
++	}
++	tx, err := s.db.BeginTx(r.Context(), nil)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	defer tx.Rollback()
++	actor := sharedimage.Actor{UserID: id.user, MembershipID: id.membership, WorkspaceType: id.wsType, WorkspaceID: id.wsID}
++	if err = sharedimage.BindTx(r.Context(), tx, r.PathValue("id"), actor, in.BusinessType, in.BusinessID); err != nil {
++		http.Error(w, `{"error":{"code":"binding_failed"}}`, 409)
++		return
++	}
++	if err = tx.Commit(); err != nil {
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	var bindingID string
++	if err = s.db.QueryRowContext(r.Context(), `SELECT binding_id FROM ky_image.binding WHERE resource_id=$1 AND business_type=$2 AND business_id=$3 AND slot='logo'`, r.PathValue("id"), in.BusinessType, in.BusinessID).Scan(&bindingID); err != nil {
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	write(w, map[string]any{"imageId": r.PathValue("id"), "bindingId": bindingID, "businessType": in.BusinessType, "businessId": in.BusinessID, "status": "bound"})
++}
++
++func (s *service) unbind(w http.ResponseWriter, r *http.Request) {
++	id, code := s.identify(r)
++	if code != 0 {
++		http.Error(w, `{"error":{"code":"unauthorized"}}`, code)
++		return
++	}
++	var in bindingInput
++	d := json.NewDecoder(io.LimitReader(r.Body, 65537))
++	d.DisallowUnknownFields()
++	if d.Decode(&in) != nil || d.Decode(new(any)) != io.EOF || !validBindingType(in.BusinessType) || in.BusinessID == "" {
++		http.Error(w, `{"error":{"code":"validation_error"}}`, 400)
++		return
++	}
++	allowed, err := s.allowed(r.Context(), id, in.BusinessType, in.BusinessID)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"permission_unavailable"}}`, 503)
++		return
++	}
++	if !allowed {
++		http.Error(w, `{"error":{"code":"forbidden"}}`, 403)
++		return
++	}
++	var current, currentBinding string
++	if err = s.db.QueryRowContext(r.Context(), `SELECT resource_id,binding_id FROM ky_image.binding WHERE business_type=$1 AND business_id=$2 AND slot='logo'`, in.BusinessType, in.BusinessID).Scan(&current, &currentBinding); err != nil {
++		if err == sql.ErrNoRows {
++			http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++			return
++		}
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	if current != r.PathValue("id") || r.PathValue("bindingId") != currentBinding {
++		http.Error(w, `{"error":{"code":"binding_conflict"}}`, 409)
++		return
++	}
++	tx, err := s.db.BeginTx(r.Context(), nil)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	defer tx.Rollback()
++	actor := sharedimage.Actor{UserID: id.user, MembershipID: id.membership, WorkspaceType: id.wsType, WorkspaceID: id.wsID}
++	if err = sharedimage.UnbindTx(r.Context(), tx, actor, in.BusinessType, in.BusinessID); err != nil {
++		http.Error(w, `{"error":{"code":"unbind_failed"}}`, 409)
++		return
++	}
++	if err = tx.Commit(); err != nil {
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	write(w, map[string]any{"imageId": r.PathValue("id"), "bindingId": r.PathValue("bindingId"), "status": "unbound"})
++}
++
++func validBindingType(value string) bool {
++	return value == "agency" || value == "enterprise" || value == "shop"
++}
++
++func firstNonEmpty(values ...string) string {
++	for _, value := range values {
++		if value != "" {
++			return value
++		}
++	}
++	return ""
++}
++func (s *service) identify(r *http.Request) (identity, int) {
++	h := r.Header.Get("Authorization")
++	if !strings.HasPrefix(h, "Bearer ") {
++		return identity{}, 401
++	}
++	p, err := auth.VerifyToken(s.c.secret, strings.TrimSpace(strings.TrimPrefix(h, "Bearer ")))
++	if err != nil {
++		return identity{}, 401
++	}
++	wsType, wsID := r.Header.Get("X-KY-Workspace-Type"), r.Header.Get("X-KY-Workspace-Id")
++	if wsType == "" || wsID == "" {
++		return identity{}, 400
++	}
++	if wsType == "platform" && wsID != "platform_root" {
++		return identity{}, 403
++	}
++	var membership string
++	var membershipCount int
++	err = s.db.QueryRowContext(r.Context(), `SELECT count(*),COALESCE(min(id),'') FROM ky_membership WHERE user_id=$1 AND workspace_type=$2 AND workspace_id=$3 AND status='active' AND deleted_at IS NULL`, p.UserID, wsType, wsID).Scan(&membershipCount, &membership)
++	if err == nil && membershipCount != 1 {
++		return identity{}, 403
++	}
++	if err != nil {
++		return identity{}, 503
++	}
++	var sessionStatus, userStatus string
++	var sessionExpiry time.Time
++	err = s.db.QueryRowContext(r.Context(), `SELECT s.status,s.expires_at,u.status FROM ky_user_session s JOIN ky_user u ON u.id=s.user_id WHERE s.id=$1 AND s.user_id=$2`, p.SessionID, p.UserID).Scan(&sessionStatus, &sessionExpiry, &userStatus)
++	if err != nil || sessionStatus != "active" || userStatus != "normal" || !sessionExpiry.After(time.Now().UTC()) {
++		return identity{}, 401
++	}
++	return identity{user: p.UserID, session: p.SessionID, membership: membership, wsType: wsType, wsID: wsID}, 0
++}
++
++func (s *service) accessDecision(ctx context.Context, actor, session, wsType, wsID string, required []string) ([]string, bool, string, error) {
++	if s.c.membershipURL == "" {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	body := map[string]any{"actorId": actor, "sessionId": session, "workspaceType": wsType, "workspaceId": wsID, "requiredAllPermissions": required}
++	b, _ := json.Marshal(body)
++	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.c.membershipURL, "/")+"/internal/v1/access-decisions", bytes.NewReader(b))
++	if err != nil {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	req.Header.Set("X-KY-Internal-Token", s.c.internalToken)
++	var requestID [12]byte
++	_, _ = rand.Read(requestID[:])
++	req.Header.Set("X-KY-Request-Id", "image-"+hex.EncodeToString(requestID[:]))
++	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect") }}
++	resp, err := client.Do(req)
++	if err != nil {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	var out struct {
++		Data struct {
++			Allowed       *bool  `json:"allowed"`
++			ActorID       string `json:"actorId"`
++			WorkspaceType string `json:"workspaceType"`
++			WorkspaceID   string `json:"workspaceId"`
++			MembershipID  string `json:"membershipId"`
++			DataScopes    []struct {
++				ScopeType string `json:"scopeType"`
++			} `json:"dataScopes"`
++			GrantedRequiredPermissions []string `json:"grantedRequiredPermissions"`
++		} `json:"data"`
++	}
++	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 65536+1))
++	if err != nil || len(bodyBytes) > 65536 {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
++	if decoder.Decode(&out) != nil || func() bool { var extra any; return decoder.Decode(&extra) != io.EOF }() || out.Data.Allowed == nil {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	if !*out.Data.Allowed {
++		return nil, false, out.Data.MembershipID, nil
++	}
++	if out.Data.MembershipID == "" || out.Data.ActorID != actor || out.Data.WorkspaceType != wsType || out.Data.WorkspaceID != wsID || (wsType == "platform" && wsID != "platform_root") {
++		return nil, false, "", errAccessDecisionInvalid
++	}
++	granted := make(map[string]bool, len(out.Data.GrantedRequiredPermissions))
++	for _, p := range out.Data.GrantedRequiredPermissions {
++		granted[p] = true
++	}
++	for _, p := range required {
++		if !granted[p] {
++			return nil, false, "", errAccessDecisionInvalid
++		}
++	}
++	scopes := make([]string, 0, len(out.Data.DataScopes))
++	for _, x := range out.Data.DataScopes {
++		scopes = append(scopes, x.ScopeType)
++	}
++	return scopes, true, out.Data.MembershipID, nil
++}
++func (s *service) allowed(ctx context.Context, actor identity, contextType, contextID string) (bool, error) {
++	verb := "create"
++	if contextID != "" {
++		verb = "update"
++	}
++	permission := actor.wsType + "." + contextType + "s." + verb
++	if actor.wsType == "platform" {
++		plural := map[string]string{"agency": "agencies", "enterprise": "enterprises", "shop": "shop_management"}[contextType]
++		permission = "platform." + plural + "." + verb
++	}
++	if actor.wsType == "agency" && contextType == "enterprise" {
++		permission = "agency.enterprises." + verb
++	}
++	if actor.wsType != "platform" && contextType == "agency" {
++		permission = actor.wsType + ".profile.update"
++	}
++	if actor.wsType == "enterprise" && contextType == "enterprise" {
++		permission = "enterprise.profile.update"
++	}
++	if contextType == "shop" {
++		permission = actor.wsType + ".shop_management." + verb
++	}
++	required := []string{permission}
++	if contextType == "shop" {
++		required = append(required, actor.wsType+".shop_management.view")
++	}
++	scopes, ok, decisionMembership, decisionErr := s.accessDecision(ctx, actor.user, actor.session, actor.wsType, actor.wsID, required)
++	if decisionErr != nil {
++		return false, decisionErr
++	}
++	if !ok || decisionMembership != actor.membership {
++		return false, nil
++	}
++	actor.scopes = scopes
++	if contextType == "shop" && !validScopeList(actor.wsType, actor.scopes) {
++		return false, nil
++	}
++	if contextID == "" {
++		return true, nil
++	}
++	if contextType == "shop" {
++		return s.boundObjectVisible(ctx, actor, "shop", contextID)
++	}
++	var ownerType, ownerID, parentID string
++	var err error
++	switch contextType {
++	case "enterprise":
++		err = s.db.QueryRowContext(ctx, `SELECT 'enterprise',id,COALESCE(agency_id,'') FROM ky_enterprise WHERE id=$1 AND deleted_at IS NULL`, contextID).Scan(&ownerType, &ownerID, &parentID)
++	case "agency":
++		err = s.db.QueryRowContext(ctx, `SELECT 'agency',id,'' FROM ky_agency WHERE id=$1 AND deleted_at IS NULL`, contextID).Scan(&ownerType, &ownerID, &parentID)
++	case "shop":
++		err = s.db.QueryRowContext(ctx, `SELECT 'shop',id,workspace_id FROM ky_shop_management.ky_shop_store WHERE id=$1::uuid AND deleted_at IS NULL`, contextID).Scan(&ownerType, &ownerID, &parentID)
++	default:
++		return false, nil
++	}
++	if err == sql.ErrNoRows {
++		return false, nil
++	}
++	if err != nil {
++		return false, err
++	}
++	if ownerType != contextType {
++		return false, nil
++	}
++	// The object must belong to the selected workspace; platform may update
++	// platform-owned objects only. Enterprise/agency membership is exact.
++	if actor.wsType == "enterprise" && contextType == "enterprise" && actor.wsID != ownerID {
++		return false, nil
++	}
++	if actor.wsType == "agency" && contextType == "agency" && actor.wsID != ownerID {
++		return false, nil
++	}
++	if actor.wsType == "agency" && contextType == "enterprise" && actor.wsID != parentID {
++		return false, nil
++	}
++	if contextType == "shop" && actor.wsType != "platform" && actor.wsID != parentID {
++		return false, nil
++	}
++	return true, nil
++}
++func (s *service) upload(w http.ResponseWriter, r *http.Request) {
++	id, code := s.identify(r)
++	if code != 0 {
++		http.Error(w, `{"error":{"code":"unauthorized"}}`, code)
++		return
++	}
++	select {
++	case imageSlots <- struct{}{}:
++		defer func() { <-imageSlots }()
++	case <-r.Context().Done():
++		http.Error(w, `{"error":{"code":"overloaded"}}`, 503)
++		return
++	}
++	r.Body = http.MaxBytesReader(w, r.Body, 3*1024*1024)
++	var in uploadInput
++	d := json.NewDecoder(r.Body)
++	d.DisallowUnknownFields()
++	if d.Decode(&in) != nil || func() bool { var extra any; return d.Decode(&extra) != io.EOF }() || in.Purpose != "logo" || (in.ContextType != "agency" && in.ContextType != "enterprise" && in.ContextType != "shop") {
++		http.Error(w, `{"error":{"code":"validation_error"}}`, 400)
++		return
++	}
++	allowed, err := s.allowed(r.Context(), id, in.ContextType, in.ContextID)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"permission_unavailable"}}`, 503)
++		return
++	}
++	if !allowed {
++		http.Error(w, `{"error":{"code":"forbidden"}}`, 403)
++		return
++	}
++	raw, err := base64.StdEncoding.Strict().DecodeString(in.Base64)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"validation_error"}}`, 400)
++		return
++	}
++	clean, meta, err := sharedimage.Sanitize(raw, in.MIME)
++	if err != nil {
++		if errors.Is(err, sharedimage.ErrInvalid) {
++			http.Error(w, `{"error":{"code":"validation_error"}}`, 400)
++		} else {
++			http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		}
++		return
++	}
++	providerCfg, provider, err := imagestorage.Load(r.Context(), s.db, s.c.dir, s.c.storageSecret)
++	if err != nil {
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	if providerCfg.Provider == "local" {
++		meta, err = sharedimage.Save(s.c.dir, in.MIME, raw)
++		if err != nil {
++			http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++			return
++		}
++	} else {
++		meta.ID, err = imagestorage.NewKey()
++		if err == nil {
++			meta.Path = meta.ID
++			err = provider.Put(r.Context(), meta.ID, meta.MIME, clean)
++		}
++		if err != nil {
++			http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++			return
++		}
++	}
++	expires := time.Now().UTC().Add(24 * time.Hour)
++	tx, err := s.db.BeginTx(r.Context(), nil)
++	status := "temporary"
++	if err == nil {
++		_, err = tx.ExecContext(r.Context(), `INSERT INTO ky_image.resource(id,workspace_type,workspace_id,uploader_user_id,uploader_membership_id,context_type,context_id,purpose,path,mime,byte_size,width,height,sha256,status,expires_at,storage_provider) VALUES($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, meta.ID, id.wsType, id.wsID, id.user, id.membership, in.ContextType, in.ContextID, in.Purpose, filepath.Base(meta.Path), meta.MIME, meta.Bytes, meta.Width, meta.Height, meta.Hash, status, expires, providerCfg.Provider)
++		if err == nil {
++			err = tx.Commit()
++		} else {
++			_ = tx.Rollback()
++		}
++	}
++	if err != nil {
++		_ = provider.Delete(r.Context(), meta.ID)
++		if providerCfg.Provider == "local" {
++			_ = os.Remove(meta.Path)
++		}
++		http.Error(w, `{"error":{"code":"storage_unavailable"}}`, 503)
++		return
++	}
++	write(w, map[string]any{"imageId": meta.ID, "mime": meta.MIME, "bytes": meta.Bytes, "width": meta.Width, "height": meta.Height, "expiresAt": expires.Format(time.RFC3339)})
++}
++func (s *service) read(w http.ResponseWriter, r *http.Request) {
++	id, code := s.identify(r)
++	if code != 0 {
++		http.Error(w, `{"error":{"code":"unauthorized"}}`, code)
++		return
++	}
++	var path, mime, status, businessType, businessID, providerKey string
++	var expires time.Time
++	err := s.db.QueryRowContext(r.Context(), `SELECT r.path,r.mime,r.expires_at,r.status,r.storage_provider,COALESCE(b.business_type,''),COALESCE(b.business_id,'') FROM ky_image.resource r LEFT JOIN ky_image.binding b ON b.resource_id=r.id WHERE r.id=$1 AND r.status IN('temporary','bound') ORDER BY b.created_at DESC NULLS LAST LIMIT 1`, r.PathValue("id")).Scan(&path, &mime, &expires, &status, &providerKey, &businessType, &businessID)
++	if err != nil || (status == "temporary" && expires.Before(time.Now().UTC())) {
++		http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++		return
++	}
++	if status == "temporary" {
++		var uploader, membership string
++		if e := s.db.QueryRowContext(r.Context(), `SELECT uploader_user_id,uploader_membership_id FROM ky_image.resource WHERE id=$1`, r.PathValue("id")).Scan(&uploader, &membership); e != nil || uploader != id.user || membership != id.membership {
++			http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++			return
++		}
++	} else {
++		permission := id.wsType + ".profile.view"
++		if id.wsType == "platform" {
++			plural := map[string]string{"agency": "agencies", "enterprise": "enterprises", "shop": "shop_management"}[businessType]
++			permission = "platform." + plural + ".view"
++		}
++		if id.wsType == "agency" && businessType == "enterprise" {
++			permission = "agency.enterprises.view"
++		}
++		if id.wsType == "agency" && businessType == "agency" {
++			permission = "agency.profile.view"
++		}
++		if id.wsType == "enterprise" && businessType == "enterprise" {
++			permission = "enterprise.profile.view"
++		}
++		if businessType == "shop" {
++			permission = id.wsType + ".shop_management.view"
++		}
++		scopes, allowed, membership, decisionErr := s.accessDecision(r.Context(), id.user, id.session, id.wsType, id.wsID, []string{permission})
++		if decisionErr != nil {
++			http.Error(w, `{"error":{"code":"permission_unavailable"}}`, 503)
++			return
++		}
++		if !allowed || membership != id.membership {
++			http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++			return
++		}
++		id.scopes = scopes
++		if businessType == "shop" && !validScopeList(id.wsType, id.scopes) {
++			http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++			return
++		}
++		if businessType == "shop" {
++			enterpriseID, bindingID := r.URL.Query().Get("enterpriseId"), r.URL.Query().Get("bindingId")
++			if enterpriseID != "" || bindingID != "" {
++				if enterpriseID == "" || bindingID == "" || !s.shopImageAllowed(r.Context(), id, enterpriseID, businessID, bindingID, r.PathValue("id")) {
++					http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++					return
++				}
++			}
++		}
++		visible, e := s.boundObjectVisible(r.Context(), id, businessType, businessID)
++		if e != nil || !visible {
++			http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++			return
++		}
++	}
++	var raw []byte
++	if providerKey == "" || providerKey == "local" {
++		raw, err = sharedimage.Load(s.c.dir, r.PathValue("id"))
++	} else {
++		_, provider, providerErr := imagestorage.LoadProvider(r.Context(), s.db, s.c.dir, s.c.storageSecret, providerKey)
++		if providerErr != nil {
++			err = providerErr
++		} else {
++			raw, err = provider.Get(r.Context(), path)
++		}
++	}
++	if err != nil {
++		http.Error(w, `{"error":{"code":"not_found"}}`, 404)
++		return
++	}
++	w.Header().Set("Cache-Control", "private,no-store")
++	w.Header().Set("X-Content-Type-Options", "nosniff")
++	write(w, map[string]any{"mime": mime, "base64": base64.StdEncoding.EncodeToString(raw)})
++}
++
++func (s *service) shopImageAllowed(ctx context.Context, id identity, enterpriseID, shopID, bindingID, resourceID string) bool {
++	u, err := url.Parse(s.c.shopURL)
++	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost"))) {
++		return false
++	}
++	u.Path = "/internal/v1/enterprise-shop-image-access"
++	body, _ := json.Marshal(map[string]string{"actorId": id.user, "membershipId": id.membership, "workspaceType": id.wsType, "workspaceId": id.wsID, "enterpriseId": enterpriseID, "shopId": shopID, "bindingId": bindingID, "resourceId": resourceID})
++	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
++	defer cancel()
++	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
++	if err != nil {
++		return false
++	}
++	req.Header.Set("Content-Type", "application/json")
++	req.Header.Set("X-KY-Internal-Token", s.c.internalToken)
++	tr := &http.Transport{Proxy: nil}
++	defer tr.CloseIdleConnections()
++	cl := &http.Client{Transport: tr, Timeout: 2 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
++	res, err := cl.Do(req)
++	if err != nil {
++		return false
++	}
++	defer res.Body.Close()
++	if res.StatusCode != 200 {
++		return false
++	}
++	b, err := io.ReadAll(io.LimitReader(res.Body, 65537))
++	if err != nil || len(b) > 65536 {
++		return false
++	}
++	var out struct {
++		Data struct {
++			Allowed      bool   `json:"allowed"`
++			ActorID      string `json:"actorId"`
++			MembershipID string `json:"membershipId"`
++			ResourceID   string `json:"resourceId"`
++		} `json:"data"`
++	}
++	dec := json.NewDecoder(bytes.NewReader(b))
++	if dec.Decode(&out) != nil || dec.Decode(new(any)) != io.EOF {
++		return false
++	}
++	return out.Data.Allowed && out.Data.ActorID == id.user && out.Data.MembershipID == id.membership && out.Data.ResourceID == resourceID
++}
++
++func (s *service) boundObjectVisible(ctx context.Context, actor identity, typ, objectID string) (bool, error) {
++	if typ == "enterprise" {
++		var agency string
++		if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(agency_id,'') FROM ky_enterprise WHERE id=$1 AND deleted_at IS NULL`, objectID).Scan(&agency); err != nil {
++			return false, err
++		}
++		return actor.wsType == "platform" || (actor.wsType == "agency" && agency == actor.wsID) || (actor.wsType == "enterprise" && objectID == actor.wsID), nil
++	}
++	if typ == "agency" {
++		var id string
++		if err := s.db.QueryRowContext(ctx, `SELECT id FROM ky_agency WHERE id=$1 AND deleted_at IS NULL`, objectID).Scan(&id); err != nil {
++			return false, err
++		}
++		return actor.wsType == "platform" || (actor.wsType == "agency" && id == actor.wsID), nil
++	}
++	if typ == "shop" {
++		var wsType, wsID, ownerMembership string
++		if err := s.db.QueryRowContext(ctx, `SELECT workspace_type,workspace_id,owner_membership_id FROM ky_shop_management.ky_shop_store WHERE id=$1::uuid AND deleted_at IS NULL`, objectID).Scan(&wsType, &wsID, &ownerMembership); err != nil {
++			return false, err
++		}
++		if wsType != actor.wsType || wsID != actor.wsID || !validScopeList(actor.wsType, actor.scopes) {
++			return false, nil
++		}
++		for _, scope := range actor.scopes {
++			switch scope {
++			case "all":
++				return true, nil
++			case "self":
++				if ownerMembership == actor.membership {
++					return true, nil
++				}
++			case "current_agency":
++				if actor.wsType == "agency" {
++					return true, nil
++				}
++			case "current_enterprise":
++				if actor.wsType == "enterprise" {
++					return true, nil
++				}
++			}
++		}
++		return false, nil
++	}
++	return false, nil
++}
++
++func validScopeList(workspaceType string, scopes []string) bool {
++	if len(scopes) == 0 {
++		return false
++	}
++	for _, scope := range scopes {
++		switch scope {
++		case "all", "self":
++		case "current_agency":
++			if workspaceType != "agency" {
++				return false
++			}
++		case "current_enterprise":
++			if workspaceType != "enterprise" {
++				return false
++			}
++		default:
++			return false
++		}
++	}
++	return true
++}
++func (s *service) readyz(w http.ResponseWriter, _ *http.Request) {
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	defer cancel()
++	if err := s.db.PingContext(ctx); err != nil || sharedimage.CheckDir(s.c.dir) != nil {
++		w.WriteHeader(http.StatusServiceUnavailable)
++		_, _ = w.Write([]byte("not_ready\n"))
++		return
++	}
++	w.WriteHeader(http.StatusOK)
++	_, _ = w.Write([]byte("ok\n"))
++}
++func write(w http.ResponseWriter, value any) {
++	w.Header().Set("Content-Type", "application/json")
++	_ = json.NewEncoder(w).Encode(map[string]any{"data": value})
++}
+diff --git a/services/ky-image-service/internal/storage/provider.go b/services/ky-image-service/internal/storage/provider.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..cd0b723fc1ec53f0e91982248ad32c3d40983c35
+--- /dev/null
++++ b/services/ky-image-service/internal/storage/provider.go
+@@ -0,0 +1,197 @@
++package storage
++
++import (
++	"bytes"
++	"context"
++	"crypto/rand"
++	"database/sql"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"strings"
++
++	"github.com/Kysion/KyaiCRM/shared/crypto"
++	"github.com/minio/minio-go/v7"
++	"github.com/minio/minio-go/v7/pkg/credentials"
++)
++
++type Config struct {
++	Provider, Root, Endpoint, Region, Bucket, Prefix, AccessKey, SecretEncrypted string
++	ForcePathStyle                                                               bool
++}
++
++type Provider interface {
++	Put(context.Context, string, string, []byte) error
++	Get(context.Context, string) ([]byte, error)
++	Delete(context.Context, string) error
++	Exists(context.Context, string) (bool, error)
++	Test(context.Context) error
++	BuildAccessURL(string) string
++}
++
++type localProvider struct{ root string }
++
++func (p localProvider) path(key string) string {
++	return filepath.Join(p.root, filepath.Base(key)+".image")
++}
++func (p localProvider) Put(_ context.Context, key, _ string, data []byte) error {
++	if err := os.MkdirAll(p.root, 0700); err != nil {
++		return err
++	}
++	if err := os.Chmod(p.root, 0700); err != nil {
++		return err
++	}
++	tmp, err := os.CreateTemp(p.root, ".image-")
++	if err != nil {
++		return err
++	}
++	name := tmp.Name()
++	defer os.Remove(name)
++	if err = tmp.Chmod(0600); err == nil {
++		_, err = tmp.Write(data)
++	}
++	if err == nil {
++		err = tmp.Sync()
++	}
++	if closeErr := tmp.Close(); err == nil {
++		err = closeErr
++	}
++	if err != nil {
++		return err
++	}
++	return os.Rename(name, p.path(key))
++}
++func (p localProvider) Get(_ context.Context, key string) ([]byte, error) {
++	f, err := os.Open(p.path(key))
++	if err != nil {
++		return nil, err
++	}
++	defer f.Close()
++	return io.ReadAll(io.LimitReader(f, 2*1024*1024+1))
++}
++func (p localProvider) Delete(_ context.Context, key string) error {
++	err := os.Remove(p.path(key))
++	if errors.Is(err, os.ErrNotExist) {
++		return nil
++	}
++	return err
++}
++func (p localProvider) Exists(_ context.Context, key string) (bool, error) {
++	_, err := os.Stat(p.path(key))
++	if errors.Is(err, os.ErrNotExist) {
++		return false, nil
++	}
++	return err == nil, err
++}
++func (p localProvider) Test(_ context.Context) error { return nil }
++func (p localProvider) BuildAccessURL(key string) string {
++	return "/api/v1/images/" + filepath.Base(key)
++}
++
++type s3Provider struct {
++	client         *minio.Client
++	bucket, prefix string
++}
++
++func (p s3Provider) object(key string) string {
++	return strings.Trim(strings.TrimSuffix(p.prefix, "/")+"/"+key, "/")
++}
++func (p s3Provider) Put(ctx context.Context, key, mime string, data []byte) error {
++	_, err := p.client.PutObject(ctx, p.bucket, p.object(key), bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: mime})
++	return err
++}
++func (p s3Provider) Get(ctx context.Context, key string) ([]byte, error) {
++	o, err := p.client.GetObject(ctx, p.bucket, p.object(key), minio.GetObjectOptions{})
++	if err != nil {
++		return nil, err
++	}
++	defer o.Close()
++	return io.ReadAll(io.LimitReader(o, 2*1024*1024+1))
++}
++func (p s3Provider) Delete(ctx context.Context, key string) error {
++	return p.client.RemoveObject(ctx, p.bucket, p.object(key), minio.RemoveObjectOptions{})
++}
++func (p s3Provider) Exists(ctx context.Context, key string) (bool, error) {
++	_, err := p.client.StatObject(ctx, p.bucket, p.object(key), minio.StatObjectOptions{})
++	if err != nil {
++		return false, err
++	}
++	return true, nil
++}
++func (p s3Provider) Test(ctx context.Context) error {
++	ok, err := p.client.BucketExists(ctx, p.bucket)
++	if err != nil {
++		return err
++	}
++	if !ok {
++		return fmt.Errorf("bucket_missing")
++	}
++	return nil
++}
++func (p s3Provider) BuildAccessURL(key string) string { return "/api/v1/images/" + filepath.Base(key) }
++
++func Load(ctx context.Context, db *sql.DB, root, secretKey string) (Config, Provider, error) {
++	var active, status, configFingerprint, testFingerprint string
++	if err := db.QueryRowContext(ctx, `SELECT active_storage_provider FROM ky_storage_setting WHERE id='default'`).Scan(&active); err != nil && !errors.Is(err, sql.ErrNoRows) {
++		return Config{}, nil, err
++	}
++	if active == "" {
++		active = "local"
++	}
++	if active != "local" {
++		if err := db.QueryRowContext(ctx, `SELECT last_test_status,config_fingerprint,last_test_fingerprint FROM ky_storage_setting WHERE id=$1`, active).Scan(&status, &configFingerprint, &testFingerprint); err != nil {
++			return Config{}, nil, err
++		}
++		if status != "success" || configFingerprint == "" || configFingerprint != testFingerprint {
++			return Config{}, nil, fmt.Errorf("active storage provider has not passed its current test")
++		}
++	}
++	return LoadProvider(ctx, db, root, secretKey, active)
++}
++
++func LoadProvider(ctx context.Context, db *sql.DB, root, secretKey, providerKey string) (Config, Provider, error) {
++	active := providerKey
++	if active == "" {
++		active = "local"
++	}
++	c := Config{Provider: active, Root: root}
++	if active == "local" {
++		return c, localProvider{root: root}, nil
++	}
++	var endpoint, region, bucket, prefix, access, encrypted string
++	var force bool
++	if err := db.QueryRowContext(ctx, `SELECT endpoint,region,bucket,prefix,access_key_id,secret_access_key_encrypted,force_path_style FROM ky_storage_setting WHERE id=$1`, active).Scan(&endpoint, &region, &bucket, &prefix, &access, &encrypted, &force); err != nil {
++		return Config{}, nil, err
++	}
++	c.Endpoint, c.Region, c.Bucket, c.Prefix, c.AccessKey, c.SecretEncrypted, c.ForcePathStyle = endpoint, region, bucket, prefix, access, encrypted, force
++	if endpoint == "" || bucket == "" || access == "" || encrypted == "" {
++		return Config{}, nil, fmt.Errorf("active storage provider is incomplete")
++	}
++	if secretKey == "" {
++		return Config{}, nil, fmt.Errorf("storage secret key unavailable")
++	}
++	cipher, ok := crypto.New(secretKey)
++	if !ok {
++		return Config{}, nil, fmt.Errorf("storage secret key invalid")
++	}
++	secret, err := cipher.Decrypt(encrypted)
++	if err != nil {
++		return Config{}, nil, err
++	}
++	host := strings.TrimRight(strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://"), "/")
++	client, err := minio.New(host, &minio.Options{Creds: credentials.NewStaticV4(access, secret, ""), Secure: strings.HasPrefix(endpoint, "https://"), Region: region, BucketLookup: map[bool]minio.BucketLookupType{true: minio.BucketLookupPath, false: minio.BucketLookupAuto}[force]})
++	if err != nil {
++		return Config{}, nil, err
++	}
++	return c, s3Provider{client: client, bucket: bucket, prefix: prefix}, nil
++}
++
++func NewKey() (string, error) {
++	var b [16]byte
++	if _, err := rand.Read(b[:]); err != nil {
++		return "", err
++	}
++	return fmt.Sprintf("%x", b[:]), nil
++}
+diff --git a/services/ky-image-service/internal/storage/provider_test.go b/services/ky-image-service/internal/storage/provider_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e3adee40a0c70c3c3d6a611d6ee8363795ca00d3
+--- /dev/null
++++ b/services/ky-image-service/internal/storage/provider_test.go
+@@ -0,0 +1,37 @@
++package storage
++
++import (
++	"context"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestLocalProviderPutGetDeleteAndAccessURL(t *testing.T) {
++	d := t.TempDir()
++	if err := os.Chmod(d, 0700); err != nil {
++		t.Fatal(err)
++	}
++	p := localProvider{root: d}
++	ctx := context.Background()
++	if err := p.Put(ctx, "0123456789abcdef0123456789abcdef", "image/png", []byte("image")); err != nil {
++		t.Fatal(err)
++	}
++	got, err := p.Get(ctx, "0123456789abcdef0123456789abcdef")
++	if err != nil || string(got) != "image" {
++		t.Fatalf("get=%q err=%v", got, err)
++	}
++	ok, err := p.Exists(ctx, "0123456789abcdef0123456789abcdef")
++	if err != nil || !ok {
++		t.Fatalf("exists=%v err=%v", ok, err)
++	}
++	if want := "/api/v1/images/0123456789abcdef0123456789abcdef"; p.BuildAccessURL("0123456789abcdef0123456789abcdef") != want {
++		t.Fatalf("url mismatch")
++	}
++	if err := p.Delete(ctx, "0123456789abcdef0123456789abcdef"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := os.Stat(filepath.Join(d, "0123456789abcdef0123456789abcdef.image")); !os.IsNotExist(err) {
++		t.Fatalf("file remains: %v", err)
++	}
++}
+diff --git a/shared/image/files.go b/shared/image/files.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..068f471f693a6b582402f716b53a5547a3388d7f
+--- /dev/null
++++ b/shared/image/files.go
+@@ -0,0 +1,255 @@
++// Package image contains the shared image validation and private file store.
++// Authorization and business binding remain in the image service/database.
++package image
++
++import (
++	"bytes"
++	"context"
++	"crypto/rand"
++	"crypto/sha256"
++	"database/sql"
++	"encoding/hex"
++	"image"
++	"image/color"
++	"image/jpeg"
++	"image/png"
++	"io"
++	"os"
++	"path/filepath"
++	"regexp"
++	"strings"
++	"syscall"
++	"time"
++)
++
++type Execer interface {
++	ExecContext(context.Context, string, ...any) (sql.Result, error)
++	QueryRowContext(context.Context, string, ...any) *sql.Row
++}
++
++// Actor is server-derived identity. It must never be populated from an
++// untrusted browser field when a resource is bound.
++type Actor struct {
++	UserID, MembershipID, WorkspaceType, WorkspaceID string
++}
++
++// BindTx changes a temporary resource to the business-owned resource and
++// updates the single slot atomically in the caller's business transaction.
++func BindTx(ctx context.Context, tx Execer, resourceID string, actor Actor, businessType, businessID string) error {
++	if actor.UserID == "" || actor.MembershipID == "" || actor.WorkspaceType == "" || actor.WorkspaceID == "" || resourceID == "" || businessID == "" {
++		return ErrInvalid
++	}
++	var status, uploader, uploaderMembership, wsType, wsID, contextType, purpose string
++	var contextID sql.NullString
++	var expires time.Time
++	err := tx.QueryRowContext(ctx, `SELECT status,uploader_user_id,uploader_membership_id,workspace_type,workspace_id,context_type,context_id,purpose,expires_at FROM ky_image.resource WHERE id=$1 FOR UPDATE`, resourceID).Scan(&status, &uploader, &uploaderMembership, &wsType, &wsID, &contextType, &contextID, &purpose, &expires)
++	if err != nil {
++		if err == sql.ErrNoRows {
++			return ErrInvalid
++		}
++		return err
++	}
++	var old string
++	err = tx.QueryRowContext(ctx, `SELECT resource_id FROM ky_image.binding WHERE business_type=$1 AND business_id=$2 AND slot='logo' FOR UPDATE`, businessType, businessID).Scan(&old)
++	if err != nil && err != sql.ErrNoRows {
++		return err
++	}
++	if err == nil && old == resourceID && status == "bound" {
++		return nil
++	}
++	if purpose != "logo" || contextType != businessType || (contextID.Valid && contextID.String != businessID) || uploader != actor.UserID || uploaderMembership != actor.MembershipID || wsType != actor.WorkspaceType || wsID != actor.WorkspaceID {
++		return ErrInvalid
++	}
++	if status != "temporary" || !expires.After(time.Now().UTC()) {
++		return ErrInvalid
++	}
++	if err == nil && old != "" {
++		var refs int
++		if e := tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_image.binding WHERE resource_id=$1 AND NOT (business_type=$2 AND business_id=$3 AND slot='logo')`, old, businessType, businessID).Scan(&refs); e != nil {
++			return e
++		}
++		if refs == 0 {
++			if _, e := tx.ExecContext(ctx, `UPDATE ky_image.resource SET status='expired',expires_at=now()+interval '7 days',updated_at=now() WHERE id=$1 AND status='bound'`, old); e != nil {
++				return e
++			}
++		}
++	}
++	if _, err = tx.ExecContext(ctx, `UPDATE ky_image.resource SET status='bound',updated_at=now() WHERE id=$1 AND status='temporary'`, resourceID); err != nil {
++		return err
++	}
++	if _, err = tx.ExecContext(ctx, `INSERT INTO ky_image.binding(binding_id,resource_id,business_type,business_id,slot) VALUES(substr(md5($1||':'||$2||':'||$3||':logo'),1,8)||'-'||substr(md5($1||':'||$2||':'||$3||':logo'),9,4)||'-'||substr(md5($1||':'||$2||':'||$3||':logo'),13,4)||'-'||substr(md5($1||':'||$2||':'||$3||':logo'),17,4)||'-'||substr(md5($1||':'||$2||':'||$3||':logo'),21,12),$1,$2,$3,'logo') ON CONFLICT (business_type,business_id,slot) DO UPDATE SET resource_id=EXCLUDED.resource_id`, resourceID, businessType, businessID); err != nil {
++		return err
++	}
++	return nil
++}
++
++func UnbindTx(ctx context.Context, tx Execer, actor Actor, businessType, businessID string) error {
++	if actor.UserID == "" || actor.MembershipID == "" || actor.WorkspaceType == "" || actor.WorkspaceID == "" || businessID == "" {
++		return ErrInvalid
++	}
++	var resourceID string
++	err := tx.QueryRowContext(ctx, `SELECT resource_id FROM ky_image.binding WHERE business_type=$1 AND business_id=$2 AND slot='logo' FOR UPDATE`, businessType, businessID).Scan(&resourceID)
++	if err == sql.ErrNoRows {
++		return nil
++	}
++	if err != nil {
++		return err
++	}
++	if _, err = tx.ExecContext(ctx, `DELETE FROM ky_image.binding WHERE business_type=$1 AND business_id=$2 AND slot='logo'`, businessType, businessID); err != nil {
++		return err
++	}
++	var refs int
++	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_image.binding WHERE resource_id=$1`, resourceID).Scan(&refs); err != nil {
++		return err
++	}
++	if refs == 0 {
++		_, err = tx.ExecContext(ctx, `UPDATE ky_image.resource SET status='expired',expires_at=now()+interval '7 days',updated_at=now() WHERE id=$1 AND status='bound'`, resourceID)
++	}
++	return err
++}
++
++const MaxBytes = 2 * 1024 * 1024
++const MaxDimension = 4096
++const MaxStoredDimension = 1024
++
++var IDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
++var ErrInvalid = os.ErrInvalid
++
++type Meta struct {
++	ID, MIME, Path, Hash string
++	Bytes, Width, Height int
++}
++
++func IDFromURL(value string) (string, bool) {
++	const prefix = "/api/v1/images/"
++	if !strings.HasPrefix(value, prefix) {
++		return "", false
++	}
++	id := strings.TrimPrefix(value, prefix)
++	return id, IDPattern.MatchString(id)
++}
++
++func CheckDir(dir string) error {
++	if !filepath.IsAbs(dir) {
++		return ErrInvalid
++	}
++	st, e := os.Lstat(dir)
++	if e != nil {
++		return e
++	}
++	u, ok := st.Sys().(*syscall.Stat_t)
++	if !ok || !st.IsDir() || st.Mode().Perm() != 0700 || u.Uid != uint32(os.Geteuid()) {
++		return ErrInvalid
++	}
++	return nil
++}
++func Sanitize(raw []byte, mime string) ([]byte, Meta, error) {
++	if len(raw) == 0 || len(raw) > MaxBytes {
++		return nil, Meta{}, ErrInvalid
++	}
++	cfg, format, e := image.DecodeConfig(bytes.NewReader(raw))
++	if e != nil || cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > MaxDimension || cfg.Height > MaxDimension || int64(cfg.Width)*int64(cfg.Height) > int64(MaxDimension*MaxDimension) {
++		return nil, Meta{}, ErrInvalid
++	}
++	if (format != "png" && format != "jpeg") || (format == "png" && mime != "image/png") || (format == "jpeg" && mime != "image/jpeg") {
++		return nil, Meta{}, ErrInvalid
++	}
++	src, decoded, e := image.Decode(bytes.NewReader(raw))
++	if e != nil || decoded != format {
++		return nil, Meta{}, ErrInvalid
++	}
++	w, h := cfg.Width, cfg.Height
++	if w > MaxStoredDimension || h > MaxStoredDimension {
++		scale := float64(MaxStoredDimension) / float64(w)
++		if float64(h)*scale > float64(MaxStoredDimension) {
++			scale = float64(MaxStoredDimension) / float64(h)
++		}
++		w, h = int(float64(w)*scale), int(float64(h)*scale)
++		if w < 1 {
++			w = 1
++		}
++		if h < 1 {
++			h = 1
++		}
++		dst := image.NewRGBA(image.Rect(0, 0, w, h))
++		resizeNearest(dst, src)
++		src = dst
++	}
++	var out bytes.Buffer
++	if format == "png" {
++		e = png.Encode(&out, src)
++	} else {
++		e = jpeg.Encode(&out, src, &jpeg.Options{Quality: 90})
++	}
++	if e != nil || out.Len() > MaxBytes {
++		return nil, Meta{}, ErrInvalid
++	}
++	b := out.Bytes()
++	sum := sha256.Sum256(b)
++	return b, Meta{MIME: mime, Hash: hex.EncodeToString(sum[:]), Bytes: len(b), Width: w, Height: h}, nil
++}
++func resizeNearest(dst *image.RGBA, src image.Image) {
++	sb, db := src.Bounds(), dst.Bounds()
++	for y := 0; y < db.Dy(); y++ {
++		sy := sb.Min.Y + y*sb.Dy()/db.Dy()
++		for x := 0; x < db.Dx(); x++ {
++			sx := sb.Min.X + x*sb.Dx()/db.Dx()
++			dst.Set(x, y, color.NRGBAModel.Convert(src.At(sx, sy)))
++		}
++	}
++}
++func Save(dir, mime string, raw []byte) (Meta, error) {
++	if e := CheckDir(dir); e != nil {
++		return Meta{}, e
++	}
++	clean, m, e := Sanitize(raw, mime)
++	if e != nil {
++		return Meta{}, e
++	}
++	var id [16]byte
++	if _, e = rand.Read(id[:]); e != nil {
++		return Meta{}, e
++	}
++	m.ID = hex.EncodeToString(id[:])
++	m.Path = filepath.Join(dir, m.ID+".image")
++	f, e := os.OpenFile(m.Path+".tmp", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
++	if e != nil {
++		return Meta{}, e
++	}
++	if _, e = f.Write(clean); e == nil {
++		e = f.Sync()
++	}
++	_ = f.Close()
++	if e != nil {
++		_ = os.Remove(m.Path + ".tmp")
++		return Meta{}, e
++	}
++	if e = os.Rename(m.Path+".tmp", m.Path); e != nil {
++		return Meta{}, e
++	}
++	d, e := os.Open(dir)
++	if e == nil {
++		e = d.Sync()
++		_ = d.Close()
++	}
++	return m, e
++}
++func Load(dir, id string) ([]byte, error) {
++	if !IDPattern.MatchString(id) || CheckDir(dir) != nil {
++		return nil, ErrInvalid
++	}
++	f, e := os.OpenFile(filepath.Join(dir, id+".image"), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
++	if e != nil {
++		return nil, e
++	}
++	defer f.Close()
++	st, e := f.Stat()
++	if e != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0600 || st.Size() > MaxBytes {
++		return nil, ErrInvalid
++	}
++	b, e := io.ReadAll(io.LimitReader(f, MaxBytes+1))
++	if e != nil || len(b) > MaxBytes {
++		return nil, ErrInvalid
++	}
++	return b, nil
++}
+diff --git a/shared/image/files_test.go b/shared/image/files_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9085532b7208da423aa2eb423c1594f392b1d96
+--- /dev/null
++++ b/shared/image/files_test.go
+@@ -0,0 +1,31 @@
++package image
++
++import (
++	"bytes"
++	"image"
++	"image/color"
++	"image/png"
++	"testing"
++)
++
++func TestSanitizeResizeAndMime(t *testing.T) {
++	var b bytes.Buffer
++	p := image.NewNRGBA(image.Rect(0, 0, 2048, 1024))
++	p.Set(0, 0, color.NRGBA{R: 255, A: 255})
++	p.Set(2047, 1023, color.NRGBA{B: 255, A: 255})
++	_ = png.Encode(&b, p)
++	out, m, e := Sanitize(b.Bytes(), "image/png")
++	if e != nil || m.Width != 1024 || m.Height != 512 {
++		t.Fatalf("resize: %+v %v", m, e)
++	}
++	d, _, e := image.Decode(bytes.NewReader(out))
++	if e != nil {
++		t.Fatal(e)
++	}
++	if d.Bounds().Dx() != 1024 || d.Bounds().Dy() != 512 {
++		t.Fatal("aspect lost")
++	}
++	if _, _, e = Sanitize(b.Bytes(), "image/jpeg"); e == nil {
++		t.Fatal("fake MIME")
++	}
++}

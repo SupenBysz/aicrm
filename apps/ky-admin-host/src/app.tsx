@@ -974,7 +974,10 @@ function WorkspaceLayout() {
                   <Button icon={<MenuOutlined />} onClick={() => setMobileMenuOpen(true)} type="text" />
                 ) : null}
                 <div className="brand-block">
-                  <Typography.Text className="brand-title">
+                  <Typography.Text
+                    className="brand-title"
+                    style={effectiveSidebarCollapsed ? platformProfile.logoTextShortStyle : platformProfile.logoTextLongStyle}
+                  >
                     {workspaceBackendTitle(currentWorkspace, platformProfile, effectiveSidebarCollapsed ? "short" : "full")}
                   </Typography.Text>
                 </div>

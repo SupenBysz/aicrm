@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, message } from "antd";
+import { App as AntdApp, Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
@@ -15,6 +15,7 @@ const STATUS_OPTS = [{ value: "enabled", label: "启用" }, { value: "disabled",
 const ENC_OPTS = [{ value: "ssl", label: "SSL(465)" }, { value: "tls", label: "STARTTLS(587)" }, { value: "none", label: "无加密(25)" }];
 
 export function EmailPage() {
+  const { message } = AntdApp.useApp();
   const client = useRequestClient();
   const permissions = usePermissions();
   const qc = useQueryClient();

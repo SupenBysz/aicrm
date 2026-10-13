@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Drawer, Form, Input, Popconfirm, Space, Switch, Table, Tag, Typography, message } from "antd";
+import { App as AntdApp, Button, Drawer, Form, Input, Popconfirm, Space, Switch, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
@@ -14,6 +14,7 @@ import {
 type EditInput = { templateName: string; title: string; content: string; description: string };
 
 export function NotificationTemplatesPage() {
+  const { message } = AntdApp.useApp();
   const client = useRequestClient();
   const permissions = usePermissions();
   const queryClient = useQueryClient();

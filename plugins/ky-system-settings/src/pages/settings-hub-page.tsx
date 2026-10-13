@@ -1,5 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Empty, Tabs } from "antd";
+import { useSearchParams } from "react-router-dom";
 import {
   ApiOutlined,
   BellOutlined,
@@ -43,11 +44,20 @@ const SECTIONS: Section[] = [
 
 export function SettingsHubPage() {
   const permissions = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
   const sections = useMemo(
     () => SECTIONS.filter((s) => (s.anyPerms ? permissions.canAny(s.anyPerms) : s.perm ? permissions.can(s.perm) : true)),
     [permissions]
   );
-  const [active, setActive] = useState(sections[0]?.key ?? "");
+  const [active, setActive] = useState("");
+
+  const urlTabToKey = (value: string | null) => (value === "parameters" || value === "settings" ? "settings" : value ?? "");
+  const keyToUrlTab = (key: string) => (key === "settings" ? "parameters" : key);
+
+  useEffect(() => {
+    const requested = urlTabToKey(searchParams.get("tab"));
+    setActive(sections.some((section) => section.key === requested) ? requested : sections[0]?.key ?? "");
+  }, [searchParams, sections]);
 
   if (sections.length === 0) {
     return <Empty style={{ marginTop: 80 }} description="暂无可访问的系统配置项" />;
@@ -57,8 +67,14 @@ export function SettingsHubPage() {
 
   return (
     <Tabs
+      className="system-settings-hub-tabs"
       activeKey={activeKey}
-      onChange={setActive}
+      onChange={(key) => {
+        setActive(key);
+        const next = new URLSearchParams(searchParams);
+        next.set("tab", keyToUrlTab(key));
+        setSearchParams(next);
+      }}
       items={sections.map((s) => ({
         key: s.key,
         label: (
@@ -67,7 +83,7 @@ export function SettingsHubPage() {
           </span>
         ),
         // Only the active tab mounts — avoids 8 pages firing queries at once.
-        children: s.key === activeKey ? s.element : null
+        children: s.key === activeKey ? <div className="system-settings-hub-tab-content">{s.element}</div> : null
       }))}
     />
   );

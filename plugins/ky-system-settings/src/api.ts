@@ -1,11 +1,17 @@
 import type { RequestClient } from "@ky/admin-core";
 
-export type SettingsMap = Record<string, string>;
+export type SettingsMap = Record<string, unknown>;
 
 export interface PlatformProfile {
   companyName: string;
   brandLogoTextLong: string;
   brandLogoTextShort: string;
+  longLogoFontSize: number;
+  longLogoFontFamily: "system" | "sans" | "serif" | "mono";
+  longLogoFontWeight: 400 | 500 | 600 | 700;
+  shortLogoFontSize: number;
+  shortLogoFontFamily: "system" | "sans" | "serif" | "mono";
+  shortLogoFontWeight: 400 | 500 | 600 | 700;
   icpRecord: string;
   updatedAt?: string;
 }
@@ -85,6 +91,7 @@ export function deleteAppVersionRule(client: RequestClient, id: string): Promise
 
 export interface StorageSetting {
   providerKey: string;
+  localDirectory: string;
   endpoint: string;
   region: string;
   bucket: string;
@@ -93,6 +100,7 @@ export interface StorageSetting {
   prefix: string;
   publicDomain: string;
   accessKeyId: string;
+  secretAccessKey?: string;
   hasSecret: boolean;
   lastTestStatus: string;
   lastTestMessage?: string;
@@ -100,8 +108,13 @@ export interface StorageSetting {
   updatedAt?: string;
 }
 
-export function getStorageSetting(client: RequestClient): Promise<StorageSetting> {
-  return client.request<StorageSetting>("/api/v1/platform/storage-setting");
+export interface StorageSettings {
+  activeStorageProvider: "local" | "minio" | "oss";
+  providers: Record<"local" | "minio" | "oss", StorageSetting>;
+}
+
+export function getStorageSetting(client: RequestClient): Promise<StorageSettings> {
+  return client.request<StorageSettings>("/api/v1/platform/storage-setting");
 }
 
 export function updateStorageSetting(client: RequestClient, input: Record<string, unknown>): Promise<StorageSetting> {
@@ -109,11 +122,19 @@ export function updateStorageSetting(client: RequestClient, input: Record<string
 }
 
 export function rotateStorageSecret(client: RequestClient, secretAccessKey: string): Promise<{ hasSecret: boolean }> {
-  return client.request<{ hasSecret: boolean }>("/api/v1/platform/storage-setting/rotate-secret", { method: "POST", body: { secretAccessKey } });
+  return client.request<{ hasSecret: boolean }>("/api/v1/platform/storage-setting/rotate-secret", { method: "POST", body: { providerKey: "minio", secretAccessKey } });
 }
 
-export function testStorageSetting(client: RequestClient): Promise<{ ok: boolean; latencyMs: number; errorMessage?: string }> {
-  return client.request("/api/v1/platform/storage-setting/test", { method: "POST" });
+export function activateStorageProvider(client: RequestClient, providerKey: string): Promise<StorageSettings> {
+  return client.request<StorageSettings>("/api/v1/platform/storage-setting/activate", { method: "POST", body: { providerKey } });
+}
+
+export function rotateStorageSecretForProvider(client: RequestClient, providerKey: string, secretAccessKey: string): Promise<{ hasSecret: boolean }> {
+  return client.request<{ hasSecret: boolean }>("/api/v1/platform/storage-setting/rotate-secret", { method: "POST", body: { providerKey, secretAccessKey } });
+}
+
+export function testStorageSetting(client: RequestClient, providerKey: string): Promise<{ ok: boolean; latencyMs: number; errorCode?: string; errorMessage?: string }> {
+  return client.request(`/api/v1/platform/storage-setting/test`, { method: "POST", body: { providerKey } });
 }
 
 // --- SMS service ---

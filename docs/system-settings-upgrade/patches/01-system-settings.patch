@@ -1,0 +1,2321 @@
+diff --git a/apps/ky-admin-host/src/app.tsx b/apps/ky-admin-host/src/app.tsx
+index 980d78ac364e58291839e520a65f0cb70243079c..4dcd9b1e676441d92b09b99ec10ebc6983615e99 100644
+--- a/apps/ky-admin-host/src/app.tsx
++++ b/apps/ky-admin-host/src/app.tsx
+@@ -974,7 +974,10 @@ function WorkspaceLayout() {
+                   <Button icon={<MenuOutlined />} onClick={() => setMobileMenuOpen(true)} type="text" />
+                 ) : null}
+                 <div className="brand-block">
+-                  <Typography.Text className="brand-title">
++                  <Typography.Text
++                    className="brand-title"
++                    style={effectiveSidebarCollapsed ? platformProfile.logoTextShortStyle : platformProfile.logoTextLongStyle}
++                  >
+                     {workspaceBackendTitle(currentWorkspace, platformProfile, effectiveSidebarCollapsed ? "short" : "full")}
+                   </Typography.Text>
+                 </div>
+diff --git a/apps/ky-admin-host/src/platform-profile.tsx b/apps/ky-admin-host/src/platform-profile.tsx
+index 2425719c16793fda0877e6e2de9b08cd943b6d31..6ab78c9c58e32d532fb2f896197e8eb04cf3298a 100644
+--- a/apps/ky-admin-host/src/platform-profile.tsx
++++ b/apps/ky-admin-host/src/platform-profile.tsx
+@@ -5,6 +5,12 @@ export interface PlatformProfile {
+   companyName: string;
+   brandLogoTextLong: string;
+   brandLogoTextShort: string;
++  longLogoFontSize: number;
++  longLogoFontFamily: "system" | "sans" | "serif" | "mono";
++  longLogoFontWeight: 400 | 500 | 600 | 700;
++  shortLogoFontSize: number;
++  shortLogoFontFamily: "system" | "sans" | "serif" | "mono";
++  shortLogoFontWeight: 400 | 500 | 600 | 700;
+   icpRecord: string;
+ }
+ 
+@@ -20,9 +26,24 @@ interface PlatformProfileContextValue extends PlatformProfile {
+   logoTextLong: string;
+   /** Effective collapsed text logo. */
+   logoTextShort: string;
++  logoTextLongStyle: LogoTextStyle;
++  logoTextShortStyle: LogoTextStyle;
+   refresh: () => void;
+ }
+ 
++export interface LogoTextStyle {
++  fontSize: number;
++  fontFamily: string;
++  fontWeight: 400 | 500 | 600 | 700;
++}
++
++const FONT_FAMILY_MAP: Record<PlatformProfile["longLogoFontFamily"], string> = {
++  system: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
++  sans: "Arial, 'Helvetica Neue', sans-serif",
++  serif: "Georgia, 'Times New Roman', serif",
++  mono: "ui-monospace, SFMono-Regular, Menlo, monospace"
++};
++
+ function compactLogoText(value: string): string {
+   const normalized = value.trim() || DEFAULT_PLATFORM_NAME;
+   const hanChars = Array.from(normalized.matchAll(/\p{Script=Han}/gu), (match) => match[0]);
+@@ -35,6 +56,12 @@ function normalizeProfile(value: Partial<PlatformProfile> | null | undefined): P
+     companyName: value?.companyName ?? "",
+     brandLogoTextLong: value?.brandLogoTextLong ?? "",
+     brandLogoTextShort: value?.brandLogoTextShort ?? "",
++    longLogoFontSize: value?.longLogoFontSize && value.longLogoFontSize >= 8 && value.longLogoFontSize <= 72 ? value.longLogoFontSize : 16,
++    longLogoFontFamily: value?.longLogoFontFamily && value.longLogoFontFamily in FONT_FAMILY_MAP ? value.longLogoFontFamily : "system",
++    longLogoFontWeight: value?.longLogoFontWeight && [400, 500, 600, 700].includes(value.longLogoFontWeight) ? value.longLogoFontWeight : 600,
++    shortLogoFontSize: value?.shortLogoFontSize && value.shortLogoFontSize >= 8 && value.shortLogoFontSize <= 72 ? value.shortLogoFontSize : 14,
++    shortLogoFontFamily: value?.shortLogoFontFamily && value.shortLogoFontFamily in FONT_FAMILY_MAP ? value.shortLogoFontFamily : "system",
++    shortLogoFontWeight: value?.shortLogoFontWeight && [400, 500, 600, 700].includes(value.shortLogoFontWeight) ? value.shortLogoFontWeight : 600,
+     icpRecord: value?.icpRecord ?? ""
+   };
+ }
+@@ -43,7 +70,17 @@ function resolveProfile(profile: PlatformProfile) {
+   const name = profile.companyName.trim() || DEFAULT_PLATFORM_NAME;
+   const logoTextLong = profile.brandLogoTextLong.trim() || name;
+   const logoTextShort = profile.brandLogoTextShort.trim() || compactLogoText(logoTextLong || name);
+-  return { logoTextLong, logoTextShort, name };
++  const logoTextLongStyle: LogoTextStyle = {
++    fontSize: profile.longLogoFontSize,
++    fontFamily: FONT_FAMILY_MAP[profile.longLogoFontFamily],
++    fontWeight: profile.longLogoFontWeight
++  };
++  const logoTextShortStyle: LogoTextStyle = {
++    fontSize: profile.shortLogoFontSize,
++    fontFamily: FONT_FAMILY_MAP[profile.shortLogoFontFamily],
++    fontWeight: profile.shortLogoFontWeight
++  };
++  return { logoTextLong, logoTextShort, logoTextLongStyle, logoTextShortStyle, name };
+ }
+ 
+ const defaultProfile = normalizeProfile(null);
+diff --git a/apps/ky-admin-host/src/styles.css b/apps/ky-admin-host/src/styles.css
+index 347f26d384e36c928d8af4a7b85166d07627c678..40b7a7ae4ba394910433771626161785b471b106 100644
+--- a/apps/ky-admin-host/src/styles.css
++++ b/apps/ky-admin-host/src/styles.css
+@@ -2633,3 +2633,109 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
+ .desktop-plugin-item { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+ button.desktop-plugin-item { cursor: pointer; }
+ button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
++
++/* 系统配置 Tabs 紧凑纵向边界，保留内容区左右留白。 */
++.system-settings-tabs.ant-tabs-left > .ant-tabs-nav,
++.system-settings-tabs.ant-tabs-right > .ant-tabs-nav {
++  align-self: stretch;
++  margin-block: 0;
++  padding-block: 0;
++}
++
++.system-settings-tabs.ant-tabs-left > .ant-tabs-nav::before,
++.system-settings-tabs.ant-tabs-right > .ant-tabs-nav::before {
++  bottom: 0 !important;
++  top: 0 !important;
++}
++
++.system-settings-tabs.ant-tabs-left > .ant-tabs-nav .ant-tabs-nav-list,
++.system-settings-tabs.ant-tabs-right > .ant-tabs-nav .ant-tabs-nav-list {
++  padding-block: 0;
++}
++
++.system-settings-tabs.ant-tabs-left > .ant-tabs-content-holder,
++.system-settings-tabs.ant-tabs-right > .ant-tabs-content-holder {
++  align-self: stretch;
++  border-inline-start: 0;
++}
++
++.system-settings-tabs.ant-tabs-left > .ant-tabs-content-holder,
++.system-settings-tabs.ant-tabs-right > .ant-tabs-content-holder,
++.system-settings-tabs.ant-tabs-top > .ant-tabs-nav,
++.system-settings-tabs.ant-tabs-bottom > .ant-tabs-nav {
++  margin-block: 0;
++}
++
++.system-settings-tabs > .ant-tabs-content-holder > .ant-tabs-content,
++.system-settings-tabs > .ant-tabs-content-holder > .ant-tabs-content-holder {
++  padding-block: 0;
++}
++
++/* 系统设置内部 Tabs 的 hover/focus 反馈，不改变标签尺寸或布局。 */
++.system-settings-tabs .ant-tabs-tab {
++  border-radius: 6px;
++  transition: background-color 160ms ease, color 160ms ease;
++}
++
++.system-settings-tabs .ant-tabs-tab:hover {
++  background: var(--admin-accent-soft);
++  color: var(--admin-accent);
++}
++
++.system-settings-tabs.ant-tabs-left .ant-tabs-tab:hover,
++.system-settings-tabs.ant-tabs-left .ant-tabs-tab:focus-within {
++  border-radius: 6px 0 0 6px;
++}
++
++.system-settings-tabs .ant-tabs-tab:hover .ant-typography,
++.system-settings-tabs .ant-tabs-tab:hover .ant-tabs-tab-btn {
++  color: var(--admin-accent);
++}
++
++.system-settings-tabs .ant-tabs-tab-btn:focus-visible {
++  border-radius: 4px;
++  outline: 2px solid var(--admin-accent);
++  outline-offset: 2px;
++}
++
++.system-settings-dictionary-tab-label {
++  align-items: stretch;
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  line-height: 1.35;
++  max-width: 240px;
++  min-width: 120px;
++  text-align: right;
++  width: 100%;
++  white-space: normal;
++}
++
++.system-settings-dictionary-tab-label > .ant-typography {
++  display: block;
++  text-align: right;
++  width: 100%;
++}
++
++.system-settings-dictionary-tab-code {
++  font-size: 12px;
++  line-height: 1.25;
++  overflow-wrap: anywhere;
++}
++
++@media (max-width: 640px) {
++  .system-settings-dictionary-tab-label {
++    max-width: 220px;
++    min-width: 0;
++  }
++}
++
++/* 系统设置一级导航取消上下空白，保留文字行高和底部激活指示器。 */
++.system-settings-hub-tabs > .ant-tabs-nav {
++  margin-block: 0;
++  padding-block: 0;
++}
++
++.system-settings-hub-tab-content {
++  padding-top: 16px;
++}
+diff --git a/ops/db/078_platform_logo_typography.sql b/ops/db/078_platform_logo_typography.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..4613f232355d27b1c3ee56dfbb9fd4067bce7a9b
+--- /dev/null
++++ b/ops/db/078_platform_logo_typography.sql
+@@ -0,0 +1,24 @@
++-- 平台品牌长短文字 Logo 的安全字体配置。仅允许受控枚举和范围值，兼容既有 profile 行。
++ALTER TABLE ky_platform_profile
++  ADD COLUMN IF NOT EXISTS long_logo_font_size integer NOT NULL DEFAULT 16,
++  ADD COLUMN IF NOT EXISTS long_logo_font_family text NOT NULL DEFAULT 'system',
++  ADD COLUMN IF NOT EXISTS long_logo_font_weight integer NOT NULL DEFAULT 600,
++  ADD COLUMN IF NOT EXISTS short_logo_font_size integer NOT NULL DEFAULT 14,
++  ADD COLUMN IF NOT EXISTS short_logo_font_family text NOT NULL DEFAULT 'system',
++  ADD COLUMN IF NOT EXISTS short_logo_font_weight integer NOT NULL DEFAULT 600;
++
++UPDATE ky_platform_profile
++SET long_logo_font_size = COALESCE(NULLIF(long_logo_font_size, 0), 16),
++    long_logo_font_family = CASE WHEN long_logo_font_family IN ('system', 'sans', 'serif', 'mono') THEN long_logo_font_family ELSE 'system' END,
++    long_logo_font_weight = CASE WHEN long_logo_font_weight IN (400, 500, 600, 700) THEN long_logo_font_weight ELSE 600 END,
++    short_logo_font_size = COALESCE(NULLIF(short_logo_font_size, 0), 14),
++    short_logo_font_family = CASE WHEN short_logo_font_family IN ('system', 'sans', 'serif', 'mono') THEN short_logo_font_family ELSE 'system' END,
++    short_logo_font_weight = CASE WHEN short_logo_font_weight IN (400, 500, 600, 700) THEN short_logo_font_weight ELSE 600 END;
++
++ALTER TABLE ky_platform_profile
++  ADD CONSTRAINT ky_platform_profile_long_logo_font_size_ck CHECK (long_logo_font_size BETWEEN 8 AND 72),
++  ADD CONSTRAINT ky_platform_profile_short_logo_font_size_ck CHECK (short_logo_font_size BETWEEN 8 AND 72),
++  ADD CONSTRAINT ky_platform_profile_long_logo_font_family_ck CHECK (long_logo_font_family IN ('system', 'sans', 'serif', 'mono')),
++  ADD CONSTRAINT ky_platform_profile_short_logo_font_family_ck CHECK (short_logo_font_family IN ('system', 'sans', 'serif', 'mono')),
++  ADD CONSTRAINT ky_platform_profile_long_logo_font_weight_ck CHECK (long_logo_font_weight IN (400, 500, 600, 700)),
++  ADD CONSTRAINT ky_platform_profile_short_logo_font_weight_ck CHECK (short_logo_font_weight IN (400, 500, 600, 700));
+diff --git a/ops/db/079_storage_providers.sql b/ops/db/079_storage_providers.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..f7a8f1fef1580c5854d385dbce6273693e44868a
+--- /dev/null
++++ b/ops/db/079_storage_providers.sql
+@@ -0,0 +1,23 @@
++-- 对象存储多提供商配置：保留旧单例并复制到兼容 MinIO 配置。
++ALTER TABLE ky_storage_setting
++  ADD COLUMN IF NOT EXISTS local_directory text NOT NULL DEFAULT './storage',
++  ADD COLUMN IF NOT EXISTS active_storage_provider text NOT NULL DEFAULT 'minio';
++
++INSERT INTO ky_storage_setting (id, provider_key, endpoint, region, bucket, bucket_private, force_path_style, prefix,
++  public_domain, access_key_id, secret_access_key_encrypted, updated_by)
++SELECT 'minio', CASE WHEN provider_key = 's3' THEN 'minio' ELSE provider_key END, endpoint, region, bucket,
++  bucket_private, force_path_style, prefix, public_domain, access_key_id, secret_access_key_encrypted, updated_by
++FROM ky_storage_setting WHERE id='default'
++ON CONFLICT (id) DO NOTHING;
++
++INSERT INTO ky_storage_setting (id, provider_key, local_directory, bucket_private)
++VALUES ('local', 'local', './storage', true)
++ON CONFLICT (id) DO NOTHING;
++INSERT INTO ky_storage_setting (id, provider_key, bucket_private)
++VALUES ('oss', 'oss', true)
++ON CONFLICT (id) DO NOTHING;
++
++UPDATE ky_storage_setting SET active_storage_provider = CASE
++  WHEN active_storage_provider IN ('local', 'minio', 'oss') THEN active_storage_provider
++  ELSE 'minio' END
++WHERE id='default';
+diff --git a/ops/db/080_storage_project_directory.sql b/ops/db/080_storage_project_directory.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..c96751b9ead86be8a1415ee1c7374bbb76c9e682
+--- /dev/null
++++ b/ops/db/080_storage_project_directory.sql
+@@ -0,0 +1,4 @@
++-- 将历史生成的系统目录默认值迁移为服务工作目录下的项目 storage；不移动已有文件。
++UPDATE ky_storage_setting
++SET local_directory = './storage'
++WHERE id='local' AND (local_directory IS NULL OR local_directory='' OR local_directory='/var/lib/kww/storage');
+diff --git a/ops/db/081_storage_activation_default.sql b/ops/db/081_storage_activation_default.sql
+new file mode 100644
+index 0000000000000000000000000000000000000000..d88bf1244665a34454faa7623b4ee3d462fee497
+--- /dev/null
++++ b/ops/db/081_storage_activation_default.sql
+@@ -0,0 +1,17 @@
++-- 为测试结果绑定配置版本；未经成功测试的云存储不得成为当前存储。
++ALTER TABLE ky_storage_setting
++  ADD COLUMN IF NOT EXISTS config_fingerprint text NOT NULL DEFAULT '',
++  ADD COLUMN IF NOT EXISTS last_test_fingerprint text NOT NULL DEFAULT '';
++
++UPDATE ky_storage_setting AS d
++SET active_storage_provider = 'local', updated_at = now()
++WHERE d.id = 'default'
++  AND d.active_storage_provider <> 'local'
++  AND NOT EXISTS (
++    SELECT 1
++    FROM ky_storage_setting AS p
++    WHERE p.id = d.active_storage_provider
++      AND p.last_test_status = 'success'
++      AND p.config_fingerprint <> ''
++      AND p.config_fingerprint = p.last_test_fingerprint
++  );
+diff --git a/ops/native/ky-admin-host.nginx.conf b/ops/native/ky-admin-host.nginx.conf
+index f57f2537d4f55b8d71bdefd497a09fe6fa938b7c..3eaea3b9ae3879d256f2a11d2cb3991245fa2dcc 100644
+--- a/ops/native/ky-admin-host.nginx.conf
++++ b/ops/native/ky-admin-host.nginx.conf
+@@ -150,6 +150,111 @@ server {
+     proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
+     proxy_pass http://127.0.0.1:18082;
+   }
++
++  # 系统配置增量端点，复用组织服务与既有请求头合同。
++  location /api/v1/public/platform-profile {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/platform/platform-profile {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/platform/notification-templates {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/platform/storage-setting {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/platform/sms/ {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/platform/email/ {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/public/app-version-check {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
++
++  location /api/v1/platform/app-version-rules {
++    proxy_http_version 1.1;
++    proxy_set_header Host $host;
++    proxy_set_header X-Real-IP $remote_addr;
++    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++    proxy_set_header X-Forwarded-Proto $scheme;
++    proxy_set_header Authorization $http_authorization;
++    proxy_set_header X-KY-Workspace-Id $http_x_ky_workspace_id;
++    proxy_set_header X-KY-Workspace-Type $http_x_ky_workspace_type;
++    proxy_set_header X-KY-Request-Id $http_x_ky_request_id;
++    proxy_pass http://127.0.0.1:18082;
++  }
+   location /api/v1/dictionaries {
+     proxy_http_version 1.1;
+     proxy_set_header Host $host;
+diff --git a/plugins/ky-system-settings/src/api.ts b/plugins/ky-system-settings/src/api.ts
+index 86e3bf8891a620459ed41ff55f44eabc469ae6b1..9ed089aebfdae746dcc60ea8e4db791b7fcdc4e4 100644
+--- a/plugins/ky-system-settings/src/api.ts
++++ b/plugins/ky-system-settings/src/api.ts
+@@ -1,11 +1,17 @@
+ import type { RequestClient } from "@ky/admin-core";
+ 
+-export type SettingsMap = Record<string, string>;
++export type SettingsMap = Record<string, unknown>;
+ 
+ export interface PlatformProfile {
+   companyName: string;
+   brandLogoTextLong: string;
+   brandLogoTextShort: string;
++  longLogoFontSize: number;
++  longLogoFontFamily: "system" | "sans" | "serif" | "mono";
++  longLogoFontWeight: 400 | 500 | 600 | 700;
++  shortLogoFontSize: number;
++  shortLogoFontFamily: "system" | "sans" | "serif" | "mono";
++  shortLogoFontWeight: 400 | 500 | 600 | 700;
+   icpRecord: string;
+   updatedAt?: string;
+ }
+@@ -85,6 +91,7 @@ export function deleteAppVersionRule(client: RequestClient, id: string): Promise
+ 
+ export interface StorageSetting {
+   providerKey: string;
++  localDirectory: string;
+   endpoint: string;
+   region: string;
+   bucket: string;
+@@ -93,6 +100,7 @@ export interface StorageSetting {
+   prefix: string;
+   publicDomain: string;
+   accessKeyId: string;
++  secretAccessKey?: string;
+   hasSecret: boolean;
+   lastTestStatus: string;
+   lastTestMessage?: string;
+@@ -100,8 +108,13 @@ export interface StorageSetting {
+   updatedAt?: string;
+ }
+ 
+-export function getStorageSetting(client: RequestClient): Promise<StorageSetting> {
+-  return client.request<StorageSetting>("/api/v1/platform/storage-setting");
++export interface StorageSettings {
++  activeStorageProvider: "local" | "minio" | "oss";
++  providers: Record<"local" | "minio" | "oss", StorageSetting>;
++}
++
++export function getStorageSetting(client: RequestClient): Promise<StorageSettings> {
++  return client.request<StorageSettings>("/api/v1/platform/storage-setting");
+ }
+ 
+ export function updateStorageSetting(client: RequestClient, input: Record<string, unknown>): Promise<StorageSetting> {
+@@ -109,11 +122,19 @@ export function updateStorageSetting(client: RequestClient, input: Record<string
+ }
+ 
+ export function rotateStorageSecret(client: RequestClient, secretAccessKey: string): Promise<{ hasSecret: boolean }> {
+-  return client.request<{ hasSecret: boolean }>("/api/v1/platform/storage-setting/rotate-secret", { method: "POST", body: { secretAccessKey } });
++  return client.request<{ hasSecret: boolean }>("/api/v1/platform/storage-setting/rotate-secret", { method: "POST", body: { providerKey: "minio", secretAccessKey } });
++}
++
++export function activateStorageProvider(client: RequestClient, providerKey: string): Promise<StorageSettings> {
++  return client.request<StorageSettings>("/api/v1/platform/storage-setting/activate", { method: "POST", body: { providerKey } });
++}
++
++export function rotateStorageSecretForProvider(client: RequestClient, providerKey: string, secretAccessKey: string): Promise<{ hasSecret: boolean }> {
++  return client.request<{ hasSecret: boolean }>("/api/v1/platform/storage-setting/rotate-secret", { method: "POST", body: { providerKey, secretAccessKey } });
+ }
+ 
+-export function testStorageSetting(client: RequestClient): Promise<{ ok: boolean; latencyMs: number; errorMessage?: string }> {
+-  return client.request("/api/v1/platform/storage-setting/test", { method: "POST" });
++export function testStorageSetting(client: RequestClient, providerKey: string): Promise<{ ok: boolean; latencyMs: number; errorCode?: string; errorMessage?: string }> {
++  return client.request(`/api/v1/platform/storage-setting/test`, { method: "POST", body: { providerKey } });
+ }
+ 
+ // --- SMS service ---
+diff --git a/plugins/ky-system-settings/src/pages/app-version-page.tsx b/plugins/ky-system-settings/src/pages/app-version-page.tsx
+index 8ccb2163a5b070c2848dd53018689333b2517344..dc2cd54b7bb16eaf1af79fb3db47743deaba9f0b 100644
+--- a/plugins/ky-system-settings/src/pages/app-version-page.tsx
++++ b/plugins/ky-system-settings/src/pages/app-version-page.tsx
+@@ -1,5 +1,5 @@
+ import { useState } from "react";
+-import { Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
++import { App as AntdApp, Button, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Table, Tag, Typography } from "antd";
+ import type { ColumnsType } from "antd/es/table";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
+@@ -15,6 +15,7 @@ import {
+ const PLATFORM_LABELS: Record<string, string> = { ios: "iOS", android: "Android" };
+ 
+ export function AppVersionPage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const permissions = usePermissions();
+   const queryClient = useQueryClient();
+diff --git a/plugins/ky-system-settings/src/pages/basic-info-page.tsx b/plugins/ky-system-settings/src/pages/basic-info-page.tsx
+index dc3fec87462ab826ad030af360e72cb6f441e26f..3fa0c7d8a0a8e4fdb304d8d44490914dc8ea1c3c 100644
+--- a/plugins/ky-system-settings/src/pages/basic-info-page.tsx
++++ b/plugins/ky-system-settings/src/pages/basic-info-page.tsx
+@@ -1,14 +1,30 @@
+-import { useEffect } from "react";
+-import { Button, Form, Input, Space, Typography, message } from "antd";
++import { useEffect, useState } from "react";
++import { App as AntdApp, Button, Divider, Form, Input, InputNumber, Select, Space, Tabs, Typography } from "antd";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ListPageCard, useRequestClient, usePermissions } from "@ky/admin-core";
+ import { getPlatformProfile, updatePlatformProfile, type PlatformProfile } from "../api";
+ 
++const logoFontFamilyOptions = [
++  { label: "系统无衬线", value: "system" },
++  { label: "无衬线", value: "sans" },
++  { label: "衬线", value: "serif" },
++  { label: "等宽", value: "mono" }
++];
++const logoFontWeightOptions = [
++  { label: "常规 400", value: 400 },
++  { label: "中等 500", value: 500 },
++  { label: "半粗 600", value: 600 },
++  { label: "粗体 700", value: 700 }
++];
++
+ export function BasicInfoPage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const permissions = usePermissions();
+   const queryClient = useQueryClient();
+   const [form] = Form.useForm<PlatformProfile>();
++  const [compactTabs, setCompactTabs] = useState(false);
++  const [activeInfoTab, setActiveInfoTab] = useState("brand");
+ 
+   const canUpdate = permissions.can("platform.basic_info.update");
+ 
+@@ -21,6 +37,14 @@ export function BasicInfoPage() {
+     if (data) form.setFieldsValue(data);
+   }, [data, form]);
+ 
++  useEffect(() => {
++    const media = window.matchMedia("(max-width: 640px)");
++    const update = () => setCompactTabs(media.matches);
++    update();
++    media.addEventListener("change", update);
++    return () => media.removeEventListener("change", update);
++  }, []);
++
+   const saveMutation = useMutation({
+     mutationFn: (values: PlatformProfile) => updatePlatformProfile(client, values),
+     onSuccess: () => {
+@@ -32,53 +56,142 @@ export function BasicInfoPage() {
+     onError: (error: Error) => message.error(error.message)
+   });
+ 
++  const saveButton = canUpdate ? (
++    <Form.Item style={{ margin: "16px 0 0" }}>
++      <Space>
++        <Button type="primary" htmlType="button" loading={saveMutation.isPending} onClick={() => form.submit()}>
++          保存
++        </Button>
++      </Space>
++    </Form.Item>
++  ) : null;
++
++  const fieldLabels: Record<string, string> = {
++    brandLogoTextLong: "长文字 LOGO",
++    brandLogoTextShort: "短文字 LOGO",
++    companyName: "公司 / 平台主体名称",
++    icpRecord: "ICP 备案号"
++  };
++
+   return (
+     <ListPageCard title="基础信息" subtitle="维护平台品牌信息、公司主体信息与备案展示。">
+-      <div style={{ maxWidth: 640, padding: 16 }}>
+-        <Form<PlatformProfile> form={form} layout="vertical" disabled={isFetching} onFinish={(v) => saveMutation.mutate(v)}>
+-          <Typography.Title level={5} style={{ margin: "0 0 12px" }}>
+-            品牌信息
+-          </Typography.Title>
+-          <Form.Item
+-            extra="用于导航展开态、登录页主品牌与浏览器标题。为空时使用公司 / 平台主体名称。"
+-            label="长文字 LOGO"
+-            name="brandLogoTextLong"
+-            rules={[{ max: 20, message: "长文字 LOGO 最多 20 个字符" }]}
+-          >
+-            <Input maxLength={20} placeholder="如 AI 智能 CRM / AiCRM" showCount />
+-          </Form.Item>
+-          <Form.Item
+-            extra="用于导航收起态，建议中文 1-2 个字或英文 2-6 个字符。为空时自动从长文字 LOGO 生成。"
+-            label="短文字 LOGO"
+-            name="brandLogoTextShort"
+-            rules={[{ max: 6, message: "短文字 LOGO 最多 6 个字符" }]}
+-          >
+-            <Input maxLength={6} placeholder="如 AI / CRM / AiCRM" showCount />
+-          </Form.Item>
+-
+-          <Typography.Title level={5} style={{ margin: "20px 0 12px" }}>
+-            主体信息
+-          </Typography.Title>
+-          <Form.Item label="公司 / 平台主体名称" name="companyName" rules={[{ required: true, message: "请输入名称" }]}>
+-            <Input placeholder="如 凯翼科技" />
+-          </Form.Item>
+-          <Form.Item label="ICP 备案号" name="icpRecord">
+-            <Input placeholder="如 京ICP备2026000001号" />
+-          </Form.Item>
+-          {data?.updatedAt ? (
+-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+-              最后更新:{new Date(data.updatedAt).toLocaleString("zh-CN")}
+-            </Typography.Text>
+-          ) : null}
+-          {canUpdate ? (
+-            <Form.Item style={{ marginTop: 16 }}>
+-              <Space>
+-                <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>
+-                  保存
+-                </Button>
+-              </Space>
+-            </Form.Item>
+-          ) : null}
++      <div style={{ padding: 16 }}>
++        <Form<PlatformProfile>
++          form={form}
++          layout="vertical"
++          preserve
++          disabled={isFetching}
++          onFinish={(v) => saveMutation.mutate(v)}
++          onFinishFailed={({ errorFields }) => {
++            const first = errorFields[0];
++            if (!first) {
++              void message.error("请检查基础信息字段后再保存。");
++              return;
++            }
++            const fieldName = String(first.name[first.name.length - 1]);
++            if (fieldName === "companyName" || fieldName === "icpRecord") setActiveInfoTab("subject");
++            void form.scrollToField(first.name, { block: "center" });
++            const reason = first.errors.join("、") || "值不符合要求";
++            void message.error(`${fieldLabels[fieldName] ?? fieldName}：${reason}`);
++          }}
++        >
++          <Tabs
++            className="system-settings-tabs"
++            activeKey={activeInfoTab}
++            onChange={setActiveInfoTab}
++            destroyOnHidden={false}
++            tabPosition={compactTabs ? "top" : "left"}
++            style={{ width: "100%" }}
++            tabBarStyle={compactTabs ? undefined : { minWidth: 168 }}
++            items={[
++              {
++                key: "brand",
++                label: (
++                  <span className="system-settings-dictionary-tab-label">
++                    <Typography.Text>品牌信息</Typography.Text>
++                    <Typography.Text type="secondary" className="system-settings-dictionary-tab-code">
++                      brand_info
++                    </Typography.Text>
++                  </span>
++                ),
++                forceRender: true,
++                children: (
++                  <div style={{ width: "100%", maxWidth: 720, padding: "0 16px" }}>
++                    <Form.Item
++                      extra="用于导航展开态、登录页主品牌与浏览器标题。为空时使用公司 / 平台主体名称。"
++                      label="长文字 LOGO"
++                      name="brandLogoTextLong"
++                      rules={[{ max: 20, message: "长文字 LOGO 最多 20 个字符" }]}
++                    >
++                      <Input maxLength={20} placeholder="如 AI 智能 CRM / AiCRM" showCount />
++                    </Form.Item>
++                    <Typography.Text type="secondary">字体设置仅作用于左上角的 Logo。</Typography.Text>
++                    <Space wrap size={12} style={{ width: "100%" }}>
++                      <Form.Item label="字体大小" name="longLogoFontSize" rules={[{ required: true, type: "number", min: 8, max: 72, message: "请输入 8—72 的字号" }]}>
++                        <InputNumber addonAfter="px" min={8} max={72} precision={0} />
++                      </Form.Item>
++                      <Form.Item label="字体" name="longLogoFontFamily" rules={[{ required: true, message: "请选择字体" }]}>
++                        <Select options={logoFontFamilyOptions} style={{ minWidth: 150 }} />
++                      </Form.Item>
++                      <Form.Item label="粗细" name="longLogoFontWeight" rules={[{ required: true, message: "请选择字重" }]}>
++                        <Select options={logoFontWeightOptions} style={{ minWidth: 130 }} />
++                      </Form.Item>
++                    </Space>
++                    <Form.Item
++                      extra="用于导航收起态，建议中文 1-2 个字或英文 2-6 个字符。为空时自动从长文字 LOGO 生成。"
++                      label="短文字 LOGO"
++                      name="brandLogoTextShort"
++                      rules={[{ max: 6, message: "短文字 LOGO 最多 6 个字符" }]}
++                    >
++                      <Input maxLength={6} placeholder="如 AI / CRM / AiCRM" showCount />
++                    </Form.Item>
++                    <Typography.Text type="secondary">字体设置仅作用于左上角的 Logo。</Typography.Text>
++                    <Space wrap size={12} style={{ width: "100%" }}>
++                      <Form.Item label="字体大小" name="shortLogoFontSize" rules={[{ required: true, type: "number", min: 8, max: 72, message: "请输入 8—72 的字号" }]}>
++                        <InputNumber addonAfter="px" min={8} max={72} precision={0} />
++                      </Form.Item>
++                      <Form.Item label="字体" name="shortLogoFontFamily" rules={[{ required: true, message: "请选择字体" }]}>
++                        <Select options={logoFontFamilyOptions} style={{ minWidth: 150 }} />
++                      </Form.Item>
++                      <Form.Item label="粗细" name="shortLogoFontWeight" rules={[{ required: true, message: "请选择字重" }]}>
++                        <Select options={logoFontWeightOptions} style={{ minWidth: 130 }} />
++                      </Form.Item>
++                    </Space>
++                    <Divider />
++                    {saveButton}
++                  </div>
++                )
++              },
++              {
++                key: "subject",
++                label: (
++                  <span className="system-settings-dictionary-tab-label">
++                    <Typography.Text>主体信息</Typography.Text>
++                    <Typography.Text type="secondary" className="system-settings-dictionary-tab-code">
++                      subject_info
++                    </Typography.Text>
++                  </span>
++                ),
++                forceRender: true,
++                children: (
++                  <div style={{ width: "100%", maxWidth: 720, padding: "0 16px" }}>
++                    <Form.Item label="公司 / 平台主体名称" name="companyName" rules={[{ required: true, message: "请输入名称" }]}>
++                      <Input placeholder="如 凯翼科技" />
++                    </Form.Item>
++                    <Form.Item label="ICP 备案号" name="icpRecord">
++                      <Input placeholder="如 京ICP备2026000001号" />
++                    </Form.Item>
++                    {data?.updatedAt ? (
++                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
++                        最后更新:{new Date(data.updatedAt).toLocaleString("zh-CN")}
++                      </Typography.Text>
++                    ) : null}
++                    {saveButton}
++                  </div>
++                )
++              }
++            ]}
++          />
+         </Form>
+       </div>
+     </ListPageCard>
+diff --git a/plugins/ky-system-settings/src/pages/dictionaries-page.tsx b/plugins/ky-system-settings/src/pages/dictionaries-page.tsx
+index bd34640fc655c2ea371b16bb02c68b2726f06e31..ea48ead12069ab6f304c81f25a780211459c4db9 100644
+--- a/plugins/ky-system-settings/src/pages/dictionaries-page.tsx
++++ b/plugins/ky-system-settings/src/pages/dictionaries-page.tsx
+@@ -1,4 +1,5 @@
+-import { Card, Skeleton, Space, Table, Tag, Typography } from "antd";
++import { useEffect, useState } from "react";
++import { Skeleton, Table, Tabs, Tag, Typography } from "antd";
+ import type { ColumnsType } from "antd/es/table";
+ import { useQuery } from "@tanstack/react-query";
+ import { ListPageCard, useRequestClient } from "@ky/admin-core";
+@@ -7,6 +8,22 @@ import { listDictionaries, type Dictionary, type DictionaryItem } from "../api";
+ export function DictionariesPage() {
+   const client = useRequestClient();
+   const { data, isLoading } = useQuery({ queryKey: ["dictionaries"], queryFn: () => listDictionaries(client) });
++  const [activeKey, setActiveKey] = useState("");
++  const [compactTabs, setCompactTabs] = useState(false);
++
++  useEffect(() => {
++    const dictionaries = data ?? [];
++    if (dictionaries.some((dictionary) => dictionary.id === activeKey)) return;
++    setActiveKey(dictionaries[0]?.id ?? "");
++  }, [activeKey, data]);
++
++  useEffect(() => {
++    const media = window.matchMedia("(max-width: 640px)");
++    const update = () => setCompactTabs(media.matches);
++    update();
++    media.addEventListener("change", update);
++    return () => media.removeEventListener("change", update);
++  }, []);
+ 
+   const itemColumns: ColumnsType<DictionaryItem> = [
+     { title: "标签", dataIndex: "label", key: "label" },
+@@ -26,32 +43,39 @@ export function DictionariesPage() {
+       <div style={{ padding: 16 }}>
+         {isLoading ? (
+           <Skeleton active />
++        ) : (data ?? []).length === 0 ? (
++          <Typography.Text type="secondary">暂无字典。</Typography.Text>
+         ) : (
+-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+-            {(data ?? []).map((dict: Dictionary) => (
+-              <Card
+-                key={dict.id}
+-                size="small"
+-                title={
+-                  <Space>
+-                    <Typography.Text strong>{dict.name}</Typography.Text>
+-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+-                      {dict.code}
+-                    </Typography.Text>
+-                  </Space>
+-                }
+-              >
+-                <Table<DictionaryItem>
+-                  rowKey={(item) => `${dict.id}:${item.value}`}
+-                  columns={itemColumns}
+-                  dataSource={dict.items}
+-                  pagination={false}
+-                  size="small"
+-                />
+-              </Card>
+-            ))}
+-            {(data ?? []).length === 0 ? <Typography.Text type="secondary">暂无字典。</Typography.Text> : null}
+-          </Space>
++          <Tabs
++            className="system-settings-tabs"
++            activeKey={activeKey}
++            onChange={setActiveKey}
++            tabPosition={compactTabs ? "top" : "left"}
++            style={{ width: "100%" }}
++            tabBarStyle={compactTabs ? undefined : { minWidth: 168 }}
++            items={(data ?? []).map((dict: Dictionary) => ({
++              key: dict.id,
++              label: (
++                <span className="system-settings-dictionary-tab-label">
++                  <Typography.Text>{dict.name || dict.code}</Typography.Text>
++                  <Typography.Text type="secondary" className="system-settings-dictionary-tab-code">
++                    {dict.code}
++                  </Typography.Text>
++                </span>
++              ),
++              children: (
++                <div style={{ width: "100%", padding: "0 16px" }}>
++                  <Table<DictionaryItem>
++                    rowKey={(item) => `${dict.id}:${item.value}`}
++                    columns={itemColumns}
++                    dataSource={dict.items}
++                    pagination={false}
++                    size="small"
++                  />
++                </div>
++              )
++            }))}
++          />
+         )}
+       </div>
+     </ListPageCard>
+diff --git a/plugins/ky-system-settings/src/pages/email-page.tsx b/plugins/ky-system-settings/src/pages/email-page.tsx
+index 7deaeda637bcc57800d131987a604eb527919beb..3f3c162dddec6d31b03ee61d9e03e54362e39781 100644
+--- a/plugins/ky-system-settings/src/pages/email-page.tsx
++++ b/plugins/ky-system-settings/src/pages/email-page.tsx
+@@ -1,5 +1,5 @@
+ import { useState } from "react";
+-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, message } from "antd";
++import { App as AntdApp, Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag } from "antd";
+ import type { ColumnsType } from "antd/es/table";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
+@@ -15,6 +15,7 @@ const STATUS_OPTS = [{ value: "enabled", label: "启用" }, { value: "disabled",
+ const ENC_OPTS = [{ value: "ssl", label: "SSL(465)" }, { value: "tls", label: "STARTTLS(587)" }, { value: "none", label: "无加密(25)" }];
+ 
+ export function EmailPage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const permissions = usePermissions();
+   const qc = useQueryClient();
+diff --git a/plugins/ky-system-settings/src/pages/notification-templates-page.tsx b/plugins/ky-system-settings/src/pages/notification-templates-page.tsx
+index 326dba90f6097a5ca83220c35200b6b058e0c819..04a08a5188a6db4ae041c14ae8fb42c678a3905a 100644
+--- a/plugins/ky-system-settings/src/pages/notification-templates-page.tsx
++++ b/plugins/ky-system-settings/src/pages/notification-templates-page.tsx
+@@ -1,5 +1,5 @@
+ import { useState } from "react";
+-import { Button, Drawer, Form, Input, Popconfirm, Space, Switch, Table, Tag, Typography, message } from "antd";
++import { App as AntdApp, Button, Drawer, Form, Input, Popconfirm, Space, Switch, Table, Tag, Typography } from "antd";
+ import type { ColumnsType } from "antd/es/table";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
+@@ -14,6 +14,7 @@ import {
+ type EditInput = { templateName: string; title: string; content: string; description: string };
+ 
+ export function NotificationTemplatesPage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const permissions = usePermissions();
+   const queryClient = useQueryClient();
+diff --git a/plugins/ky-system-settings/src/pages/settings-hub-page.tsx b/plugins/ky-system-settings/src/pages/settings-hub-page.tsx
+index 42411261814ca75caabebe4539e724d8347b91a1..16f57ed55baa6b0bb88a32630419434518acded6 100644
+--- a/plugins/ky-system-settings/src/pages/settings-hub-page.tsx
++++ b/plugins/ky-system-settings/src/pages/settings-hub-page.tsx
+@@ -1,5 +1,6 @@
+-import { useMemo, useState, type ReactNode } from "react";
++import { useEffect, useMemo, useState, type ReactNode } from "react";
+ import { Empty, Tabs } from "antd";
++import { useSearchParams } from "react-router-dom";
+ import {
+   ApiOutlined,
+   BellOutlined,
+@@ -43,11 +44,20 @@ const SECTIONS: Section[] = [
+ 
+ export function SettingsHubPage() {
+   const permissions = usePermissions();
++  const [searchParams, setSearchParams] = useSearchParams();
+   const sections = useMemo(
+     () => SECTIONS.filter((s) => (s.anyPerms ? permissions.canAny(s.anyPerms) : s.perm ? permissions.can(s.perm) : true)),
+     [permissions]
+   );
+-  const [active, setActive] = useState(sections[0]?.key ?? "");
++  const [active, setActive] = useState("");
++
++  const urlTabToKey = (value: string | null) => (value === "parameters" || value === "settings" ? "settings" : value ?? "");
++  const keyToUrlTab = (key: string) => (key === "settings" ? "parameters" : key);
++
++  useEffect(() => {
++    const requested = urlTabToKey(searchParams.get("tab"));
++    setActive(sections.some((section) => section.key === requested) ? requested : sections[0]?.key ?? "");
++  }, [searchParams, sections]);
+ 
+   if (sections.length === 0) {
+     return <Empty style={{ marginTop: 80 }} description="暂无可访问的系统配置项" />;
+@@ -57,8 +67,14 @@ export function SettingsHubPage() {
+ 
+   return (
+     <Tabs
++      className="system-settings-hub-tabs"
+       activeKey={activeKey}
+-      onChange={setActive}
++      onChange={(key) => {
++        setActive(key);
++        const next = new URLSearchParams(searchParams);
++        next.set("tab", keyToUrlTab(key));
++        setSearchParams(next);
++      }}
+       items={sections.map((s) => ({
+         key: s.key,
+         label: (
+@@ -67,7 +83,7 @@ export function SettingsHubPage() {
+           </span>
+         ),
+         // Only the active tab mounts — avoids 8 pages firing queries at once.
+-        children: s.key === activeKey ? s.element : null
++        children: s.key === activeKey ? <div className="system-settings-hub-tab-content">{s.element}</div> : null
+       }))}
+     />
+   );
+diff --git a/plugins/ky-system-settings/src/pages/settings-page.tsx b/plugins/ky-system-settings/src/pages/settings-page.tsx
+index 4f5d4dd093b5194f53214e121923e5e42ddbe822..d19c8d6c1277ad7952bac91d72a4b86fc3543b37 100644
+--- a/plugins/ky-system-settings/src/pages/settings-page.tsx
++++ b/plugins/ky-system-settings/src/pages/settings-page.tsx
+@@ -1,8 +1,7 @@
+ import { useEffect, useState } from "react";
+-import { Button, Input, Skeleton, Space, Typography, message } from "antd";
+-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
++import { App as AntdApp, Button, Divider, Form, Skeleton, Space, Switch, Tabs, Typography } from "antd";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+-import { DetailPagePanel, useCurrentWorkspace, useRequestClient, usePermissions } from "@ky/admin-core";
++import { ListPageCard, useCurrentWorkspace, useRequestClient, usePermissions } from "@ky/admin-core";
+ import {
+   getOrgSettings,
+   getPlatformSettings,
+@@ -11,18 +10,17 @@ import {
+   type SettingsMap
+ } from "../api";
+ 
+-interface Entry {
+-  key: string;
+-  value: string;
+-}
+-
+ export function SettingsPage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const workspace = useCurrentWorkspace();
+   const permissions = usePermissions();
+   const queryClient = useQueryClient();
+   const isPlatform = workspace?.type === "platform";
+-  const [entries, setEntries] = useState<Entry[]>([]);
++  const [mfaEnabled, setMfaEnabled] = useState(false);
++  const [securitySettings, setSecuritySettings] = useState<Record<string, unknown>>({});
++  const [invalidMfaValue, setInvalidMfaValue] = useState(false);
++  const [compactTabs, setCompactTabs] = useState(false);
+ 
+   const canUpdate = permissions.canAny(["platform.settings.update", "agency.settings.update", "enterprise.settings.update"]);
+ 
+@@ -32,11 +30,43 @@ export function SettingsPage() {
+   });
+ 
+   useEffect(() => {
+-    if (data?.settings) {
+-      setEntries(Object.entries(data.settings).map(([key, value]) => ({ key, value: String(value) })));
++    if (!data?.settings) return;
++    const rawSecurity = data.settings.security;
++    if (rawSecurity === undefined) {
++      setSecuritySettings({});
++      setMfaEnabled(false);
++      setInvalidMfaValue(false);
++    } else {
++      if (!rawSecurity || typeof rawSecurity !== "object" || Array.isArray(rawSecurity)) {
++        setSecuritySettings({});
++        setMfaEnabled(false);
++        setInvalidMfaValue(true);
++        return;
++      }
++      const nextSecurity = rawSecurity as Record<string, unknown>;
++      const value = nextSecurity.mfaEnabled;
++      setSecuritySettings({ ...nextSecurity });
++      if (value === undefined) {
++        setMfaEnabled(false);
++        setInvalidMfaValue(false);
++      } else if (typeof value === "boolean") {
++        setMfaEnabled(value);
++        setInvalidMfaValue(false);
++      } else {
++        setMfaEnabled(false);
++        setInvalidMfaValue(true);
++      }
+     }
+   }, [data]);
+ 
++  useEffect(() => {
++    const media = window.matchMedia("(max-width: 640px)");
++    const update = () => setCompactTabs(media.matches);
++    update();
++    media.addEventListener("change", update);
++    return () => media.removeEventListener("change", update);
++  }, []);
++
+   const saveMutation = useMutation({
+     mutationFn: (settings: SettingsMap) =>
+       isPlatform ? updatePlatformSettings(client, settings) : updateOrgSettings(client, settings),
+@@ -48,66 +78,54 @@ export function SettingsPage() {
+   });
+ 
+   function save() {
+-    const map: SettingsMap = {};
+-    for (const entry of entries) {
+-      const key = entry.key.trim();
+-      if (key) map[key] = entry.value;
++    if (invalidMfaValue) {
++      message.error("security.mfaEnabled 必须是布尔值，未保存。");
++      return;
+     }
+-    saveMutation.mutate(map);
++    saveMutation.mutate({ security: { ...securitySettings, mfaEnabled } });
+   }
+ 
+   return (
+-    <DetailPagePanel
+-      title={isPlatform ? "平台系统设置" : "组织设置"}
+-      extra={
+-        canUpdate ? (
+-          <Button type="primary" loading={saveMutation.isPending} onClick={save}>
+-            保存
+-          </Button>
+-        ) : null
+-      }
+-    >
++    <ListPageCard title="参数配置" subtitle="管理平台与组织安全参数。">
+       {isLoading ? (
+         <Skeleton active />
+       ) : (
+-        <Space direction="vertical" size={12} style={{ width: "100%", maxWidth: 720 }}>
+-          <Typography.Text type="secondary">键值对形式的配置项，保存即覆盖。</Typography.Text>
+-          {entries.map((entry, index) => (
+-            <Space key={index} align="start" style={{ width: "100%" }}>
+-              <Input
+-                placeholder="配置键"
+-                style={{ width: 220 }}
+-                value={entry.key}
+-                disabled={!canUpdate}
+-                onChange={(event) =>
+-                  setEntries((list) => list.map((e, i) => (i === index ? { ...e, key: event.target.value } : e)))
+-                }
+-              />
+-              <Input
+-                placeholder="配置值"
+-                style={{ width: 360 }}
+-                value={entry.value}
+-                disabled={!canUpdate}
+-                onChange={(event) =>
+-                  setEntries((list) => list.map((e, i) => (i === index ? { ...e, value: event.target.value } : e)))
+-                }
+-              />
+-              {canUpdate ? (
+-                <Button
+-                  type="text"
+-                  icon={<DeleteOutlined />}
+-                  onClick={() => setEntries((list) => list.filter((_, i) => i !== index))}
+-                />
+-              ) : null}
+-            </Space>
+-          ))}
+-          {canUpdate ? (
+-            <Button icon={<PlusOutlined />} onClick={() => setEntries((list) => [...list, { key: "", value: "" }])}>
+-              新增配置项
+-            </Button>
+-          ) : null}
+-        </Space>
++        <div style={{ padding: 16 }}>
++          <Tabs
++            className="system-settings-tabs"
++            tabPosition={compactTabs ? "top" : "left"}
++            style={{ width: "100%" }}
++            tabBarStyle={compactTabs ? undefined : { minWidth: 168 }}
++            items={[
++              {
++                key: "mfa",
++                label: "多因素认证（MFA）",
++                children: (
++                  <div style={{ width: "100%", maxWidth: 720, padding: "0 16px" }}>
++                    <Form layout="vertical">
++                      <Form.Item label="状态" extra="启用后，登录及敏感操作可按安全策略要求多因素验证。">
++                        <Space wrap>
++                          <Switch checked={mfaEnabled} disabled={!canUpdate || invalidMfaValue} onChange={setMfaEnabled} />
++                          <Typography.Text>{mfaEnabled ? "已启用" : "已关闭"}</Typography.Text>
++                        </Space>
++                      </Form.Item>
++                    </Form>
++                    {invalidMfaValue ? (
++                      <Typography.Text type="danger">security.mfaEnabled 配置值不是布尔值，无法保存。</Typography.Text>
++                    ) : null}
++                    <Divider />
++                    <Space style={{ width: "100%", justifyContent: "flex-end" }}>
++                      <Button type="primary" loading={saveMutation.isPending} disabled={!canUpdate || invalidMfaValue} onClick={save}>
++                        保存
++                      </Button>
++                    </Space>
++                  </div>
++                )
++              }
++            ]}
++          />
++        </div>
+       )}
+-    </DetailPagePanel>
++    </ListPageCard>
+   );
+ }
+diff --git a/plugins/ky-system-settings/src/pages/sms-page.tsx b/plugins/ky-system-settings/src/pages/sms-page.tsx
+index 96bc756493f1a39fc9e6657b5e8ddc823a95d15b..104fda9639ae13d21c47c035068e195967b94d86 100644
+--- a/plugins/ky-system-settings/src/pages/sms-page.tsx
++++ b/plugins/ky-system-settings/src/pages/sms-page.tsx
+@@ -1,5 +1,5 @@
+ import { useState } from "react";
+-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, message } from "antd";
++import { App as AntdApp, Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag } from "antd";
+ import type { ColumnsType } from "antd/es/table";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
+@@ -14,6 +14,7 @@ import {
+ const STATUS_OPTS = [{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }];
+ 
+ export function SmsPage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const permissions = usePermissions();
+   const qc = useQueryClient();
+diff --git a/plugins/ky-system-settings/src/pages/storage-page.tsx b/plugins/ky-system-settings/src/pages/storage-page.tsx
+index 53d7fa50582596b3bbe00ed1f3a5664ccdb0dace..705b9a665a61015b0158b27d764f18ce76d177be 100644
+--- a/plugins/ky-system-settings/src/pages/storage-page.tsx
++++ b/plugins/ky-system-settings/src/pages/storage-page.tsx
+@@ -1,141 +1,105 @@
+-import { useEffect, useState } from "react";
+-import { Alert, Button, Form, Input, Modal, Space, Switch, Typography, message } from "antd";
++import { useEffect, useMemo, useRef, useState } from "react";
++import { App as AntdApp, Alert, Button, Form, Input, Modal, Radio, Space, Tabs, Tag, type FormInstance } from "antd";
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+-import { ListPageCard, useRequestClient, usePermissions } from "@ky/admin-core";
+-import {
+-  getStorageSetting,
+-  rotateStorageSecret,
+-  testStorageSetting,
+-  updateStorageSetting,
+-  type StorageSetting
+-} from "../api";
++import { ListPageCard, usePermissions, useRequestClient } from "@ky/admin-core";
++import { activateStorageProvider, getStorageSetting, testStorageSetting, updateStorageSetting, type StorageSetting, type StorageSettings } from "../api";
++
++type ProviderKey = "local" | "minio" | "oss";
++const providerLabels: Record<ProviderKey, string> = { local: "本地存储", minio: "MinIO", oss: "阿里云 OSS" };
++
++function providerDefaults(key: ProviderKey): StorageSetting {
++  return { providerKey: key, localDirectory: "./storage", endpoint: "", region: "", bucket: "", bucketPrivate: true, forcePathStyle: key === "minio", prefix: "", publicDomain: "", accessKeyId: "", hasSecret: false, lastTestStatus: "" };
++}
++
++function storageFormSnapshot(values: Partial<StorageSetting>): string {
++  return JSON.stringify({
++    localDirectory: String(values.localDirectory ?? "").trim(),
++    endpoint: String(values.endpoint ?? "").trim(),
++    region: String(values.region ?? "").trim(),
++    bucket: String(values.bucket ?? "").trim(),
++    bucketPrivate: Boolean(values.bucketPrivate),
++    forcePathStyle: Boolean(values.forcePathStyle),
++    prefix: String(values.prefix ?? "").trim(),
++    publicDomain: String(values.publicDomain ?? "").trim(),
++    accessKeyId: String(values.accessKeyId ?? "").trim(),
++    secretAccessKey: String(values.secretAccessKey ?? "")
++  });
++}
+ 
+ export function StoragePage() {
++  const { message } = AntdApp.useApp();
+   const client = useRequestClient();
+   const permissions = usePermissions();
+   const queryClient = useQueryClient();
+-  const [form] = Form.useForm();
+-  const [rotateOpen, setRotateOpen] = useState(false);
+-  const [newSecret, setNewSecret] = useState("");
+-  const [testResult, setTestResult] = useState<{ ok: boolean; latencyMs: number; errorMessage?: string } | null>(null);
+-
++  const [form] = Form.useForm<StorageSetting>();
++  const [activeProvider, setActiveProvider] = useState<ProviderKey>("local");
++  const [testResult, setTestResult] = useState<{ ok: boolean; latencyMs: number; errorCode?: string; errorMessage?: string } | null>(null);
++  const providerSnapshots = useRef<Partial<Record<ProviderKey, string>>>({});
+   const canUpdate = permissions.can("platform.storage.update");
+   const canTest = permissions.can("platform.storage.test");
++  const { data, isFetching } = useQuery<StorageSettings>({ queryKey: ["storage-settings"], queryFn: () => getStorageSetting(client) });
++  const current = useMemo(() => data?.providers?.[activeProvider] ?? providerDefaults(activeProvider), [activeProvider, data]);
+ 
+-  const { data, isFetching } = useQuery({ queryKey: ["storage-setting"], queryFn: () => getStorageSetting(client) });
+-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["storage-setting"] });
+-
+   useEffect(() => {
+-    if (data) form.setFieldsValue(data);
+-  }, [data, form]);
++    if (!data) return;
++    setActiveProvider(data.activeStorageProvider || "local");
++  }, [data]);
++  useEffect(() => {
++    form.setFieldsValue({ ...current, secretAccessKey: "" });
++    providerSnapshots.current[activeProvider] = storageFormSnapshot({ ...current, secretAccessKey: "" });
++    setTestResult(null);
++  }, [activeProvider, current, form]);
+ 
+   const saveMutation = useMutation({
+-    mutationFn: (values: Partial<StorageSetting>) => updateStorageSetting(client, values),
+-    onSuccess: () => {
+-      void message.success("对象存储配置已保存。");
+-      invalidate();
+-    },
++    mutationFn: (input: { provider: ProviderKey; values: StorageSetting }) => updateStorageSetting(client, { ...input.values, providerKey: input.provider, secretAccessKey: input.values.secretAccessKey }),
++    onSuccess: (_result, input) => { providerSnapshots.current[input.provider] = storageFormSnapshot(input.values); void message.success(`${providerLabels[input.provider]}配置已保存。`); void queryClient.invalidateQueries({ queryKey: ["storage-settings"] }); form.resetFields(); },
+     onError: (error: Error) => message.error(error.message)
+   });
+-  const rotateMutation = useMutation({
+-    mutationFn: (secret: string) => rotateStorageSecret(client, secret),
+-    onSuccess: () => {
+-      void message.success("SecretKey 已更新。");
+-      setRotateOpen(false);
+-      setNewSecret("");
+-      invalidate();
+-    },
++  const activateMutation = useMutation({
++    mutationFn: () => activateStorageProvider(client, activeProvider),
++    onSuccess: () => { void message.success("当前存储已切换。"); void queryClient.invalidateQueries({ queryKey: ["storage-settings"] }); },
+     onError: (error: Error) => message.error(error.message)
+   });
+   const testMutation = useMutation({
+-    mutationFn: () => testStorageSetting(client),
+-    onSuccess: (r) => {
+-      setTestResult(r);
+-      invalidate();
+-    },
++    mutationFn: () => testStorageSetting(client, activeProvider),
++    onSuccess: (result) => setTestResult(result),
+     onError: (error: Error) => message.error(error.message)
+   });
+ 
+-  return (
+-    <ListPageCard title="对象存储设置" subtitle="S3 兼容对象存储配置(SecretKey 加密存储,永不回显明文)。">
+-      <div style={{ maxWidth: 640, padding: 16 }}>
+-        <Form layout="vertical" form={form} disabled={isFetching} onFinish={(v) => saveMutation.mutate(v)}>
+-          <Form.Item label="Provider" name="providerKey" initialValue="s3">
+-            <Input placeholder="s3 / oss / minio" />
+-          </Form.Item>
+-          <Form.Item label="Endpoint" name="endpoint" rules={[{ required: true, message: "请输入 Endpoint" }]}>
+-            <Input placeholder="https://oss-cn-hangzhou.aliyuncs.com" />
+-          </Form.Item>
+-          <Form.Item label="Region" name="region">
+-            <Input placeholder="cn-hangzhou" />
+-          </Form.Item>
+-          <Form.Item label="Bucket" name="bucket" rules={[{ required: true, message: "请输入 Bucket" }]}>
+-            <Input placeholder="my-bucket" />
+-          </Form.Item>
+-          <Form.Item label="Access Key ID" name="accessKeyId">
+-            <Input placeholder="AccessKeyId" />
+-          </Form.Item>
+-          <Form.Item label="Secret Access Key" name="secretAccessKey" extra={data?.hasSecret ? "已配置;留空保留原密钥,更换请用「轮换密钥」。" : "首次配置请填写。"}>
+-            <Input.Password placeholder={data?.hasSecret ? "留空保留原密钥" : "SecretAccessKey"} />
+-          </Form.Item>
+-          <Form.Item label="路径前缀 Prefix" name="prefix">
+-            <Input placeholder="可选,如 uploads/" />
+-          </Form.Item>
+-          <Form.Item label="公网访问域名" name="publicDomain">
+-            <Input placeholder="https://cdn.example.com" />
+-          </Form.Item>
+-          <Space size="large">
+-            <Form.Item label="私有桶" name="bucketPrivate" valuePropName="checked" initialValue>
+-              <Switch />
+-            </Form.Item>
+-            <Form.Item label="Path-Style(强制路径)" name="forcePathStyle" valuePropName="checked">
+-              <Switch />
+-            </Form.Item>
+-          </Space>
++  const switchProvider = (next: ProviderKey) => {
++    if (next === activeProvider) return;
++    const snapshot = providerSnapshots.current[activeProvider];
++    const dirty = snapshot !== undefined && storageFormSnapshot(form.getFieldsValue(true)) !== snapshot;
++    if (!dirty) { setActiveProvider(next); return; }
++    Modal.confirm({ title: "放弃未保存修改？", content: "切换存储类型将放弃当前未保存内容。", okText: "放弃并切换", cancelText: "继续编辑", onOk: () => { form.resetFields(); setActiveProvider(next); } });
++  };
++  const providerTab = (key: ProviderKey) => ({ key, label: <Space size={8}>{providerLabels[key]} {data?.activeStorageProvider === key ? <Tag color="green">当前使用</Tag> : null}</Space>, forceRender: true, children: <ProviderForm provider={key} current={data?.providers?.[key] ?? providerDefaults(key)} form={form} canUpdate={canUpdate} canTest={canTest} isFetching={isFetching} testResult={testResult} saving={saveMutation.isPending} activating={activateMutation.isPending} onSave={(values) => saveMutation.mutate({ provider: key, values })} onActivate={() => activateMutation.mutate()} onTest={() => testMutation.mutate()} /> });
+ 
+-          {testResult ? (
+-            <Alert
+-              style={{ marginBottom: 16 }}
+-              type={testResult.ok ? "success" : "error"}
+-              showIcon
+-              message={testResult.ok ? `连接成功 · 延迟 ${testResult.latencyMs} ms` : "连接失败"}
+-              description={testResult.ok ? undefined : testResult.errorMessage}
+-            />
+-          ) : data?.lastTestStatus ? (
+-            <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12, fontSize: 12 }}>
+-              上次测试:{data.lastTestStatus === "success" ? "成功" : `失败(${data.lastTestMessage || "—"})`}
+-            </Typography.Text>
+-          ) : null}
+-
+-          {canUpdate ? (
+-            <Space>
+-              <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>
+-                保存
+-              </Button>
+-              <Button onClick={() => setRotateOpen(true)}>轮换密钥</Button>
+-              {canTest ? (
+-                <Button loading={testMutation.isPending} onClick={() => testMutation.mutate()}>
+-                  测试连接
+-                </Button>
+-              ) : null}
+-            </Space>
+-          ) : null}
+-        </Form>
+-      </div>
++  return <ListPageCard title="存储设置" subtitle="配置平台文件、图片等资源的存储方式。">
++    <div style={{ padding: 16 }}>
++      <Tabs className="system-settings-tabs" tabPosition={window.matchMedia("(max-width: 640px)").matches ? "top" : "left"} activeKey={activeProvider} onChange={(key) => switchProvider(key as ProviderKey)} items={(["local", "minio", "oss"] as ProviderKey[]).map(providerTab)} />
++    </div>
++  </ListPageCard>;
++}
+ 
+-      <Modal
+-        title="轮换 Secret Access Key"
+-        open={rotateOpen}
+-        onCancel={() => setRotateOpen(false)}
+-        onOk={() => rotateMutation.mutate(newSecret)}
+-        confirmLoading={rotateMutation.isPending}
+-        okButtonProps={{ disabled: !newSecret.trim() }}
+-        okText="轮换"
+-        cancelText="取消"
+-      >
+-        <Typography.Paragraph type="secondary">输入新的 SecretKey,提交后立即加密存储,响应不回显明文。</Typography.Paragraph>
+-        <Input.Password placeholder="新 SecretAccessKey" value={newSecret} onChange={(e) => setNewSecret(e.target.value)} />
+-      </Modal>
+-    </ListPageCard>
+-  );
++function ProviderForm(props: { provider: ProviderKey; current: StorageSetting; form: FormInstance<StorageSetting>; canUpdate: boolean; canTest: boolean; isFetching: boolean; testResult: { ok: boolean; latencyMs: number; errorCode?: string; errorMessage?: string } | null; saving: boolean; activating: boolean; onSave: (values: StorageSetting) => void; onActivate: () => void; onTest: () => void }) {
++  const { provider, current, form, canUpdate, canTest, isFetching, testResult, saving, activating, onSave, onActivate, onTest } = props;
++  const isLocal = provider === "local";
++  return <div style={{ maxWidth: 720, padding: "0 16px" }}>
++    <Form form={form} layout="vertical" disabled={isFetching} onFinish={onSave}>
++      {isLocal ? <Form.Item label="存储目录" name="localDirectory" extra="默认使用项目目录下的 storage；迁移项目时请一并迁移该目录，也可填写绝对路径覆盖默认值。" rules={[{ required: true, message: "请输入存储目录" }]}><Input placeholder="./storage（项目目录下）" /></Form.Item> : <>
++        <Form.Item label="Endpoint" name="endpoint" rules={[{ required: true, message: "请输入 Endpoint" }]}><Input placeholder="https://..." /></Form.Item>
++        <Form.Item label="Region" name="region"><Input placeholder="cn-hangzhou" /></Form.Item>
++        <Form.Item label="Bucket" name="bucket" rules={[{ required: true, message: "请输入 Bucket" }]}><Input placeholder="my-bucket" /></Form.Item>
++        <Form.Item label="Access Key ID" name="accessKeyId"><Input placeholder="AccessKey ID" /></Form.Item>
++        <Form.Item label="Secret Access Key" name="secretAccessKey" extra="已配置密钥时留空表示保持原密钥；填写新密钥后保存即可完成替换。"><Input.Password placeholder={current.hasSecret ? "留空保持原密钥" : "请输入密钥"} /></Form.Item>
++      </>}
++      <Form.Item label="路径前缀" name="prefix"><Input placeholder="可选，例如 uploads/" /></Form.Item>
++      <Form.Item label="公网访问域名" name="publicDomain"><Input placeholder="可选，例如 https://cdn.example.com" /></Form.Item>
++      <Form.Item label="访问权限" name="bucketPrivate" extra="私有存储需要授权访问；公共读可通过公网地址直接访问。"><Radio.Group options={[{ label: "私有（推荐）", value: true }, { label: "公共读", value: false }]} /></Form.Item>
++      {provider === "minio" ? <Form.Item label="路径访问方式" name="forcePathStyle" extra="部分 MinIO 服务需要启用路径模式才能正常访问 Bucket。"><Radio.Group options={[{ label: "路径模式", value: true }, { label: "虚拟主机模式", value: false }]} /></Form.Item> : null}
++      {testResult ? <Alert type={testResult.ok ? "success" : "error"} showIcon style={{ marginBottom: 16 }} message={testResult.ok ? `测试成功 · ${testResult.latencyMs} ms` : (testResult.errorCode === "bucket_missing" ? "Bucket 不存在" : testResult.errorCode === "write_failed" ? "写入失败" : "连接失败或无权限")} description={testResult.ok ? undefined : testResult.errorMessage} /> : null}
++      {canUpdate ? <Space wrap><Button type="primary" onClick={() => form.submit()} loading={saving}>保存</Button><Button onClick={onActivate} loading={activating}>设为当前存储</Button>{canTest ? <Button onClick={onTest}>测试{isLocal ? "写入" : "连接"}</Button> : null}</Space> : null}
++    </Form>
++  </div>;
+ }
+diff --git a/services/ky-org-service/internal/server/platform_profile_handlers.go b/services/ky-org-service/internal/server/platform_profile_handlers.go
+index f0207fd9c91a0baa725fc479f0fd6ce44bd03e76..14f404a2126f618abcf9f36157aba969be2c183c 100644
+--- a/services/ky-org-service/internal/server/platform_profile_handlers.go
++++ b/services/ky-org-service/internal/server/platform_profile_handlers.go
+@@ -5,6 +5,28 @@ import (
+ 	"strings"
+ )
+ 
++var platformLogoFontFamilies = map[string]struct{}{
++	"system": {},
++	"sans":   {},
++	"serif":  {},
++	"mono":   {},
++}
++
++var platformLogoFontWeights = map[int]struct{}{
++	400: {}, 500: {}, 600: {}, 700: {},
++}
++
++func validPlatformLogoStyle(size, weight int, family string) bool {
++	if size < 8 || size > 72 {
++		return false
++	}
++	if _, ok := platformLogoFontFamilies[family]; !ok {
++		return false
++	}
++	_, ok := platformLogoFontWeights[weight]
++	return ok
++}
++
+ // getPublicPlatformProfile serves GET /api/v1/public/platform-profile — no auth,
+ // read-only non-sensitive info for login page / footer.
+ func (s *Server) getPublicPlatformProfile(w http.ResponseWriter, r *http.Request) {
+@@ -30,10 +52,16 @@ func (s *Server) getPlatformProfile(w http.ResponseWriter, r *http.Request, wc w
+ }
+ 
+ type platformProfileInput struct {
+-	CompanyName        string `json:"companyName"`
+-	BrandLogoTextLong  string `json:"brandLogoTextLong"`
+-	BrandLogoTextShort string `json:"brandLogoTextShort"`
+-	ICPRecord          string `json:"icpRecord"`
++	CompanyName         string  `json:"companyName"`
++	BrandLogoTextLong   string  `json:"brandLogoTextLong"`
++	BrandLogoTextShort  string  `json:"brandLogoTextShort"`
++	LongLogoFontSize    *int    `json:"longLogoFontSize"`
++	LongLogoFontFamily  *string `json:"longLogoFontFamily"`
++	LongLogoFontWeight  *int    `json:"longLogoFontWeight"`
++	ShortLogoFontSize   *int    `json:"shortLogoFontSize"`
++	ShortLogoFontFamily *string `json:"shortLogoFontFamily"`
++	ShortLogoFontWeight *int    `json:"shortLogoFontWeight"`
++	ICPRecord           string  `json:"icpRecord"`
+ }
+ 
+ func (s *Server) updatePlatformProfile(w http.ResponseWriter, r *http.Request, wc wsContext) {
+@@ -41,11 +69,50 @@ func (s *Server) updatePlatformProfile(w http.ResponseWriter, r *http.Request, w
+ 	if !decodeJSON(w, r, &in) {
+ 		return
+ 	}
++	current, err := s.store.GetPlatformProfile(r.Context())
++	if err != nil {
++		writeStoreError(w, r, err)
++		return
++	}
++	longSize, longFamily, longWeight := current.LongLogoFontSize, current.LongLogoFontFamily, current.LongLogoFontWeight
++	shortSize, shortFamily, shortWeight := current.ShortLogoFontSize, current.ShortLogoFontFamily, current.ShortLogoFontWeight
++	if in.LongLogoFontSize != nil {
++		longSize = *in.LongLogoFontSize
++	}
++	if in.LongLogoFontFamily != nil {
++		longFamily = *in.LongLogoFontFamily
++	}
++	if in.LongLogoFontWeight != nil {
++		longWeight = *in.LongLogoFontWeight
++	}
++	if in.ShortLogoFontSize != nil {
++		shortSize = *in.ShortLogoFontSize
++	}
++	if in.ShortLogoFontFamily != nil {
++		shortFamily = *in.ShortLogoFontFamily
++	}
++	if in.ShortLogoFontWeight != nil {
++		shortWeight = *in.ShortLogoFontWeight
++	}
++	if !validPlatformLogoStyle(longSize, longWeight, longFamily) {
++		writeError(w, r, http.StatusBadRequest, "invalid_logo_style", "长文字 LOGO 字体设置无效")
++		return
++	}
++	if !validPlatformLogoStyle(shortSize, shortWeight, shortFamily) {
++		writeError(w, r, http.StatusBadRequest, "invalid_logo_style", "短文字 LOGO 字体设置无效")
++		return
++	}
+ 	if err := s.store.UpsertPlatformProfile(
+ 		r.Context(),
+ 		strings.TrimSpace(in.CompanyName),
+ 		strings.TrimSpace(in.BrandLogoTextLong),
+ 		strings.TrimSpace(in.BrandLogoTextShort),
++		longSize,
++		longFamily,
++		longWeight,
++		shortSize,
++		shortFamily,
++		shortWeight,
+ 		strings.TrimSpace(in.ICPRecord),
+ 		wc.UserID,
+ 	); err != nil {
+diff --git a/services/ky-org-service/internal/server/platform_profile_handlers_test.go b/services/ky-org-service/internal/server/platform_profile_handlers_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..799f83ad39adeb4335f68134ebd642458ab65b38
+--- /dev/null
++++ b/services/ky-org-service/internal/server/platform_profile_handlers_test.go
+@@ -0,0 +1,28 @@
++package server
++
++import "testing"
++
++func TestValidPlatformLogoStyle(t *testing.T) {
++	for _, tc := range []struct {
++		name   string
++		size   int
++		family string
++		weight int
++		want   bool
++	}{
++		{"默认长Logo", 16, "system", 600, true},
++		{"默认短Logo", 14, "system", 600, true},
++		{"最小字号", 8, "sans", 400, true},
++		{"最大字号", 72, "mono", 700, true},
++		{"字号过小", 7, "system", 600, false},
++		{"字号过大", 73, "system", 600, false},
++		{"未知字体", 16, "user-css", 600, false},
++		{"未知字重", 16, "system", 450, false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := validPlatformLogoStyle(tc.size, tc.weight, tc.family); got != tc.want {
++				t.Fatalf("validPlatformLogoStyle(%d, %q, %d) = %v, want %v", tc.size, tc.family, tc.weight, got, tc.want)
++			}
++		})
++	}
++}
+diff --git a/services/ky-org-service/internal/server/server.go b/services/ky-org-service/internal/server/server.go
+index f5a63bd9f87b4a3e634083670d9d75973e62a1bd..a4f5a5b315524217ea4308ca1d4054463745fb56 100644
+--- a/services/ky-org-service/internal/server/server.go
++++ b/services/ky-org-service/internal/server/server.go
+@@ -2,6 +2,7 @@ package server
+ 
+ import (
+ 	"context"
++	"fmt"
+ 	"net/http"
+ 	"time"
+ 
+@@ -38,6 +39,13 @@ func (s *Server) Run(ctx context.Context) error {
+ 		if opened, err := store.Open(ctx, s.cfg.DatabaseURL); err == nil {
+ 			s.store = opened
+ 			defer opened.Close()
++			if settings, settingsErr := s.store.GetStorageSettings(ctx); settingsErr != nil {
++				return fmt.Errorf("读取对象存储配置失败: %w", settingsErr)
++			} else if settings.ActiveStorageProvider == "local" {
++				if localErr := ensureLocalStorageDirectory(settings.Providers["local"].LocalDirectory); localErr != nil {
++					return fmt.Errorf("本地存储目录不可用: %w", localErr)
++				}
++			}
+ 		}
+ 	}
+ 
+@@ -116,6 +124,7 @@ func (s *Server) Run(ctx context.Context) error {
+ 	// 对象存储设置 (object storage)
+ 	mux.HandleFunc("GET /api/v1/platform/storage-setting", s.ws("platform", perms("platform.storage.view"), s.getStorageSetting))
+ 	mux.HandleFunc("PATCH /api/v1/platform/storage-setting", s.ws("platform", perms("platform.storage.update"), s.updateStorageSetting))
++	mux.HandleFunc("POST /api/v1/platform/storage-setting/activate", s.ws("platform", perms("platform.storage.update"), s.activateStorageProvider))
+ 	mux.HandleFunc("POST /api/v1/platform/storage-setting/rotate-secret", s.ws("platform", perms("platform.storage.update"), s.rotateStorageSecret))
+ 	mux.HandleFunc("POST /api/v1/platform/storage-setting/test", s.ws("platform", perms("platform.storage.test"), s.testStorageSetting))
+ 
+diff --git a/services/ky-org-service/internal/server/settings_handlers.go b/services/ky-org-service/internal/server/settings_handlers.go
+index 043570c40cfe7371979f0fd8cc2509b1d676125c..4b8028f5c5afc166f0d4337f473ad2879875d1b4 100644
+--- a/services/ky-org-service/internal/server/settings_handlers.go
++++ b/services/ky-org-service/internal/server/settings_handlers.go
+@@ -1,7 +1,9 @@
+ package server
+ 
+ import (
++	"bytes"
+ 	"encoding/json"
++	"errors"
+ 	"net/http"
+ )
+ 
+@@ -9,6 +11,35 @@ type settingsBody struct {
+ 	Settings map[string]json.RawMessage `json:"settings"`
+ }
+ 
++var errInvalidSettingsPatch = errors.New("invalid settings patch")
++
++func validateSettingsPatch(settings map[string]json.RawMessage) error {
++	if len(settings) != 1 {
++		return errInvalidSettingsPatch
++	}
++	raw, ok := settings["security"]
++	if !ok {
++		return errInvalidSettingsPatch
++	}
++	var security map[string]json.RawMessage
++	if err := json.Unmarshal(raw, &security); err != nil || security == nil {
++		return errInvalidSettingsPatch
++	}
++	raw, ok = security["mfaEnabled"]
++	if !ok {
++		return errInvalidSettingsPatch
++	}
++	var enabled bool
++	if err := json.Unmarshal(raw, &enabled); err != nil {
++		return errInvalidSettingsPatch
++	}
++	normalized := bytes.TrimSpace(raw)
++	if !bytes.Equal(normalized, []byte("true")) && !bytes.Equal(normalized, []byte("false")) {
++		return errInvalidSettingsPatch
++	}
++	return nil
++}
++
+ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request, wc wsContext) {
+ 	m, err := s.store.GetSettings(r.Context(), wc.WorkspaceType, wc.WorkspaceID, "")
+ 	if err != nil {
+@@ -23,8 +54,10 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request, wc wsCon
+ 	if !decodeJSON(w, r, &in) {
+ 		return
+ 	}
+-	// Empty is allowed — the editor sends the full desired set, so an empty map
+-	// clears all settings for the scope (full-replace semantics in UpsertSettings).
++	if err := validateSettingsPatch(in.Settings); err != nil {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "security.mfaEnabled 必须是布尔值")
++		return
++	}
+ 	if err := s.store.UpsertSettings(r.Context(), wc.WorkspaceType, wc.WorkspaceID, in.Settings, wc.UserID); err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+@@ -53,6 +86,10 @@ func (s *Server) updatePlatformSettings(w http.ResponseWriter, r *http.Request,
+ 	if !decodeJSON(w, r, &in) {
+ 		return
+ 	}
++	if err := validateSettingsPatch(in.Settings); err != nil {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "security.mfaEnabled 必须是布尔值")
++		return
++	}
+ 	if err := s.store.UpsertSettings(r.Context(), "platform", "platform_root", in.Settings, wc.UserID); err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+diff --git a/services/ky-org-service/internal/server/settings_route_test.go b/services/ky-org-service/internal/server/settings_route_test.go
+index 35c7de154cbc100483a16afccec87bebf2c8f170..624f6e6ca42d6af412b49491b96e830186c59ec6 100644
+--- a/services/ky-org-service/internal/server/settings_route_test.go
++++ b/services/ky-org-service/internal/server/settings_route_test.go
+@@ -1,6 +1,9 @@
+ package server
+ 
+-import "testing"
++import (
++	"encoding/json"
++	"testing"
++)
+ 
+ // TestSettingsWorkspaceGating documents the intended workspace gating for the
+ // Phase 1.11 endpoints via the shared typeAllowed helper.
+@@ -20,3 +23,22 @@ func TestSettingsWorkspaceGating(t *testing.T) {
+ 		t.Error("platform-only endpoint must allow platform workspace")
+ 	}
+ }
++
++func TestSettingsPatchOnlyAcceptsMFABoolean(t *testing.T) {
++	if err := validateSettingsPatch(map[string]json.RawMessage{"security": json.RawMessage(`{"mfaEnabled":true,"sessionHours":12}`)}); err != nil {
++		t.Fatalf("布尔MFA配置应被接受: %v", err)
++	}
++	for name, settings := range map[string]map[string]json.RawMessage{
++		"字符串":          {"security": json.RawMessage(`{"mfaEnabled":"true"}`)},
++		"缺失":           {"security": json.RawMessage(`{"sessionHours":12}`)},
++		"空值":           {"security": json.RawMessage(`{"mfaEnabled":null}`)},
++		"字面点号键":        {"security.mfaEnabled": json.RawMessage("true")},
++		"未知顶层键":        {"general": json.RawMessage(`{"enabled":true}`)},
++		"security非法类型": {"security": json.RawMessage(`true`)},
++		"空补丁":          {},
++	} {
++		if err := validateSettingsPatch(settings); err == nil {
++			t.Fatalf("%s应被拒绝", name)
++		}
++	}
++}
+diff --git a/services/ky-org-service/internal/server/storage_setting_handlers.go b/services/ky-org-service/internal/server/storage_setting_handlers.go
+index ff23b46da65237df426fa548fb59bb05535b375f..40455673a9b9c02c331d5b2511bb4d4e790ee9b7 100644
+--- a/services/ky-org-service/internal/server/storage_setting_handlers.go
++++ b/services/ky-org-service/internal/server/storage_setting_handlers.go
+@@ -2,7 +2,11 @@ package server
+ 
+ import (
+ 	"context"
++	"crypto/rand"
++	"fmt"
+ 	"net/http"
++	"os"
++	"path/filepath"
+ 	"strings"
+ 	"time"
+ 
+@@ -11,17 +15,41 @@ import (
+ 	"github.com/minio/minio-go/v7/pkg/credentials"
+ )
+ 
++var storageProviders = map[string]struct{}{"local": {}, "minio": {}, "oss": {}}
++
++func validStorageProvider(key string) bool { _, ok := storageProviders[key]; return ok }
++
++func ensureLocalStorageDirectory(path string) error {
++	if err := os.MkdirAll(path, 0750); err != nil {
++		return fmt.Errorf("目录创建失败: %w", err)
++	}
++	probe, err := os.CreateTemp(path, ".kww-storage-permission-")
++	if err != nil {
++		return fmt.Errorf("目录无读写权限: %w", err)
++	}
++	probeName := probe.Name()
++	if err := probe.Close(); err != nil {
++		_ = os.Remove(probeName)
++		return fmt.Errorf("目录写入检查失败: %w", err)
++	}
++	if err := os.Remove(probeName); err != nil {
++		return fmt.Errorf("目录清理检查失败: %w", err)
++	}
++	return nil
++}
++
+ func (s *Server) getStorageSetting(w http.ResponseWriter, r *http.Request, wc wsContext) {
+-	st, err := s.store.GetStorageSetting(r.Context())
++	settings, err := s.store.GetStorageSettings(r.Context())
+ 	if err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+ 	}
+-	writeData(w, r, st) // SecretEncrypted is json:"-"; only hasSecret is exposed
++	writeData(w, r, settings)
+ }
+ 
+ type storageSettingInput struct {
+ 	ProviderKey     string `json:"providerKey"`
++	LocalDirectory  string `json:"localDirectory"`
+ 	Endpoint        string `json:"endpoint"`
+ 	Region          string `json:"region"`
+ 	Bucket          string `json:"bucket"`
+@@ -30,7 +58,7 @@ type storageSettingInput struct {
+ 	Prefix          string `json:"prefix"`
+ 	PublicDomain    string `json:"publicDomain"`
+ 	AccessKeyID     string `json:"accessKeyId"`
+-	SecretAccessKey string `json:"secretAccessKey"` // optional; empty keeps existing
++	SecretAccessKey string `json:"secretAccessKey"`
+ }
+ 
+ func (s *Server) updateStorageSetting(w http.ResponseWriter, r *http.Request, wc wsContext) {
+@@ -39,8 +67,25 @@ func (s *Server) updateStorageSetting(w http.ResponseWriter, r *http.Request, wc
+ 		return
+ 	}
+ 	provider := strings.TrimSpace(in.ProviderKey)
+-	if provider == "" {
+-		provider = "s3"
++	if provider == "s3" {
++		provider = "minio"
++	}
++	if !validStorageProvider(provider) {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "存储类型无效")
++		return
++	}
++	if provider == "local" {
++		if strings.TrimSpace(in.LocalDirectory) == "" {
++			writeError(w, r, http.StatusBadRequest, "validation_error", "请输入存储目录")
++			return
++		}
++		if err := ensureLocalStorageDirectory(strings.TrimSpace(in.LocalDirectory)); err != nil {
++			writeError(w, r, http.StatusBadRequest, "storage_directory_unavailable", err.Error())
++			return
++		}
++	} else if strings.TrimSpace(in.Endpoint) == "" || strings.TrimSpace(in.Bucket) == "" {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "请输入 Endpoint 与 Bucket")
++		return
+ 	}
+ 	secretEnc := ""
+ 	if strings.TrimSpace(in.SecretAccessKey) != "" {
+@@ -55,36 +100,69 @@ func (s *Server) updateStorageSetting(w http.ResponseWriter, r *http.Request, wc
+ 		}
+ 		secretEnc = enc
+ 	}
+-	st := store.StorageSetting{
+-		ProviderKey: provider, Endpoint: strings.TrimSpace(in.Endpoint), Region: strings.TrimSpace(in.Region),
+-		Bucket: strings.TrimSpace(in.Bucket), BucketPrivate: in.BucketPrivate, ForcePathStyle: in.ForcePathStyle,
+-		Prefix: strings.TrimSpace(in.Prefix), PublicDomain: strings.TrimSpace(in.PublicDomain),
+-		AccessKeyID: strings.TrimSpace(in.AccessKeyID),
+-	}
++	st := store.StorageSetting{ProviderKey: provider, LocalDirectory: strings.TrimSpace(in.LocalDirectory), Endpoint: strings.TrimSpace(in.Endpoint), Region: strings.TrimSpace(in.Region), Bucket: strings.TrimSpace(in.Bucket), BucketPrivate: in.BucketPrivate, ForcePathStyle: in.ForcePathStyle, Prefix: strings.TrimSpace(in.Prefix), PublicDomain: strings.TrimSpace(in.PublicDomain), AccessKeyID: strings.TrimSpace(in.AccessKeyID)}
+ 	if err := s.store.UpsertStorageSetting(r.Context(), st, secretEnc, wc.UserID); err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+ 	}
+-	s.audit(r.Context(), r, wc, "storage_setting.updated", "storage_setting", "default", nil)
+-	out, err := s.store.GetStorageSetting(r.Context())
++	s.audit(r.Context(), r, wc, "storage_setting.updated", "storage_setting", provider, nil)
++	s.writeStorageSettings(w, r)
++}
++
++func (s *Server) writeStorageSettings(w http.ResponseWriter, r *http.Request) {
++	settings, err := s.store.GetStorageSettings(r.Context())
++	if err != nil {
++		writeStoreError(w, r, err)
++		return
++	}
++	writeData(w, r, settings)
++}
++
++func (s *Server) activateStorageProvider(w http.ResponseWriter, r *http.Request, wc wsContext) {
++	var in struct {
++		ProviderKey string `json:"providerKey"`
++	}
++	if !decodeJSON(w, r, &in) || !validStorageProvider(in.ProviderKey) {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "存储类型无效")
++		return
++	}
++	settings, err := s.store.GetStorageSettings(r.Context())
+ 	if err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+ 	}
+-	writeData(w, r, out)
++	st := settings.Providers[in.ProviderKey]
++	if in.ProviderKey == "local" && strings.TrimSpace(st.LocalDirectory) == "" || in.ProviderKey != "local" && (st.Endpoint == "" || st.Bucket == "" || st.AccessKeyID == "" || !st.HasSecret) {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "请先完整保存当前存储配置")
++		return
++	}
++	if st.LastTestStatus != "success" || st.ConfigFingerprint == "" || st.TestFingerprint == "" || st.ConfigFingerprint != st.TestFingerprint {
++		writeError(w, r, http.StatusBadRequest, "storage_not_tested", "请先测试连接成功后再设为当前存储")
++		return
++	}
++	if in.ProviderKey == "local" {
++		if err := ensureLocalStorageDirectory(st.LocalDirectory); err != nil {
++			writeError(w, r, http.StatusBadRequest, "storage_directory_unavailable", err.Error())
++			return
++		}
++	}
++	if err := s.store.SetActiveStorageProvider(r.Context(), in.ProviderKey, wc.UserID); err != nil {
++		writeStoreError(w, r, err)
++		return
++	}
++	s.audit(r.Context(), r, wc, "storage_setting.activated", "storage_setting", in.ProviderKey, nil)
++	s.writeStorageSettings(w, r)
+ }
+ 
+ type rotateSecretInput struct {
++	ProviderKey     string `json:"providerKey"`
+ 	SecretAccessKey string `json:"secretAccessKey"`
+ }
+ 
+ func (s *Server) rotateStorageSecret(w http.ResponseWriter, r *http.Request, wc wsContext) {
+ 	var in rotateSecretInput
+-	if !decodeJSON(w, r, &in) {
+-		return
+-	}
+-	if strings.TrimSpace(in.SecretAccessKey) == "" {
+-		writeError(w, r, http.StatusBadRequest, "validation_error", "secretAccessKey 不能为空")
++	if !decodeJSON(w, r, &in) || !validStorageProvider(in.ProviderKey) || in.ProviderKey == "local" || strings.TrimSpace(in.SecretAccessKey) == "" {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "请输入有效的云存储类型和新密钥")
+ 		return
+ 	}
+ 	if s.cipher == nil {
+@@ -96,22 +174,30 @@ func (s *Server) rotateStorageSecret(w http.ResponseWriter, r *http.Request, wc
+ 		writeError(w, r, http.StatusInternalServerError, "internal_error", "密钥加密失败")
+ 		return
+ 	}
+-	if err := s.store.RotateStorageSecret(r.Context(), enc, wc.UserID); err != nil {
++	if err := s.store.RotateStorageSecret(r.Context(), in.ProviderKey, enc, wc.UserID); err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+ 	}
+-	s.audit(r.Context(), r, wc, "storage_setting.secret_rotated", "storage_setting", "default", nil)
++	s.audit(r.Context(), r, wc, "storage_setting.secret_rotated", "storage_setting", in.ProviderKey, nil)
+ 	writeData(w, r, map[string]any{"hasSecret": true})
+ }
+ 
+ type storageTestResult struct {
+ 	OK           bool   `json:"ok"`
+ 	LatencyMs    int64  `json:"latencyMs"`
++	ErrorCode    string `json:"errorCode,omitempty"`
+ 	ErrorMessage string `json:"errorMessage,omitempty"`
+ }
+ 
+ func (s *Server) testStorageSetting(w http.ResponseWriter, r *http.Request, wc wsContext) {
+-	st, err := s.store.GetStorageSetting(r.Context())
++	var in struct {
++		ProviderKey string `json:"providerKey"`
++	}
++	if !decodeJSON(w, r, &in) || !validStorageProvider(in.ProviderKey) {
++		writeError(w, r, http.StatusBadRequest, "validation_error", "请选择存储类型")
++		return
++	}
++	st, err := s.store.GetStorageSetting(r.Context(), in.ProviderKey)
+ 	if err != nil {
+ 		writeStoreError(w, r, err)
+ 		return
+@@ -121,57 +207,57 @@ func (s *Server) testStorageSetting(w http.ResponseWriter, r *http.Request, wc w
+ 	if result.OK {
+ 		status = "success"
+ 	}
+-	_ = s.store.RecordStorageTest(r.Context(), status, result.ErrorMessage)
+-	s.audit(r.Context(), r, wc, "storage_setting.tested", "storage_setting", "default", map[string]any{"ok": result.OK})
++	_ = s.store.RecordStorageTest(r.Context(), in.ProviderKey, status, result.ErrorMessage)
++	s.audit(r.Context(), r, wc, "storage_setting.tested", "storage_setting", in.ProviderKey, map[string]any{"ok": result.OK})
+ 	writeData(w, r, result)
+ }
+ 
+ func (s *Server) runStorageTest(ctx context.Context, st store.StorageSetting) storageTestResult {
++	start := time.Now()
++	if st.ProviderKey == "local" {
++		if st.LocalDirectory == "" {
++			return storageTestResult{ErrorCode: "directory_missing", ErrorMessage: "请先填写存储目录"}
++		}
++		if err := ensureLocalStorageDirectory(st.LocalDirectory); err != nil {
++			return storageTestResult{ErrorCode: "write_failed", ErrorMessage: err.Error()}
++		}
++		var token [16]byte
++		_, _ = rand.Read(token[:])
++		path := filepath.Join(st.LocalDirectory, ".kww-write-test-"+fmt.Sprintf("%x", token))
++		if err := os.WriteFile(path, []byte("kww-storage-test"), 0600); err != nil {
++			return storageTestResult{ErrorCode: "write_failed", ErrorMessage: "测试写入失败"}
++		}
++		_ = os.Remove(path)
++		return storageTestResult{OK: true, LatencyMs: time.Since(start).Milliseconds()}
++	}
+ 	if st.Endpoint == "" || st.Bucket == "" {
+-		return storageTestResult{ErrorMessage: "请先填写 Endpoint 与 Bucket"}
++		return storageTestResult{ErrorCode: "config_missing", ErrorMessage: "请先填写 Endpoint 与 Bucket"}
+ 	}
+ 	if st.AccessKeyID == "" || st.SecretEncrypted == "" {
+-		return storageTestResult{ErrorMessage: "请先配置 AccessKey / SecretKey"}
++		return storageTestResult{ErrorCode: "secret_missing", ErrorMessage: "请先配置 AccessKey 与密钥"}
+ 	}
+ 	if s.cipher == nil {
+-		return storageTestResult{ErrorMessage: "密钥服务未启用,无法测试"}
++		return storageTestResult{ErrorCode: "secret_unconfigured", ErrorMessage: "密钥服务未启用,无法测试"}
+ 	}
+ 	secret, err := s.cipher.Decrypt(st.SecretEncrypted)
+ 	if err != nil {
+-		return storageTestResult{ErrorMessage: "SecretKey 解密失败,请重新配置"}
++		return storageTestResult{ErrorCode: "secret_invalid", ErrorMessage: "密钥解密失败,请重新配置"}
+ 	}
+-
+-	endpoint := st.Endpoint
+-	secure := true
+-	if strings.HasPrefix(endpoint, "https://") {
+-		endpoint = strings.TrimPrefix(endpoint, "https://")
+-	} else if strings.HasPrefix(endpoint, "http://") {
+-		endpoint = strings.TrimPrefix(endpoint, "http://")
+-		secure = false
+-	}
+-	endpoint = strings.TrimRight(endpoint, "/")
+-
+-	client, err := minio.New(endpoint, &minio.Options{
+-		Creds:        credentials.NewStaticV4(st.AccessKeyID, secret, ""),
+-		Secure:       secure,
+-		Region:       st.Region,
+-		BucketLookup: bucketLookup(st.ForcePathStyle),
+-	})
++	endpoint := strings.TrimRight(strings.TrimPrefix(strings.TrimPrefix(st.Endpoint, "https://"), "http://"), "/")
++	client, err := minio.New(endpoint, &minio.Options{Creds: credentials.NewStaticV4(st.AccessKeyID, secret, ""), Secure: strings.HasPrefix(st.Endpoint, "https://"), Region: st.Region, BucketLookup: bucketLookup(st.ForcePathStyle)})
+ 	if err != nil {
+-		return storageTestResult{ErrorMessage: "客户端初始化失败:" + err.Error()}
++		return storageTestResult{ErrorCode: "connection_failed", ErrorMessage: "连接初始化失败"}
+ 	}
+ 	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+ 	defer cancel()
+-	start := time.Now()
+ 	exists, err := client.BucketExists(reqCtx, st.Bucket)
+-	latency := time.Since(start).Milliseconds()
+ 	if err != nil {
+-		return storageTestResult{LatencyMs: latency, ErrorMessage: "连接失败:" + err.Error()}
++		return storageTestResult{LatencyMs: time.Since(start).Milliseconds(), ErrorCode: "connection_failed", ErrorMessage: "连接失败或无权限"}
+ 	}
+ 	if !exists {
+-		return storageTestResult{LatencyMs: latency, ErrorMessage: "凭据有效,但 Bucket 不存在或无权限"}
++		return storageTestResult{LatencyMs: time.Since(start).Milliseconds(), ErrorCode: "bucket_missing", ErrorMessage: "Bucket 不存在"}
+ 	}
+-	return storageTestResult{OK: true, LatencyMs: latency}
++	return storageTestResult{OK: true, LatencyMs: time.Since(start).Milliseconds()}
+ }
+ 
+ func bucketLookup(forcePathStyle bool) minio.BucketLookupType {
+diff --git a/services/ky-org-service/internal/store/platform_profile_store.go b/services/ky-org-service/internal/store/platform_profile_store.go
+index 212dfce1615eb3b9c61034926bb2401d5febcff3..0ad0da062bc1cb356e9adf93d87bed66e89e3e9b 100644
+--- a/services/ky-org-service/internal/store/platform_profile_store.go
++++ b/services/ky-org-service/internal/store/platform_profile_store.go
+@@ -8,21 +8,56 @@ import (
+ 
+ // PlatformProfile is the platform-level basic info (singleton).
+ type PlatformProfile struct {
+-	CompanyName        string `json:"companyName"`
+-	BrandLogoTextLong  string `json:"brandLogoTextLong"`
+-	BrandLogoTextShort string `json:"brandLogoTextShort"`
+-	ICPRecord          string `json:"icpRecord"`
+-	UpdatedAt          string `json:"updatedAt,omitempty"`
++	CompanyName         string `json:"companyName"`
++	BrandLogoTextLong   string `json:"brandLogoTextLong"`
++	BrandLogoTextShort  string `json:"brandLogoTextShort"`
++	LongLogoFontSize    int    `json:"longLogoFontSize"`
++	LongLogoFontFamily  string `json:"longLogoFontFamily"`
++	LongLogoFontWeight  int    `json:"longLogoFontWeight"`
++	ShortLogoFontSize   int    `json:"shortLogoFontSize"`
++	ShortLogoFontFamily string `json:"shortLogoFontFamily"`
++	ShortLogoFontWeight int    `json:"shortLogoFontWeight"`
++	ICPRecord           string `json:"icpRecord"`
++	UpdatedAt           string `json:"updatedAt,omitempty"`
++}
++
++func normalizePlatformProfile(p *PlatformProfile) {
++	if p.LongLogoFontSize == 0 {
++		p.LongLogoFontSize = 16
++	}
++	if p.LongLogoFontFamily == "" {
++		p.LongLogoFontFamily = "system"
++	}
++	if p.LongLogoFontWeight == 0 {
++		p.LongLogoFontWeight = 600
++	}
++	if p.ShortLogoFontSize == 0 {
++		p.ShortLogoFontSize = 14
++	}
++	if p.ShortLogoFontFamily == "" {
++		p.ShortLogoFontFamily = "system"
++	}
++	if p.ShortLogoFontWeight == 0 {
++		p.ShortLogoFontWeight = 600
++	}
+ }
+ 
+ func (s *Store) GetPlatformProfile(ctx context.Context) (PlatformProfile, error) {
+ 	var p PlatformProfile
+ 	var updatedAt sql.NullTime
+ 	err := s.db.QueryRowContext(ctx,
+-		`SELECT company_name, brand_logo_text_long, brand_logo_text_short, icp_record, updated_at FROM ky_platform_profile WHERE id='default'`,
+-	).Scan(&p.CompanyName, &p.BrandLogoTextLong, &p.BrandLogoTextShort, &p.ICPRecord, &updatedAt)
++		`SELECT company_name, brand_logo_text_long, brand_logo_text_short,
++			long_logo_font_size, long_logo_font_family, long_logo_font_weight,
++			short_logo_font_size, short_logo_font_family, short_logo_font_weight,
++			icp_record, updated_at FROM ky_platform_profile WHERE id='default'`,
++	).Scan(&p.CompanyName, &p.BrandLogoTextLong, &p.BrandLogoTextShort,
++		&p.LongLogoFontSize, &p.LongLogoFontFamily, &p.LongLogoFontWeight,
++		&p.ShortLogoFontSize, &p.ShortLogoFontFamily, &p.ShortLogoFontWeight,
++		&p.ICPRecord, &updatedAt)
+ 	if err == sql.ErrNoRows {
+-		return PlatformProfile{}, nil
++		p = PlatformProfile{}
++		normalizePlatformProfile(&p)
++		return p, nil
+ 	}
+ 	if err != nil {
+ 		return PlatformProfile{}, err
+@@ -30,20 +65,30 @@ func (s *Store) GetPlatformProfile(ctx context.Context) (PlatformProfile, error)
+ 	if updatedAt.Valid {
+ 		p.UpdatedAt = updatedAt.Time.Format(time.RFC3339)
+ 	}
++	normalizePlatformProfile(&p)
+ 	return p, nil
+ }
+ 
+-func (s *Store) UpsertPlatformProfile(ctx context.Context, companyName, brandLogoTextLong, brandLogoTextShort, icpRecord, updatedBy string) error {
++func (s *Store) UpsertPlatformProfile(ctx context.Context, companyName, brandLogoTextLong, brandLogoTextShort string, longLogoFontSize int, longLogoFontFamily string, longLogoFontWeight int, shortLogoFontSize int, shortLogoFontFamily string, shortLogoFontWeight int, icpRecord, updatedBy string) error {
+ 	_, err := s.db.ExecContext(ctx, `
+-		INSERT INTO ky_platform_profile (id, company_name, brand_logo_text_long, brand_logo_text_short, icp_record, updated_by, updated_at)
+-		VALUES ('default', $1, $2, $3, $4, $5, now())
++		INSERT INTO ky_platform_profile (id, company_name, brand_logo_text_long, brand_logo_text_short,
++			long_logo_font_size, long_logo_font_family, long_logo_font_weight,
++			short_logo_font_size, short_logo_font_family, short_logo_font_weight,
++			icp_record, updated_by, updated_at)
++		VALUES ('default', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
+ 		ON CONFLICT (id) DO UPDATE SET
+ 			company_name=$1,
+ 			brand_logo_text_long=$2,
+ 			brand_logo_text_short=$3,
+-			icp_record=$4,
+-			updated_by=$5,
++			long_logo_font_size=$4,
++			long_logo_font_family=$5,
++			long_logo_font_weight=$6,
++			short_logo_font_size=$7,
++			short_logo_font_family=$8,
++			short_logo_font_weight=$9,
++			icp_record=$10,
++			updated_by=$11,
+ 			updated_at=now()
+-	`, companyName, brandLogoTextLong, brandLogoTextShort, icpRecord, nullStr(updatedBy))
++	`, companyName, brandLogoTextLong, brandLogoTextShort, longLogoFontSize, longLogoFontFamily, longLogoFontWeight, shortLogoFontSize, shortLogoFontFamily, shortLogoFontWeight, icpRecord, nullStr(updatedBy))
+ 	return err
+ }
+diff --git a/services/ky-org-service/internal/store/settings_store.go b/services/ky-org-service/internal/store/settings_store.go
+index 183aae0852d5fe819f205c19aae197b2a5b3fa2c..75d7696634fa1467d3ef57558a78e901035ed14a 100644
+--- a/services/ky-org-service/internal/store/settings_store.go
++++ b/services/ky-org-service/internal/store/settings_store.go
+@@ -3,8 +3,6 @@ package store
+ import (
+ 	"context"
+ 	"encoding/json"
+-	"strconv"
+-	"strings"
+ )
+ 
+ // GetSettings returns all settings for a scope as setting_key -> raw jsonb value.
+@@ -35,9 +33,8 @@ func (s *Store) GetSettings(ctx context.Context, scopeType, scopeID, section str
+ 	return out, rows.Err()
+ }
+ 
+-// UpsertSettings replaces the scope's settings with the provided set: keys absent
+-// from `settings` are deleted (so removals — including deleting all — persist), and
+-// the provided keys are inserted/updated.
++// UpsertSettings merges the provided settings. Omitted keys remain unchanged so
++// a partial configuration editor cannot delete hidden settings.
+ func (s *Store) UpsertSettings(ctx context.Context, scopeType, scopeID string, settings map[string]json.RawMessage, updatedBy string) error {
+ 	tx, err := s.db.BeginTx(ctx, nil)
+ 	if err != nil {
+@@ -45,24 +42,6 @@ func (s *Store) UpsertSettings(ctx context.Context, scopeType, scopeID string, s
+ 	}
+ 	defer func() { _ = tx.Rollback() }()
+ 
+-	if len(settings) == 0 {
+-		if _, err := tx.ExecContext(ctx, `DELETE FROM ky_system_setting WHERE scope_type=$1 AND scope_id=$2`, scopeType, scopeID); err != nil {
+-			return err
+-		}
+-	} else {
+-		args := []any{scopeType, scopeID}
+-		placeholders := make([]string, 0, len(settings))
+-		for key := range settings {
+-			args = append(args, key)
+-			placeholders = append(placeholders, "$"+strconv.Itoa(len(args)))
+-		}
+-		if _, err := tx.ExecContext(ctx,
+-			`DELETE FROM ky_system_setting WHERE scope_type=$1 AND scope_id=$2 AND setting_key NOT IN (`+strings.Join(placeholders, ",")+`)`,
+-			args...); err != nil {
+-			return err
+-		}
+-	}
+-
+ 	for key, value := range settings {
+ 		if len(value) == 0 {
+ 			value = json.RawMessage("null")
+diff --git a/services/ky-org-service/internal/store/storage_setting_store.go b/services/ky-org-service/internal/store/storage_setting_store.go
+index 543c25240285848c0dbc4acf1de236329503a17d..3ba1b9c4e4104d5e07a3e0a62ee06d93c521a959 100644
+--- a/services/ky-org-service/internal/store/storage_setting_store.go
++++ b/services/ky-org-service/internal/store/storage_setting_store.go
+@@ -2,44 +2,49 @@ package store
+ 
+ import (
+ 	"context"
++	"crypto/sha256"
+ 	"database/sql"
++	"encoding/hex"
++	"fmt"
+ 	"time"
+ )
+ 
+-// StorageSetting is the S3-compatible object storage config (singleton). The
+-// secret access key is stored encrypted; SecretEncrypted is internal-only.
++// StorageSetting is one provider's persisted configuration. SecretEncrypted is
++// internal-only and is never serialized in API responses.
+ type StorageSetting struct {
+-	ProviderKey     string `json:"providerKey"`
+-	Endpoint        string `json:"endpoint"`
+-	Region          string `json:"region"`
+-	Bucket          string `json:"bucket"`
+-	BucketPrivate   bool   `json:"bucketPrivate"`
+-	ForcePathStyle  bool   `json:"forcePathStyle"`
+-	Prefix          string `json:"prefix"`
+-	PublicDomain    string `json:"publicDomain"`
+-	AccessKeyID     string `json:"accessKeyId"`
+-	HasSecret       bool   `json:"hasSecret"`
+-	LastTestAt      string `json:"lastTestAt,omitempty"`
+-	LastTestStatus  string `json:"lastTestStatus"`
+-	LastTestMessage string `json:"lastTestMessage,omitempty"`
+-	UpdatedAt       string `json:"updatedAt,omitempty"`
++	ProviderKey       string `json:"providerKey"`
++	LocalDirectory    string `json:"localDirectory,omitempty"`
++	Endpoint          string `json:"endpoint"`
++	Region            string `json:"region"`
++	Bucket            string `json:"bucket"`
++	BucketPrivate     bool   `json:"bucketPrivate"`
++	ForcePathStyle    bool   `json:"forcePathStyle"`
++	Prefix            string `json:"prefix"`
++	PublicDomain      string `json:"publicDomain"`
++	AccessKeyID       string `json:"accessKeyId"`
++	HasSecret         bool   `json:"hasSecret"`
++	LastTestAt        string `json:"lastTestAt,omitempty"`
++	LastTestStatus    string `json:"lastTestStatus"`
++	LastTestMessage   string `json:"lastTestMessage,omitempty"`
++	ConfigFingerprint string `json:"-"`
++	TestFingerprint   string `json:"-"`
++	UpdatedAt         string `json:"updatedAt,omitempty"`
++	SecretEncrypted   string `json:"-"`
++}
+ 
+-	SecretEncrypted string `json:"-"`
++type StorageSettings struct {
++	ActiveStorageProvider string                    `json:"activeStorageProvider"`
++	Providers             map[string]StorageSetting `json:"providers"`
+ }
+ 
+-func (s *Store) GetStorageSetting(ctx context.Context) (StorageSetting, error) {
++const defaultStorageProvider = "local"
++
++func (s *Store) scanStorageSetting(row *sql.Row) (StorageSetting, error) {
+ 	var st StorageSetting
+ 	var lastTestAt, updatedAt sql.NullTime
+-	err := s.db.QueryRowContext(ctx, `
+-		SELECT provider_key, endpoint, region, bucket, bucket_private, force_path_style, prefix, public_domain,
+-		       access_key_id, secret_access_key_encrypted, last_test_status, last_test_message, last_test_at, updated_at
+-		FROM ky_storage_setting WHERE id='default'`).Scan(
+-		&st.ProviderKey, &st.Endpoint, &st.Region, &st.Bucket, &st.BucketPrivate, &st.ForcePathStyle,
+-		&st.Prefix, &st.PublicDomain, &st.AccessKeyID, &st.SecretEncrypted, &st.LastTestStatus, &st.LastTestMessage,
+-		&lastTestAt, &updatedAt)
+-	if err == sql.ErrNoRows {
+-		return StorageSetting{}, nil
+-	}
++	err := row.Scan(&st.ProviderKey, &st.LocalDirectory, &st.Endpoint, &st.Region, &st.Bucket, &st.BucketPrivate,
++		&st.ForcePathStyle, &st.Prefix, &st.PublicDomain, &st.AccessKeyID, &st.SecretEncrypted,
++		&st.LastTestStatus, &st.LastTestMessage, &st.ConfigFingerprint, &st.TestFingerprint, &lastTestAt, &updatedAt)
+ 	if err != nil {
+ 		return StorageSetting{}, err
+ 	}
+@@ -53,33 +58,92 @@ func (s *Store) GetStorageSetting(ctx context.Context) (StorageSetting, error) {
+ 	return st, nil
+ }
+ 
+-// UpsertStorageSetting updates config. If secretEncrypted is empty the existing
+-// secret is preserved (PATCH-keep semantics).
++func (s *Store) GetStorageSettings(ctx context.Context) (StorageSettings, error) {
++	providers := map[string]StorageSetting{}
++	for _, key := range []string{"local", "minio", "oss"} {
++		st, err := s.scanStorageSetting(s.db.QueryRowContext(ctx, `
++			SELECT provider_key, local_directory, endpoint, region, bucket, bucket_private, force_path_style,
++			       prefix, public_domain, access_key_id, secret_access_key_encrypted,
++			       last_test_status, last_test_message, config_fingerprint, last_test_fingerprint, last_test_at, updated_at
++			FROM ky_storage_setting WHERE id=$1`, key))
++		if err == sql.ErrNoRows {
++			st = StorageSetting{ProviderKey: key, BucketPrivate: true}
++		} else if err != nil {
++			return StorageSettings{}, err
++		}
++		st.ProviderKey = key
++		providers[key] = st
++	}
++	var active string
++	err := s.db.QueryRowContext(ctx, `SELECT active_storage_provider FROM ky_storage_setting WHERE id='default'`).Scan(&active)
++	if err == sql.ErrNoRows || active == "" {
++		active = defaultStorageProvider
++	} else if err != nil {
++		return StorageSettings{}, err
++	}
++	return StorageSettings{ActiveStorageProvider: active, Providers: providers}, nil
++}
++
++func (s *Store) GetStorageSetting(ctx context.Context, provider string) (StorageSetting, error) {
++	all, err := s.GetStorageSettings(ctx)
++	if err != nil {
++		return StorageSetting{}, err
++	}
++	st, ok := all.Providers[provider]
++	if !ok {
++		return StorageSetting{}, sql.ErrNoRows
++	}
++	return st, nil
++}
++
+ func (s *Store) UpsertStorageSetting(ctx context.Context, st StorageSetting, secretEncrypted, updatedBy string) error {
++	if secretEncrypted == "" {
++		_ = s.db.QueryRowContext(ctx, `SELECT secret_access_key_encrypted FROM ky_storage_setting WHERE id=$1`, st.ProviderKey).Scan(&secretEncrypted)
++	}
++	fingerprint := storageConfigFingerprint(st, secretEncrypted)
+ 	_, err := s.db.ExecContext(ctx, `
+-		INSERT INTO ky_storage_setting (id, provider_key, endpoint, region, bucket, bucket_private, force_path_style,
+-			prefix, public_domain, access_key_id, secret_access_key_encrypted, updated_by, updated_at)
+-		VALUES ('default', $1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE(NULLIF($10,''), (SELECT secret_access_key_encrypted FROM ky_storage_setting WHERE id='default')), $11, now())
++		INSERT INTO ky_storage_setting (id, provider_key, local_directory, endpoint, region, bucket, bucket_private, force_path_style,
++			prefix, public_domain, access_key_id, secret_access_key_encrypted, config_fingerprint, updated_by, updated_at)
++		VALUES ($1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE(NULLIF($11,''),''),$13,$12,now())
+ 		ON CONFLICT (id) DO UPDATE SET
+-			provider_key=$1, endpoint=$2, region=$3, bucket=$4, bucket_private=$5, force_path_style=$6,
+-			prefix=$7, public_domain=$8, access_key_id=$9,
+-			secret_access_key_encrypted=COALESCE(NULLIF($10,''), ky_storage_setting.secret_access_key_encrypted),
+-			updated_by=$11, updated_at=now()
+-	`, st.ProviderKey, st.Endpoint, st.Region, st.Bucket, st.BucketPrivate, st.ForcePathStyle,
+-		st.Prefix, st.PublicDomain, st.AccessKeyID, secretEncrypted, nullStr(updatedBy))
++			provider_key=$1, local_directory=$2, endpoint=$3, region=$4, bucket=$5, bucket_private=$6,
++			force_path_style=$7, prefix=$8, public_domain=$9, access_key_id=$10,
++			secret_access_key_encrypted=COALESCE(NULLIF($11,''), ky_storage_setting.secret_access_key_encrypted),
++			config_fingerprint=$13, last_test_fingerprint='', last_test_status='', last_test_message='', last_test_at=NULL,
++			updated_by=$12, updated_at=now()
++	`, st.ProviderKey, st.LocalDirectory, st.Endpoint, st.Region, st.Bucket, st.BucketPrivate, st.ForcePathStyle,
++		st.Prefix, st.PublicDomain, st.AccessKeyID, secretEncrypted, nullStr(updatedBy), fingerprint)
+ 	return err
+ }
+ 
+-func (s *Store) RotateStorageSecret(ctx context.Context, secretEncrypted, updatedBy string) error {
+-	_, err := s.db.ExecContext(ctx,
+-		`UPDATE ky_storage_setting SET secret_access_key_encrypted=$1, updated_by=$2, updated_at=now() WHERE id='default'`,
+-		secretEncrypted, nullStr(updatedBy))
++func (s *Store) SetActiveStorageProvider(ctx context.Context, provider, updatedBy string) error {
++	_, err := s.db.ExecContext(ctx, `UPDATE ky_storage_setting SET active_storage_provider=$1, updated_by=$2, updated_at=now() WHERE id='default'`, provider, nullStr(updatedBy))
+ 	return err
+ }
+ 
+-func (s *Store) RecordStorageTest(ctx context.Context, status, message string) error {
++func (s *Store) RotateStorageSecret(ctx context.Context, provider, secretEncrypted, updatedBy string) error {
++	st, err := s.GetStorageSetting(ctx, provider)
++	if err != nil {
++		return err
++	}
++	fingerprint := storageConfigFingerprint(st, secretEncrypted)
++	_, err = s.db.ExecContext(ctx,
++		`UPDATE ky_storage_setting SET secret_access_key_encrypted=$1, config_fingerprint=$2, last_test_fingerprint='', last_test_status='', last_test_message='', last_test_at=NULL, updated_by=$3, updated_at=now() WHERE id=$4`,
++		secretEncrypted, fingerprint, nullStr(updatedBy), provider)
++	return err
++}
++
++func (s *Store) RecordStorageTest(ctx context.Context, provider, status, message string) error {
+ 	_, err := s.db.ExecContext(ctx,
+-		`UPDATE ky_storage_setting SET last_test_at=now(), last_test_status=$1, last_test_message=$2 WHERE id='default'`,
+-		status, message)
++		`UPDATE ky_storage_setting SET last_test_at=now(), last_test_status=$1, last_test_message=$2, last_test_fingerprint=CASE WHEN $1='success' THEN config_fingerprint ELSE '' END WHERE id=$3`,
++		status, message, provider)
+ 	return err
+ }
++
++func storageConfigFingerprint(st StorageSetting, secretEncrypted string) string {
++	payload := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%t\x00%s\x00%s\x00%s\x00%s",
++		st.ProviderKey, st.LocalDirectory, st.Endpoint, st.Region, st.Bucket, st.BucketPrivate,
++		st.ForcePathStyle, st.Prefix, st.PublicDomain, st.AccessKeyID, secretEncrypted)
++	sum := sha256.Sum256([]byte(payload))
++	return hex.EncodeToString(sum[:])
++}

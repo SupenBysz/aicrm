@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Skeleton, Space, Typography, message } from "antd";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { App as AntdApp, Button, Divider, Form, Skeleton, Space, Switch, Tabs, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DetailPagePanel, useCurrentWorkspace, useRequestClient, usePermissions } from "@ky/admin-core";
+import { ListPageCard, useCurrentWorkspace, useRequestClient, usePermissions } from "@ky/admin-core";
 import {
   getOrgSettings,
   getPlatformSettings,
@@ -11,18 +10,17 @@ import {
   type SettingsMap
 } from "../api";
 
-interface Entry {
-  key: string;
-  value: string;
-}
-
 export function SettingsPage() {
+  const { message } = AntdApp.useApp();
   const client = useRequestClient();
   const workspace = useCurrentWorkspace();
   const permissions = usePermissions();
   const queryClient = useQueryClient();
   const isPlatform = workspace?.type === "platform";
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [securitySettings, setSecuritySettings] = useState<Record<string, unknown>>({});
+  const [invalidMfaValue, setInvalidMfaValue] = useState(false);
+  const [compactTabs, setCompactTabs] = useState(false);
 
   const canUpdate = permissions.canAny(["platform.settings.update", "agency.settings.update", "enterprise.settings.update"]);
 
@@ -32,10 +30,42 @@ export function SettingsPage() {
   });
 
   useEffect(() => {
-    if (data?.settings) {
-      setEntries(Object.entries(data.settings).map(([key, value]) => ({ key, value: String(value) })));
+    if (!data?.settings) return;
+    const rawSecurity = data.settings.security;
+    if (rawSecurity === undefined) {
+      setSecuritySettings({});
+      setMfaEnabled(false);
+      setInvalidMfaValue(false);
+    } else {
+      if (!rawSecurity || typeof rawSecurity !== "object" || Array.isArray(rawSecurity)) {
+        setSecuritySettings({});
+        setMfaEnabled(false);
+        setInvalidMfaValue(true);
+        return;
+      }
+      const nextSecurity = rawSecurity as Record<string, unknown>;
+      const value = nextSecurity.mfaEnabled;
+      setSecuritySettings({ ...nextSecurity });
+      if (value === undefined) {
+        setMfaEnabled(false);
+        setInvalidMfaValue(false);
+      } else if (typeof value === "boolean") {
+        setMfaEnabled(value);
+        setInvalidMfaValue(false);
+      } else {
+        setMfaEnabled(false);
+        setInvalidMfaValue(true);
+      }
     }
   }, [data]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 640px)");
+    const update = () => setCompactTabs(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const saveMutation = useMutation({
     mutationFn: (settings: SettingsMap) =>
@@ -48,66 +78,54 @@ export function SettingsPage() {
   });
 
   function save() {
-    const map: SettingsMap = {};
-    for (const entry of entries) {
-      const key = entry.key.trim();
-      if (key) map[key] = entry.value;
+    if (invalidMfaValue) {
+      message.error("security.mfaEnabled 必须是布尔值，未保存。");
+      return;
     }
-    saveMutation.mutate(map);
+    saveMutation.mutate({ security: { ...securitySettings, mfaEnabled } });
   }
 
   return (
-    <DetailPagePanel
-      title={isPlatform ? "平台系统设置" : "组织设置"}
-      extra={
-        canUpdate ? (
-          <Button type="primary" loading={saveMutation.isPending} onClick={save}>
-            保存
-          </Button>
-        ) : null
-      }
-    >
+    <ListPageCard title="参数配置" subtitle="管理平台与组织安全参数。">
       {isLoading ? (
         <Skeleton active />
       ) : (
-        <Space direction="vertical" size={12} style={{ width: "100%", maxWidth: 720 }}>
-          <Typography.Text type="secondary">键值对形式的配置项，保存即覆盖。</Typography.Text>
-          {entries.map((entry, index) => (
-            <Space key={index} align="start" style={{ width: "100%" }}>
-              <Input
-                placeholder="配置键"
-                style={{ width: 220 }}
-                value={entry.key}
-                disabled={!canUpdate}
-                onChange={(event) =>
-                  setEntries((list) => list.map((e, i) => (i === index ? { ...e, key: event.target.value } : e)))
-                }
-              />
-              <Input
-                placeholder="配置值"
-                style={{ width: 360 }}
-                value={entry.value}
-                disabled={!canUpdate}
-                onChange={(event) =>
-                  setEntries((list) => list.map((e, i) => (i === index ? { ...e, value: event.target.value } : e)))
-                }
-              />
-              {canUpdate ? (
-                <Button
-                  type="text"
-                  icon={<DeleteOutlined />}
-                  onClick={() => setEntries((list) => list.filter((_, i) => i !== index))}
-                />
-              ) : null}
-            </Space>
-          ))}
-          {canUpdate ? (
-            <Button icon={<PlusOutlined />} onClick={() => setEntries((list) => [...list, { key: "", value: "" }])}>
-              新增配置项
-            </Button>
-          ) : null}
-        </Space>
+        <div style={{ padding: 16 }}>
+          <Tabs
+            className="system-settings-tabs"
+            tabPosition={compactTabs ? "top" : "left"}
+            style={{ width: "100%" }}
+            tabBarStyle={compactTabs ? undefined : { minWidth: 168 }}
+            items={[
+              {
+                key: "mfa",
+                label: "多因素认证（MFA）",
+                children: (
+                  <div style={{ width: "100%", maxWidth: 720, padding: "0 16px" }}>
+                    <Form layout="vertical">
+                      <Form.Item label="状态" extra="启用后，登录及敏感操作可按安全策略要求多因素验证。">
+                        <Space wrap>
+                          <Switch checked={mfaEnabled} disabled={!canUpdate || invalidMfaValue} onChange={setMfaEnabled} />
+                          <Typography.Text>{mfaEnabled ? "已启用" : "已关闭"}</Typography.Text>
+                        </Space>
+                      </Form.Item>
+                    </Form>
+                    {invalidMfaValue ? (
+                      <Typography.Text type="danger">security.mfaEnabled 配置值不是布尔值，无法保存。</Typography.Text>
+                    ) : null}
+                    <Divider />
+                    <Space style={{ width: "100%", justifyContent: "flex-end" }}>
+                      <Button type="primary" loading={saveMutation.isPending} disabled={!canUpdate || invalidMfaValue} onClick={save}>
+                        保存
+                      </Button>
+                    </Space>
+                  </div>
+                )
+              }
+            ]}
+          />
+        </div>
       )}
-    </DetailPagePanel>
+    </ListPageCard>
   );
 }

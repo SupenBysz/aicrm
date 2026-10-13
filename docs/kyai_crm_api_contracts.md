@@ -1666,8 +1666,9 @@ enterprise.settings.update
 ```json
 {
   "settings": {
-    "inviteExpiresDays": 7,
-    "defaultRoleId": "role_001"
+    "security": {
+      "mfaEnabled": false
+    }
   }
 }
 ```
@@ -1688,7 +1689,9 @@ platform.settings.view
 platform.settings.update
 ```
 
-说明：基础设置、安全策略、注册策略、租户策略等都通过该聚合接口按 setting key 或 `section` 参数读写，第一阶段不单独定义 `/platform/system-settings/security` 子路由。
+2026-10-13 系统配置增量升级后，平台与机构/企业 PATCH 设置接口仅接受 `settings.security` 顶层对象，且必须包含布尔 `mfaEnabled`。其他顶层键、点号字面键、字符串/null MFA 值及空补丁拒绝。GET 保留既有 JSON 设置集合；平台 GET 的 `section` 参数仍可过滤 setting key。Store 仅 upsert 提交的顶层键，不删除未提交键；security 对象仍按参考实现整体写回，不宣称已经实现叶子级 CAS。平台 MFA 值继续由既有高危操作 assurance 链消费，不等于完整登录 MFA 已实现。
+
+新增与复用接口、权限、完整字段见 [系统配置源码与接口清单](system-settings-upgrade/源码覆盖与接口清单.md)。存储 GET/PATCH 返回聚合 `{activeStorageProvider, providers:{local,minio,oss}}`；新增 `POST /api/v1/platform/storage-setting/activate`，沿用 `platform.storage.update`。保存、测试、激活、轮换明确 providerKey；云存储密钥仅输入、返回 hasSecret。公开平台资料新增六项受控 Logo 字体字段；旧更新请求省略字体字段时保留既有值。
 
 ---
 

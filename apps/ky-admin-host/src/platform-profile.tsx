@@ -5,6 +5,12 @@ export interface PlatformProfile {
   companyName: string;
   brandLogoTextLong: string;
   brandLogoTextShort: string;
+  longLogoFontSize: number;
+  longLogoFontFamily: "system" | "sans" | "serif" | "mono";
+  longLogoFontWeight: 400 | 500 | 600 | 700;
+  shortLogoFontSize: number;
+  shortLogoFontFamily: "system" | "sans" | "serif" | "mono";
+  shortLogoFontWeight: 400 | 500 | 600 | 700;
   icpRecord: string;
 }
 
@@ -20,8 +26,23 @@ interface PlatformProfileContextValue extends PlatformProfile {
   logoTextLong: string;
   /** Effective collapsed text logo. */
   logoTextShort: string;
+  logoTextLongStyle: LogoTextStyle;
+  logoTextShortStyle: LogoTextStyle;
   refresh: () => void;
 }
+
+export interface LogoTextStyle {
+  fontSize: number;
+  fontFamily: string;
+  fontWeight: 400 | 500 | 600 | 700;
+}
+
+const FONT_FAMILY_MAP: Record<PlatformProfile["longLogoFontFamily"], string> = {
+  system: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  sans: "Arial, 'Helvetica Neue', sans-serif",
+  serif: "Georgia, 'Times New Roman', serif",
+  mono: "ui-monospace, SFMono-Regular, Menlo, monospace"
+};
 
 function compactLogoText(value: string): string {
   const normalized = value.trim() || DEFAULT_PLATFORM_NAME;
@@ -35,6 +56,12 @@ function normalizeProfile(value: Partial<PlatformProfile> | null | undefined): P
     companyName: value?.companyName ?? "",
     brandLogoTextLong: value?.brandLogoTextLong ?? "",
     brandLogoTextShort: value?.brandLogoTextShort ?? "",
+    longLogoFontSize: value?.longLogoFontSize && value.longLogoFontSize >= 8 && value.longLogoFontSize <= 72 ? value.longLogoFontSize : 16,
+    longLogoFontFamily: value?.longLogoFontFamily && value.longLogoFontFamily in FONT_FAMILY_MAP ? value.longLogoFontFamily : "system",
+    longLogoFontWeight: value?.longLogoFontWeight && [400, 500, 600, 700].includes(value.longLogoFontWeight) ? value.longLogoFontWeight : 600,
+    shortLogoFontSize: value?.shortLogoFontSize && value.shortLogoFontSize >= 8 && value.shortLogoFontSize <= 72 ? value.shortLogoFontSize : 14,
+    shortLogoFontFamily: value?.shortLogoFontFamily && value.shortLogoFontFamily in FONT_FAMILY_MAP ? value.shortLogoFontFamily : "system",
+    shortLogoFontWeight: value?.shortLogoFontWeight && [400, 500, 600, 700].includes(value.shortLogoFontWeight) ? value.shortLogoFontWeight : 600,
     icpRecord: value?.icpRecord ?? ""
   };
 }
@@ -43,7 +70,17 @@ function resolveProfile(profile: PlatformProfile) {
   const name = profile.companyName.trim() || DEFAULT_PLATFORM_NAME;
   const logoTextLong = profile.brandLogoTextLong.trim() || name;
   const logoTextShort = profile.brandLogoTextShort.trim() || compactLogoText(logoTextLong || name);
-  return { logoTextLong, logoTextShort, name };
+  const logoTextLongStyle: LogoTextStyle = {
+    fontSize: profile.longLogoFontSize,
+    fontFamily: FONT_FAMILY_MAP[profile.longLogoFontFamily],
+    fontWeight: profile.longLogoFontWeight
+  };
+  const logoTextShortStyle: LogoTextStyle = {
+    fontSize: profile.shortLogoFontSize,
+    fontFamily: FONT_FAMILY_MAP[profile.shortLogoFontFamily],
+    fontWeight: profile.shortLogoFontWeight
+  };
+  return { logoTextLong, logoTextShort, logoTextLongStyle, logoTextShortStyle, name };
 }
 
 const defaultProfile = normalizeProfile(null);

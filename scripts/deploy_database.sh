@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LEDGER_FILENAME="034_migration_ledger.sql"
 BASELINE_MAX_VERSION=34
 MIGRATION_LOCK_KEY=4701196508681632081
+# Preserve this legacy file checksum; only the ledger owns its transaction.
+LEGACY_WRAPPED_FILENAME="052_plugin_management_permissions.sql"
+LEGACY_WRAPPED_SHA256="cfbedcddfa4e7a9b5721d5e542dae4548c586a8d9da85be2fb17f3499d8348d4"
 
 shopt -s nullglob
 sql_paths=("$ROOT_DIR"/ops/db/[0-9][0-9][0-9]_*.sql)
@@ -53,8 +56,10 @@ for path in "${sql_paths[@]}"; do
   fi
   if ((version > BASELINE_MAX_VERSION)); then
     if grep -Eq '^[[:space:]]*(BEGIN|COMMIT|ROLLBACK)[[:space:]]*;' "$path"; then
-      echo "Migration $file contains transaction control; the ledger runner owns the transaction." >&2
-      exit 1
+      if [[ "$file" != "$LEGACY_WRAPPED_FILENAME" || "$checksum" != "$LEGACY_WRAPPED_SHA256" ]]; then
+        echo "Migration $file contains transaction control; the ledger runner owns the transaction." >&2
+        exit 1
+      fi
     fi
     if grep -Eqi 'CREATE[[:space:]]+(UNIQUE[[:space:]]+)?INDEX[[:space:]]+CONCURRENTLY' "$path"; then
       echo "Migration $file contains CREATE INDEX CONCURRENTLY and cannot share the ledger transaction." >&2
@@ -111,6 +116,16 @@ emit_missing_baseline_failure() {
     '$migration_baseline_entry$;'
 }
 
+emit_migration_include() {
+  local path="$1"
+  if [[ "$(basename "$path")" == "$LEGACY_WRAPPED_FILENAME" ]]; then
+    sed '/^BEGIN;$/d; /^COMMIT;$/d' "$path"
+    printf '\n'
+  else
+    printf '\ir %s\n' "$path"
+  fi
+}
+
 emit_migration_program() {
   local index file version checksum path
 
@@ -134,7 +149,7 @@ emit_migration_program() {
       emit_missing_baseline_failure "$file"
     else
       printf '%s\n' 'BEGIN;'
-      printf '\ir %s\n' "$path"
+      emit_migration_include "$path"
       printf "INSERT INTO ky_schema_migration (version, filename, checksum_sha256, applied_mode) VALUES (%d, '%s', '%s', 'migrate');\n" \
         "$version" "$file" "$checksum"
       printf '%s\n' 'COMMIT;'
@@ -154,10 +169,10 @@ emit_migration_program() {
     file="${sql_files[$index]}"
     path="$ROOT_DIR/ops/db/$file"
     if grep -Eq '^[[:space:]]*(BEGIN|COMMIT|ROLLBACK)[[:space:]]*;' "$path"; then
-      printf '\ir %s\n' "$path"
+      emit_migration_include "$path"
     else
       printf '%s\n' 'BEGIN;'
-      printf '\ir %s\n' "$path"
+      emit_migration_include "$path"
       printf '%s\n' 'COMMIT;'
     fi
   done
@@ -179,7 +194,7 @@ emit_migration_program() {
     fi
     file="${sql_files[$index]}"
     checksum="${sql_checksums[$index]}"
-    printf '\ir %s\n' "$ROOT_DIR/ops/db/$file"
+    emit_migration_include "$ROOT_DIR/ops/db/$file"
     printf "INSERT INTO ky_schema_migration (version, filename, checksum_sha256, applied_mode) VALUES (%d, '%s', '%s', 'migrate');\n" \
       "$version" "$file" "$checksum"
   done

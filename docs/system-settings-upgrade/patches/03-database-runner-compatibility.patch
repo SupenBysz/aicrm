@@ -1,0 +1,105 @@
+diff --git a/scripts/deploy_database.sh b/scripts/deploy_database.sh
+index abcc7432169bb0eed687e5cdf9178bfe82a9365d..b9226c8882e5425b2fe960ac8561085c1df3140a 100755
+--- a/scripts/deploy_database.sh
++++ b/scripts/deploy_database.sh
+@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ LEDGER_FILENAME="034_migration_ledger.sql"
+ BASELINE_MAX_VERSION=34
+ MIGRATION_LOCK_KEY=4701196508681632081
++# Preserve this legacy file checksum; only the ledger owns its transaction.
++LEGACY_WRAPPED_FILENAME="052_plugin_management_permissions.sql"
++LEGACY_WRAPPED_SHA256="cfbedcddfa4e7a9b5721d5e542dae4548c586a8d9da85be2fb17f3499d8348d4"
+ 
+ shopt -s nullglob
+ sql_paths=("$ROOT_DIR"/ops/db/[0-9][0-9][0-9]_*.sql)
+@@ -53,8 +56,10 @@ for path in "${sql_paths[@]}"; do
+   fi
+   if ((version > BASELINE_MAX_VERSION)); then
+     if grep -Eq '^[[:space:]]*(BEGIN|COMMIT|ROLLBACK)[[:space:]]*;' "$path"; then
+-      echo "Migration $file contains transaction control; the ledger runner owns the transaction." >&2
+-      exit 1
++      if [[ "$file" != "$LEGACY_WRAPPED_FILENAME" || "$checksum" != "$LEGACY_WRAPPED_SHA256" ]]; then
++        echo "Migration $file contains transaction control; the ledger runner owns the transaction." >&2
++        exit 1
++      fi
+     fi
+     if grep -Eqi 'CREATE[[:space:]]+(UNIQUE[[:space:]]+)?INDEX[[:space:]]+CONCURRENTLY' "$path"; then
+       echo "Migration $file contains CREATE INDEX CONCURRENTLY and cannot share the ledger transaction." >&2
+@@ -111,6 +116,16 @@ emit_missing_baseline_failure() {
+     '$migration_baseline_entry$;'
+ }
+ 
++emit_migration_include() {
++  local path="$1"
++  if [[ "$(basename "$path")" == "$LEGACY_WRAPPED_FILENAME" ]]; then
++    sed '/^BEGIN;$/d; /^COMMIT;$/d' "$path"
++    printf '\n'
++  else
++    printf '\ir %s\n' "$path"
++  fi
++}
++
+ emit_migration_program() {
+   local index file version checksum path
+ 
+@@ -134,7 +149,7 @@ emit_migration_program() {
+       emit_missing_baseline_failure "$file"
+     else
+       printf '%s\n' 'BEGIN;'
+-      printf '\ir %s\n' "$path"
++      emit_migration_include "$path"
+       printf "INSERT INTO ky_schema_migration (version, filename, checksum_sha256, applied_mode) VALUES (%d, '%s', '%s', 'migrate');\n" \
+         "$version" "$file" "$checksum"
+       printf '%s\n' 'COMMIT;'
+@@ -154,10 +169,10 @@ emit_migration_program() {
+     file="${sql_files[$index]}"
+     path="$ROOT_DIR/ops/db/$file"
+     if grep -Eq '^[[:space:]]*(BEGIN|COMMIT|ROLLBACK)[[:space:]]*;' "$path"; then
+-      printf '\ir %s\n' "$path"
++      emit_migration_include "$path"
+     else
+       printf '%s\n' 'BEGIN;'
+-      printf '\ir %s\n' "$path"
++      emit_migration_include "$path"
+       printf '%s\n' 'COMMIT;'
+     fi
+   done
+@@ -179,7 +194,7 @@ emit_migration_program() {
+     fi
+     file="${sql_files[$index]}"
+     checksum="${sql_checksums[$index]}"
+-    printf '\ir %s\n' "$ROOT_DIR/ops/db/$file"
++    emit_migration_include "$ROOT_DIR/ops/db/$file"
+     printf "INSERT INTO ky_schema_migration (version, filename, checksum_sha256, applied_mode) VALUES (%d, '%s', '%s', 'migrate');\n" \
+       "$version" "$file" "$checksum"
+   done
+diff --git a/scripts/test_deploy_database.sh b/scripts/test_deploy_database.sh
+index 4a328102dc806bf8d3fd30a44f0453df4134249c..e947b397b03ded90a02264afcba46a0599aff919 100755
+--- a/scripts/test_deploy_database.sh
++++ b/scripts/test_deploy_database.sh
+@@ -38,6 +38,12 @@ if [[ "$if_count" != "$endif_count" ]]; then
+   fail "unbalanced psql conditionals: if=$if_count endif=$endif_count"
+ fi
+ 
++[[ "$rendered" == *"cfbedcddfa4e7a9b5721d5e542dae4548c586a8d9da85be2fb17f3499d8348d4"* ]] || fail "legacy 052 checksum guard missing"
++[[ "$rendered" == *"平台插件管理菜单"* ]] || fail "legacy 052 body was not included"
++if grep -Eq '^\\ir .*052_plugin_management_permissions.sql$' <<<"$rendered"; then
++  fail "legacy 052 was included with its nested transaction"
++fi
++
+ fixture_root="$(mktemp -d)"
+ trap 'rm -rf "$fixture_root"' EXIT
+ mkdir -p "$fixture_root/scripts" "$fixture_root/ops/db"
+@@ -54,4 +60,12 @@ if KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.s
+   fail "future migration with transaction control was accepted"
+ fi
+ 
++rm "$fixture_root/ops/db/035_future_test.sql"
++cp "$ROOT_DIR/ops/db/052_plugin_management_permissions.sql" "$fixture_root/ops/db/052_plugin_management_permissions.sql"
++KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null || fail "known legacy 052 was rejected"
++printf '\n-- changed legacy migration\n' >>"$fixture_root/ops/db/052_plugin_management_permissions.sql"
++if KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null 2>&1; then
++  fail "modified legacy 052 with transaction control was accepted"
++fi
++
+ echo "deploy database tests passed"

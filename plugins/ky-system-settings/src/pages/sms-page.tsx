@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, message } from "antd";
+import { App as AntdApp, Alert, Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListPageCard, drawerWidths, useRequestClient, usePermissions } from "@ky/admin-core";
@@ -14,6 +14,7 @@ import {
 const STATUS_OPTS = [{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }];
 
 export function SmsPage() {
+  const { message } = AntdApp.useApp();
   const client = useRequestClient();
   const permissions = usePermissions();
   const qc = useQueryClient();
