@@ -1,0 +1,76 @@
+diff --git a/ops/db/124_remove_orphan_agency_enterprises_menu_permission.sql b/ops/db/124_remove_orphan_agency_enterprises_menu_permission.sql
+new file mode 100644
+index 000000000..9a286163e
+--- /dev/null
++++ b/ops/db/124_remove_orphan_agency_enterprises_menu_permission.sql
+@@ -0,0 +1,70 @@
++-- 移除唯一确认无机构菜单模块/运行时消费者的历史菜单权限。
++-- 只处理精确 code；其他 workspace 的旧菜单、公共 API、配额能力与兼容键均保留。
++-- 由 scripts/deploy_database.sh 在事务和迁移账本锁内执行。
++-- 回滚：从部署前受保护备份恢复 ky_permission 行及对应 ky_role_permission 行；
++-- 然后在 ky_schema_migration 中按项目恢复流程处理本迁移记录。不要手工改历史迁移账本。
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++
++DO $permission_governance_remove$
++DECLARE
++  v_permission_id text;
++BEGIN
++  IF current_database()<>'kwwcrm' THEN
++    RAISE EXCEPTION 'wrong_database';
++  END IF;
++
++  SELECT id INTO v_permission_id
++  FROM ky_permission
++  WHERE code='menu.agency.enterprises';
++
++  -- 可重复执行：该精确权限若已不存在，不再触碰其他记录。
++  IF v_permission_id IS NULL THEN
++    RETURN;
++  END IF;
++
++  IF NOT EXISTS (
++    SELECT 1 FROM ky_permission
++    WHERE id=v_permission_id AND code='menu.agency.enterprises'
++      AND category='menu' AND resource='enterprises' AND action='view'
++      AND workspace_types='["agency"]'::jsonb AND status='normal'
++  ) THEN
++    RAISE EXCEPTION 'permission_governance_target_mismatch';
++  END IF;
++
++  -- 此菜单键已确认没有活动/停用管理中心或工作台目录引用。
++  IF EXISTS (
++    SELECT 1 FROM ky_management_menu
++    WHERE permission_keys @> jsonb_build_array('menu.agency.enterprises')
++  ) OR EXISTS (
++    SELECT 1 FROM ky_workbench_menu WHERE menu_key='menu.agency.enterprises'
++  ) THEN
++    RAISE EXCEPTION 'permission_governance_target_has_menu_consumer';
++  END IF;
++
++  -- 当前机构企业邀请仍由独立 action/API 权限保护，必须保留。
++  IF NOT EXISTS (
++    SELECT 1 FROM ky_permission
++    WHERE code='agency.enterprises.invite_admin' AND category='action'
++      AND resource='enterprises' AND action='invite_admin' AND status='normal'
++  ) THEN
++    RAISE EXCEPTION 'agency_enterprise_invitation_permission_missing';
++  END IF;
++
++  -- 若执行时已有成员通过该历史键获得权限，停止而不是静默移除其访问。
++  IF EXISTS (
++    SELECT 1
++    FROM ky_role_permission rp
++    JOIN ky_role r ON r.id=rp.role_id AND r.status='normal' AND r.deleted_at IS NULL
++    JOIN ky_membership_role mr ON mr.role_id=r.id
++    JOIN ky_membership m ON m.id=mr.membership_id AND m.workspace_type='agency'
++      AND m.status='active' AND m.deleted_at IS NULL
++    WHERE rp.permission_id=v_permission_id
++  ) THEN
++    RAISE EXCEPTION 'permission_governance_target_has_active_membership';
++  END IF;
++
++  DELETE FROM ky_role_permission WHERE permission_id=v_permission_id;
++  DELETE FROM ky_permission WHERE id=v_permission_id AND code='menu.agency.enterprises';
++END
++$permission_governance_remove$;

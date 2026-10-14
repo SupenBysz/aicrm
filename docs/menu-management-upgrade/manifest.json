@@ -1,0 +1,2042 @@
+{
+  "package": "kww-workbench-menu-upgrade",
+  "version": "2026-10-14-final",
+  "baseCommit": "9ecddf2ded14d9eb3f49fa18194472c883bbcf94",
+  "layers": {
+    "prerequisites": [
+      "prerequisites/01-web-window-foundation.patch",
+      "prerequisites/02-web-window-plugin.patch",
+      "prerequisites/03-desktop-host-integration.patch"
+    ],
+    "menuCore": [
+      "patches/menu-core/01-menu-management-and-authorization.patch",
+      "patches/menu-core/02-menu-catalog-ui-refinements.patch",
+      "patches/menu-core/03-host-and-role-permission-adaptation.patch"
+    ],
+    "webviewConditional": "patches/webview-conditional/menu-webview-current-feature.patch",
+    "latestSourceReference": "patches/webview-conditional/02-latest-menu-runtime.reference.patch",
+    "optionalCleanupReference": "patches/optional/01-orphan-permission-cleanup.reference.patch"
+  },
+  "validation": {
+    "menuNodeTests": "58 passed, 0 failed",
+    "membershipGoTests": "passed",
+    "accessPluginTypecheckBuild": "passed",
+    "adminCoreBuild": "passed",
+    "adminHostBuild": "passed",
+    "adminHostTypecheck": "passed after building admin-core and plugin-script-management in the same fresh clone",
+    "freshPatchApply": "passed",
+    "latestSourceReference": "独立源码基线参考增量；不可直接叠加到目标核心层，需依赖齐备后逐段适配",
+    "localCoreApplyReverse": "6层顺序应用通过，73个结果文件哈希一致，6层逆序恢复后git status干净",
+    "latestSourceApplyReverse": "在源码提交339b0af上应用检查、实际应用及反向检查通过；未作为9ecddf2可直接应用层验收",
+    "corePatchMetadata": "本地按逐层索引树规范化新增/删除文件元数据，保留已验证最终文件内容；manifest记录结果文件哈希"
+  },
+  "deployment": false,
+  "commit": true,
+  "push": false,
+  "source": {
+    "commit": "339b0af8e068ce4fec0e2b20609037cfd448d17f",
+    "hasUncommittedChanges": true,
+    "latestReferenceFiles": [
+      "apps/aicrm-desktop/src/main/ipc/menu-webview-ipc.ts",
+      "apps/ky-admin-host/package.json",
+      "apps/ky-admin-host/src/app.tsx",
+      "apps/ky-admin-host/src/components/business-web-page-instance.test.mjs",
+      "apps/ky-admin-host/src/components/business-web-page-instance.ts",
+      "apps/ky-admin-host/src/components/business-web-page-viewport.tsx",
+      "apps/ky-admin-host/src/pages/menu-webview-page.tsx",
+      "apps/ky-admin-host/src/styles.css",
+      "packages/ky-admin-core/src/webview-common-settings.tsx",
+      "plugins/ky-access-management/src/api.ts",
+      "plugins/ky-access-management/src/menu-action-grid.ts",
+      "plugins/ky-access-management/src/menu-catalog-components.tsx",
+      "plugins/ky-access-management/src/menu-catalog-form-drawer.tsx",
+      "plugins/ky-access-management/src/menu-management-contract.ts",
+      "plugins/ky-access-management/src/menu-webview-api.test.mjs",
+      "plugins/ky-access-management/src/menu-webview-api.ts",
+      "plugins/ky-access-management/src/pages/management-menus-tab.tsx",
+      "plugins/ky-access-management/src/pages/permissions-page.tsx",
+      "plugins/ky-access-management/src/pages/roles-page.tsx",
+      "plugins/ky-access-management/src/pages/workbench-menus-page.tsx",
+      "plugins/ky-access-management/src/permission-labels.ts",
+      "plugins/ky-access-management/src/workbench-menu-contract.test.mjs",
+      "pnpm-lock.yaml",
+      "services/ky-membership-service/internal/server/access_handlers.go",
+      "services/ky-membership-service/internal/server/access_test.go",
+      "services/ky-membership-service/internal/server/management_menu_handlers.go",
+      "services/ky-membership-service/internal/server/management_menu_handlers_test.go",
+      "services/ky-membership-service/internal/server/menu_webview_handlers.go",
+      "services/ky-membership-service/internal/server/menu_webview_handlers_test.go",
+      "services/ky-membership-service/internal/server/workbench_menu_handlers.go",
+      "services/ky-membership-service/internal/server/workbench_menu_handlers_test.go",
+      "services/ky-membership-service/internal/store/db.go",
+      "services/ky-membership-service/internal/store/menu_webview.go",
+      "services/ky-membership-service/internal/store/menu_webview_test.go",
+      "services/ky-membership-service/internal/store/role_store.go",
+      "services/ky-membership-service/internal/store/workbench_menu_admin.go",
+      "services/ky-shop-management-service/internal/server/menu_webview_runtime.go",
+      "apps/aicrm-desktop/src/main/menu-webview-api-security.test.mjs",
+      "apps/aicrm-desktop/src/main/menu-webview-api-security.ts",
+      "apps/aicrm-desktop/src/main/menu-webview-diagnostic.test.mjs",
+      "apps/aicrm-desktop/src/main/menu-webview-diagnostic.ts",
+      "apps/ky-admin-host/src/components/business-web-page-presentation.test.mjs",
+      "apps/ky-admin-host/src/components/business-web-page-presentation.ts",
+      "apps/ky-admin-host/src/components/business-web-page-viewport-bounds.ts",
+      "apps/ky-admin-host/src/menu-navigation-model.test.mjs",
+      "apps/ky-admin-host/src/menu-navigation-model.ts",
+      "apps/ky-admin-host/src/menu-webview-layout-contract.test.mjs",
+      "apps/ky-admin-host/src/workspace-area-route-cache.test.mjs",
+      "apps/ky-admin-host/src/workspace-area-route-cache.ts",
+      "apps/ky-admin-host/src/workspace-area-route-pane.ts",
+      "ops/db/123_menu_webview_common_config.sql",
+      "plugins/ky-access-management/src/menu-status-toggle.test.mjs",
+      "plugins/ky-access-management/src/permission-tree.test.mjs",
+      "plugins/ky-access-management/src/permission-tree.ts",
+      "plugins/ky-access-management/src/role-permission-contract.test.mjs",
+      "plugins/ky-access-management/src/role-permission-contract.ts",
+      "services/ky-membership-service/internal/store/role_store_postgres_integration_test.go",
+      "services/ky-membership-service/internal/store/role_store_test.go",
+      "services/ky-membership-service/internal/store/workbench_menu_update_test.go"
+    ],
+    "excludedProjectDeploymentFile": "ops/kww/nginx-api-routes.conf"
+  },
+  "artifacts": [
+    {
+      "path": "patches/menu-core/01-menu-management-and-authorization.patch",
+      "sha256": "c6d020553960a1860cf3296bcb417b98a739ed050a4faf2bf859b9d012787ed3",
+      "files": [
+        {
+          "addedLines": "37",
+          "removedLines": "18",
+          "path": "apps/ky-admin-host/src/app.tsx"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "1",
+          "path": "apps/ky-admin-host/src/pages/workbench.tsx"
+        },
+        {
+          "addedLines": "108",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/workbench-menu-guard-contract.test.mjs"
+        },
+        {
+          "addedLines": "283",
+          "removedLines": "0",
+          "path": "docs/workbench-menu/2026-10-10-工作台菜单需求与迭代锁定.md"
+        },
+        {
+          "addedLines": "26",
+          "removedLines": "0",
+          "path": "docs/workbench-menu/2026-10-10-现有工作台菜单与权限映射.md"
+        },
+        {
+          "addedLines": "26",
+          "removedLines": "0",
+          "path": "docs/workbench-menu/2026-10-11-菜单角色与成员白名单权限.md"
+        },
+        {
+          "addedLines": "279",
+          "removedLines": "0",
+          "path": "ops/db/106_workbench_menu_authorization.sql"
+        },
+        {
+          "addedLines": "74",
+          "removedLines": "0",
+          "path": "ops/db/108_workbench_builtin_menus.sql"
+        },
+        {
+          "addedLines": "84",
+          "removedLines": "0",
+          "path": "ops/db/109_management_center_menu_catalog.sql"
+        },
+        {
+          "addedLines": "43",
+          "removedLines": "0",
+          "path": "ops/db/110_menu_workspace_allowlists.sql"
+        },
+        {
+          "addedLines": "9",
+          "removedLines": "1",
+          "path": "packages/ky-admin-core/src/index.ts"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/management-menu-registry-context.tsx"
+        },
+        {
+          "addedLines": "92",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/management-menu-registry.ts"
+        },
+        {
+          "addedLines": "1",
+          "removedLines": "1",
+          "path": "packages/ky-admin-core/src/permissions.tsx"
+        },
+        {
+          "addedLines": "80",
+          "removedLines": "2",
+          "path": "plugins/ky-access-management/src/api.ts"
+        },
+        {
+          "addedLines": "4",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/index.tsx"
+        },
+        {
+          "addedLines": "34",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/management-menu-merge.ts"
+        },
+        {
+          "addedLines": "233",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/management-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "26",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/management-menu-view.ts"
+        },
+        {
+          "addedLines": "33",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-action-grid.ts"
+        },
+        {
+          "addedLines": "63",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-allowlist-drawer.tsx"
+        },
+        {
+          "addedLines": "36",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-allowlist.test.mjs"
+        },
+        {
+          "addedLines": "72",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-catalog-components.tsx"
+        },
+        {
+          "addedLines": "153",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-catalog-form-drawer.tsx"
+        },
+        {
+          "addedLines": "50",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-management-contract.ts"
+        },
+        {
+          "addedLines": "126",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/pages/management-menus-tab.tsx"
+        },
+        {
+          "addedLines": "147",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/pages/workbench-menus-page.tsx"
+        },
+        {
+          "addedLines": "21",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/permission-labels.ts"
+        },
+        {
+          "addedLines": "11",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/routes.tsx"
+        },
+        {
+          "addedLines": "235",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/workbench-menu-contract.test.mjs"
+        },
+        {
+          "addedLines": "141",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/workbench-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "149",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/workbench-menu-view.ts"
+        },
+        {
+          "addedLines": "14",
+          "removedLines": "2",
+          "path": "services/ky-auth-service/internal/server/server.go"
+        },
+        {
+          "addedLines": "264",
+          "removedLines": "0",
+          "path": "services/ky-auth-service/internal/server/workbench_menu_client.go"
+        },
+        {
+          "addedLines": "170",
+          "removedLines": "0",
+          "path": "services/ky-auth-service/internal/server/workbench_menu_client_test.go"
+        },
+        {
+          "addedLines": "1",
+          "removedLines": "0",
+          "path": "services/ky-auth-service/internal/store/models.go"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "14",
+          "path": "services/ky-matrix-account-service/internal/config/config.go"
+        },
+        {
+          "addedLines": "15",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/server/server.go"
+        },
+        {
+          "addedLines": "145",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/server/workbench_menu_client.go"
+        },
+        {
+          "addedLines": "47",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/server/workbench_menu_client_test.go"
+        },
+        {
+          "addedLines": "27",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/store/account_store.go"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "2",
+          "path": "services/ky-membership-service/internal/server/access_handlers.go"
+        },
+        {
+          "addedLines": "12",
+          "removedLines": "1",
+          "path": "services/ky-membership-service/internal/server/internal_access.go"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/internal_access_test.go"
+        },
+        {
+          "addedLines": "40",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/internal_workbench_menu_test.go"
+        },
+        {
+          "addedLines": "159",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/management_menu_handlers.go"
+        },
+        {
+          "addedLines": "35",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/management_menu_handlers_test.go"
+        },
+        {
+          "addedLines": "657",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/workbench_menu_handlers.go"
+        },
+        {
+          "addedLines": "169",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/workbench_menu_handlers_test.go"
+        },
+        {
+          "addedLines": "23",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/access_decision_store.go"
+        },
+        {
+          "addedLines": "339",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/management_menu_catalog.go"
+        },
+        {
+          "addedLines": "59",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/management_menu_catalog_test.go"
+        },
+        {
+          "addedLines": "599",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/menu_allowlist.go"
+        },
+        {
+          "addedLines": "132",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/menu_allowlist_test.go"
+        },
+        {
+          "addedLines": "11",
+          "removedLines": "10",
+          "path": "services/ky-membership-service/internal/store/models.go"
+        },
+        {
+          "addedLines": "106",
+          "removedLines": "3",
+          "path": "services/ky-membership-service/internal/store/role_store.go"
+        },
+        {
+          "addedLines": "411",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_access.go"
+        },
+        {
+          "addedLines": "204",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_access_test.go"
+        },
+        {
+          "addedLines": "657",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_admin.go"
+        },
+        {
+          "addedLines": "247",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_migration_test.go"
+        }
+      ]
+    },
+    {
+      "path": "patches/menu-core/02-menu-catalog-ui-refinements.patch",
+      "sha256": "9e5c1ea60c10ade6f896d8e82523e4a4e364d6679b0d9dac3670e3388d6a6d29",
+      "files": [
+        {
+          "addedLines": "2",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/management-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "10",
+          "path": "plugins/ky-access-management/src/menu-action-grid.ts"
+        },
+        {
+          "addedLines": "6",
+          "removedLines": "13",
+          "path": "plugins/ky-access-management/src/menu-catalog-components.tsx"
+        },
+        {
+          "addedLines": "1",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/pages/management-menus-tab.tsx"
+        },
+        {
+          "addedLines": "1",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/pages/workbench-menus-page.tsx"
+        },
+        {
+          "addedLines": "29",
+          "removedLines": "32",
+          "path": "plugins/ky-access-management/src/workbench-menu-contract.test.mjs"
+        }
+      ]
+    },
+    {
+      "path": "patches/menu-core/03-host-and-role-permission-adaptation.patch",
+      "sha256": "10d850a14ca8229f0a35d5a18adaea55d4e983c0bb20c09c0504c1965e8e28cf",
+      "files": [
+        {
+          "addedLines": "59",
+          "removedLines": "11",
+          "path": "apps/ky-admin-host/src/app.tsx"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/nav-open-state.ts"
+        },
+        {
+          "addedLines": "144",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/styles.css"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/index.ts"
+        },
+        {
+          "addedLines": "101",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/management-list-extension.tsx"
+        },
+        {
+          "addedLines": "21",
+          "removedLines": "8",
+          "path": "plugins/ky-access-management/src/api.ts"
+        },
+        {
+          "addedLines": "8",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/management-menu-merge.ts"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "28",
+          "path": "plugins/ky-access-management/src/management-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/management-menu-view.ts"
+        },
+        {
+          "addedLines": "6",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-action-grid.ts"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "3",
+          "path": "plugins/ky-access-management/src/menu-allowlist.test.mjs"
+        },
+        {
+          "addedLines": "31",
+          "removedLines": "4",
+          "path": "plugins/ky-access-management/src/menu-catalog-components.tsx"
+        },
+        {
+          "addedLines": "21",
+          "removedLines": "2",
+          "path": "plugins/ky-access-management/src/menu-management-contract.ts"
+        },
+        {
+          "addedLines": "72",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-status-toggle.test.mjs"
+        },
+        {
+          "addedLines": "20",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-subtitle.ts"
+        },
+        {
+          "addedLines": "35",
+          "removedLines": "15",
+          "path": "plugins/ky-access-management/src/pages/management-menus-tab.tsx"
+        },
+        {
+          "addedLines": "37",
+          "removedLines": "86",
+          "path": "plugins/ky-access-management/src/pages/permissions-page.tsx"
+        },
+        {
+          "addedLines": "189",
+          "removedLines": "68",
+          "path": "plugins/ky-access-management/src/pages/roles-page.tsx"
+        },
+        {
+          "addedLines": "40",
+          "removedLines": "14",
+          "path": "plugins/ky-access-management/src/pages/workbench-menus-page.tsx"
+        },
+        {
+          "addedLines": "47",
+          "removedLines": "5",
+          "path": "plugins/ky-access-management/src/permission-labels.ts"
+        },
+        {
+          "addedLines": "311",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/permission-tree.test.mjs"
+        },
+        {
+          "addedLines": "457",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/permission-tree.ts"
+        },
+        {
+          "addedLines": "94",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/role-permission-contract.test.mjs"
+        },
+        {
+          "addedLines": "64",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/role-permission-contract.ts"
+        },
+        {
+          "addedLines": "15",
+          "removedLines": "8",
+          "path": "plugins/ky-access-management/src/workbench-menu-contract.test.mjs"
+        },
+        {
+          "addedLines": "17",
+          "removedLines": "4",
+          "path": "plugins/ky-access-management/src/workbench-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "7",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/workbench-menu-view.ts"
+        },
+        {
+          "addedLines": "30",
+          "removedLines": "1",
+          "path": "services/ky-membership-service/internal/server/access_handlers.go"
+        },
+        {
+          "addedLines": "75",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/management_menu_handlers.go"
+        },
+        {
+          "addedLines": "34",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/server.go"
+        },
+        {
+          "addedLines": "118",
+          "removedLines": "31",
+          "path": "services/ky-membership-service/internal/store/role_store.go"
+        },
+        {
+          "addedLines": "72",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/role_store_test.go"
+        },
+        {
+          "addedLines": "0",
+          "removedLines": "48",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_migration_test.go"
+        }
+      ]
+    },
+    {
+      "path": "patches/optional/01-orphan-permission-cleanup.reference.patch",
+      "sha256": "e551b4bcf21586c88be0c1d0cd2a3b118c84b20950440c2806b9fc47ff64e9bd",
+      "files": [
+        {
+          "addedLines": "70",
+          "removedLines": "0",
+          "path": "ops/db/124_remove_orphan_agency_enterprises_menu_permission.sql"
+        }
+      ]
+    },
+    {
+      "path": "patches/webview-conditional/02-latest-menu-runtime.reference.patch",
+      "sha256": "c7eda7980e8cc671469d92f18655940fe29c5bedf6feb26bfdb673003bb67ff1",
+      "files": [
+        {
+          "addedLines": "76",
+          "removedLines": "17",
+          "path": "apps/aicrm-desktop/src/main/ipc/menu-webview-ipc.ts"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "4",
+          "path": "apps/ky-admin-host/package.json"
+        },
+        {
+          "addedLines": "266",
+          "removedLines": "88",
+          "path": "apps/ky-admin-host/src/app.tsx"
+        },
+        {
+          "addedLines": "73",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/components/business-web-page-instance.test.mjs"
+        },
+        {
+          "addedLines": "98",
+          "removedLines": "20",
+          "path": "apps/ky-admin-host/src/components/business-web-page-instance.ts"
+        },
+        {
+          "addedLines": "14",
+          "removedLines": "5",
+          "path": "apps/ky-admin-host/src/components/business-web-page-viewport.tsx"
+        },
+        {
+          "addedLines": "30",
+          "removedLines": "19",
+          "path": "apps/ky-admin-host/src/pages/menu-webview-page.tsx"
+        },
+        {
+          "addedLines": "61",
+          "removedLines": "1",
+          "path": "apps/ky-admin-host/src/styles.css"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "1",
+          "path": "packages/ky-admin-core/src/webview-common-settings.tsx"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "3",
+          "path": "plugins/ky-access-management/src/api.ts"
+        },
+        {
+          "addedLines": "6",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-action-grid.ts"
+        },
+        {
+          "addedLines": "29",
+          "removedLines": "2",
+          "path": "plugins/ky-access-management/src/menu-catalog-components.tsx"
+        },
+        {
+          "addedLines": "109",
+          "removedLines": "28",
+          "path": "plugins/ky-access-management/src/menu-catalog-form-drawer.tsx"
+        },
+        {
+          "addedLines": "83",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-management-contract.ts"
+        },
+        {
+          "addedLines": "251",
+          "removedLines": "2",
+          "path": "plugins/ky-access-management/src/menu-webview-api.test.mjs"
+        },
+        {
+          "addedLines": "198",
+          "removedLines": "14",
+          "path": "plugins/ky-access-management/src/menu-webview-api.ts"
+        },
+        {
+          "addedLines": "48",
+          "removedLines": "13",
+          "path": "plugins/ky-access-management/src/pages/management-menus-tab.tsx"
+        },
+        {
+          "addedLines": "37",
+          "removedLines": "86",
+          "path": "plugins/ky-access-management/src/pages/permissions-page.tsx"
+        },
+        {
+          "addedLines": "173",
+          "removedLines": "69",
+          "path": "plugins/ky-access-management/src/pages/roles-page.tsx"
+        },
+        {
+          "addedLines": "43",
+          "removedLines": "15",
+          "path": "plugins/ky-access-management/src/pages/workbench-menus-page.tsx"
+        },
+        {
+          "addedLines": "47",
+          "removedLines": "5",
+          "path": "plugins/ky-access-management/src/permission-labels.ts"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/workbench-menu-contract.test.mjs"
+        },
+        {
+          "addedLines": "14",
+          "removedLines": "0",
+          "path": "pnpm-lock.yaml"
+        },
+        {
+          "addedLines": "30",
+          "removedLines": "1",
+          "path": "services/ky-membership-service/internal/server/access_handlers.go"
+        },
+        {
+          "addedLines": "68",
+          "removedLines": "1",
+          "path": "services/ky-membership-service/internal/server/access_test.go"
+        },
+        {
+          "addedLines": "74",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/management_menu_handlers.go"
+        },
+        {
+          "addedLines": "29",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/management_menu_handlers_test.go"
+        },
+        {
+          "addedLines": "189",
+          "removedLines": "37",
+          "path": "services/ky-membership-service/internal/server/menu_webview_handlers.go"
+        },
+        {
+          "addedLines": "39",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/menu_webview_handlers_test.go"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/workbench_menu_handlers.go"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/workbench_menu_handlers_test.go"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "4",
+          "path": "services/ky-membership-service/internal/store/db.go"
+        },
+        {
+          "addedLines": "268",
+          "removedLines": "95",
+          "path": "services/ky-membership-service/internal/store/menu_webview.go"
+        },
+        {
+          "addedLines": "33",
+          "removedLines": "12",
+          "path": "services/ky-membership-service/internal/store/menu_webview_test.go"
+        },
+        {
+          "addedLines": "118",
+          "removedLines": "31",
+          "path": "services/ky-membership-service/internal/store/role_store.go"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "4",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_admin.go"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "7",
+          "path": "services/ky-shop-management-service/internal/server/menu_webview_runtime.go"
+        },
+        {
+          "addedLines": "30",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-api-security.test.mjs"
+        },
+        {
+          "addedLines": "14",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-api-security.ts"
+        },
+        {
+          "addedLines": "43",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-diagnostic.test.mjs"
+        },
+        {
+          "addedLines": "57",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-diagnostic.ts"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/components/business-web-page-presentation.test.mjs"
+        },
+        {
+          "addedLines": "35",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/components/business-web-page-presentation.ts"
+        },
+        {
+          "addedLines": "15",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/components/business-web-page-viewport-bounds.ts"
+        },
+        {
+          "addedLines": "112",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/menu-navigation-model.test.mjs"
+        },
+        {
+          "addedLines": "165",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/menu-navigation-model.ts"
+        },
+        {
+          "addedLines": "30",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/menu-webview-layout-contract.test.mjs"
+        },
+        {
+          "addedLines": "162",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/workspace-area-route-cache.test.mjs"
+        },
+        {
+          "addedLines": "98",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/workspace-area-route-cache.ts"
+        },
+        {
+          "addedLines": "57",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/workspace-area-route-pane.ts"
+        },
+        {
+          "addedLines": "28",
+          "removedLines": "0",
+          "path": "ops/db/123_menu_webview_common_config.sql"
+        },
+        {
+          "addedLines": "72",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-status-toggle.test.mjs"
+        },
+        {
+          "addedLines": "317",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/permission-tree.test.mjs"
+        },
+        {
+          "addedLines": "457",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/permission-tree.ts"
+        },
+        {
+          "addedLines": "94",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/role-permission-contract.test.mjs"
+        },
+        {
+          "addedLines": "64",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/role-permission-contract.ts"
+        },
+        {
+          "addedLines": "269",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/role_store_postgres_integration_test.go"
+        },
+        {
+          "addedLines": "72",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/role_store_test.go"
+        },
+        {
+          "addedLines": "84",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_update_test.go"
+        }
+      ]
+    },
+    {
+      "path": "patches/webview-conditional/menu-webview-current-feature.patch",
+      "sha256": "cf43c7d2651d90f00337fb9c81692c2595841ddcccfbe3022d8b7cad16a02dbc",
+      "files": [
+        {
+          "addedLines": "2",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/package.json"
+        },
+        {
+          "addedLines": "44",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/src/main/app-window.ts"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs"
+        },
+        {
+          "addedLines": "1",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/src/main/guarded-ipc.ts"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/index.ts"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "2",
+          "path": "apps/aicrm-desktop/src/main/ipc/matrix-account-ipc.ts"
+        },
+        {
+          "addedLines": "680",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/ipc/menu-webview-ipc.ts"
+        },
+        {
+          "addedLines": "87",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-ipc-contract.test.mjs"
+        },
+        {
+          "addedLines": "108",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-runtime-test-runner.mjs"
+        },
+        {
+          "addedLines": "465",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/menu-webview-runtime.electron.test.mjs"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-contract.ts"
+        },
+        {
+          "addedLines": "34",
+          "removedLines": "8",
+          "path": "apps/aicrm-desktop/src/main/web-injection-window.ts"
+        },
+        {
+          "addedLines": "27",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/bridge.ts"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/src/preload/types.ts"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/shared/constants.ts"
+        },
+        {
+          "addedLines": "41",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/shared/types.ts"
+        },
+        {
+          "addedLines": "234",
+          "removedLines": "0",
+          "path": "apps/ky-admin-host/src/pages/menu-webview-page.tsx"
+        },
+        {
+          "addedLines": "23",
+          "removedLines": "8",
+          "path": "docs/desktop-host-plugins/web-window-plugin/2026-10-12-菜单嵌入式WebView与店铺登录空间路由迭代方案.md"
+        },
+        {
+          "addedLines": "75",
+          "removedLines": "0",
+          "path": "docs/desktop-host-plugins/web-window-plugin/2026-10-12-菜单嵌入式WebView服务端API契约.md"
+        },
+        {
+          "addedLines": "199",
+          "removedLines": "0",
+          "path": "docs/desktop-host-plugins/web-window-plugin/2026-10-13-菜单HTTP页面与通用WebView配置迭代方案.md"
+        },
+        {
+          "addedLines": "56",
+          "removedLines": "0",
+          "path": "ops/db/112_menu_webview_pages.sql"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "0",
+          "path": "ops/db/117_workbench_nested_webview_menus.sql"
+        },
+        {
+          "addedLines": "34",
+          "removedLines": "0",
+          "path": "ops/db/118_menu_webview_session_modes.sql"
+        },
+        {
+          "addedLines": "17",
+          "removedLines": "0",
+          "path": "ops/db/119_menu_webview_runtime_platform.sql"
+        },
+        {
+          "addedLines": "22",
+          "removedLines": "0",
+          "path": "ops/db/120_menu_webview_proxy_projection.sql"
+        },
+        {
+          "addedLines": "23",
+          "removedLines": "0",
+          "path": "ops/db/121_menu_webview_proxy_secrets.sql"
+        },
+        {
+          "addedLines": "37",
+          "removedLines": "0",
+          "path": "ops/db/122_menu_webview_proxy_secret_versions.sql"
+        },
+        {
+          "addedLines": "129",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/login-space-binding-selector.tsx"
+        },
+        {
+          "addedLines": "78",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/webview-common-settings.tsx"
+        },
+        {
+          "addedLines": "48",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/webview-protocol-whitelist.ts"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "5",
+          "path": "plugins/ky-access-management/src/api.ts"
+        },
+        {
+          "addedLines": "8",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/management-menu-merge.ts"
+        },
+        {
+          "addedLines": "66",
+          "removedLines": "8",
+          "path": "plugins/ky-access-management/src/management-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/management-menu-view.ts"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "2",
+          "path": "plugins/ky-access-management/src/menu-allowlist.test.mjs"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "2",
+          "path": "plugins/ky-access-management/src/menu-catalog-components.tsx"
+        },
+        {
+          "addedLines": "244",
+          "removedLines": "43",
+          "path": "plugins/ky-access-management/src/menu-catalog-form-drawer.tsx"
+        },
+        {
+          "addedLines": "28",
+          "removedLines": "3",
+          "path": "plugins/ky-access-management/src/menu-management-contract.ts"
+        },
+        {
+          "addedLines": "21",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-subtitle.test.mjs"
+        },
+        {
+          "addedLines": "20",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-subtitle.ts"
+        },
+        {
+          "addedLines": "87",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-webview-api.test.mjs"
+        },
+        {
+          "addedLines": "268",
+          "removedLines": "0",
+          "path": "plugins/ky-access-management/src/menu-webview-api.ts"
+        },
+        {
+          "addedLines": "40",
+          "removedLines": "11",
+          "path": "plugins/ky-access-management/src/pages/management-menus-tab.tsx"
+        },
+        {
+          "addedLines": "44",
+          "removedLines": "10",
+          "path": "plugins/ky-access-management/src/pages/workbench-menus-page.tsx"
+        },
+        {
+          "addedLines": "10",
+          "removedLines": "4",
+          "path": "plugins/ky-access-management/src/workbench-menu-contract.test.mjs"
+        },
+        {
+          "addedLines": "17",
+          "removedLines": "4",
+          "path": "plugins/ky-access-management/src/workbench-menu-view.test.mjs"
+        },
+        {
+          "addedLines": "7",
+          "removedLines": "1",
+          "path": "plugins/ky-access-management/src/workbench-menu-view.ts"
+        },
+        {
+          "addedLines": "39",
+          "removedLines": "11",
+          "path": "scripts/desktop-plugins/web-window-plugin-host-runtime.mjs"
+        },
+        {
+          "addedLines": "29",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/server/script_runtime_handlers.go"
+        },
+        {
+          "addedLines": "37",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/server/script_runtime_handlers_test.go"
+        },
+        {
+          "addedLines": "42",
+          "removedLines": "5",
+          "path": "services/ky-matrix-account-service/internal/store/script_runtime_resolver.go"
+        },
+        {
+          "addedLines": "17",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/store/script_runtime_resolver_test.go"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "0",
+          "path": "services/ky-matrix-account-service/internal/store/script_runtime_types.go"
+        },
+        {
+          "addedLines": "13",
+          "removedLines": "1",
+          "path": "services/ky-membership-service/internal/server/management_menu_handlers.go"
+        },
+        {
+          "addedLines": "589",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/menu_webview_handlers.go"
+        },
+        {
+          "addedLines": "182",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/menu_webview_handlers_test.go"
+        },
+        {
+          "addedLines": "35",
+          "removedLines": "1",
+          "path": "services/ky-membership-service/internal/server/workbench_menu_handlers.go"
+        },
+        {
+          "addedLines": "36",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/server/workbench_menu_handlers_test.go"
+        },
+        {
+          "addedLines": "95",
+          "removedLines": "20",
+          "path": "services/ky-membership-service/internal/store/management_menu_catalog.go"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "3",
+          "path": "services/ky-membership-service/internal/store/menu_allowlist.go"
+        },
+        {
+          "addedLines": "799",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/menu_webview.go"
+        },
+        {
+          "addedLines": "121",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/menu_webview_revision_integration_test.go"
+        },
+        {
+          "addedLines": "396",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/menu_webview_test.go"
+        },
+        {
+          "addedLines": "114",
+          "removedLines": "20",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_admin.go"
+        },
+        {
+          "addedLines": "77",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_migration_test.go"
+        },
+        {
+          "addedLines": "32",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_schema_migration_test.go"
+        },
+        {
+          "addedLines": "40",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_write_errors.go"
+        },
+        {
+          "addedLines": "45",
+          "removedLines": "0",
+          "path": "services/ky-membership-service/internal/store/workbench_menu_write_errors_test.go"
+        }
+      ]
+    },
+    {
+      "path": "prerequisites/01-web-window-foundation.patch",
+      "sha256": "900b138357e9180ba6acdb4bccfc5b77624c092076d81c85c503386010bd3ead",
+      "files": [
+        {
+          "addedLines": "38",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/login-space-info-sdk.test.mjs"
+        },
+        {
+          "addedLines": "24",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/login-space-info-sdk.ts"
+        },
+        {
+          "addedLines": "140",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-injection-plan.test.mjs"
+        },
+        {
+          "addedLines": "270",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-injection-plan.ts"
+        },
+        {
+          "addedLines": "158",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-injector.electron.test.mjs"
+        },
+        {
+          "addedLines": "75",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-injector.test.mjs"
+        },
+        {
+          "addedLines": "167",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-injector.ts"
+        },
+        {
+          "addedLines": "216",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-cache.ts"
+        },
+        {
+          "addedLines": "114",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-contract.ts"
+        },
+        {
+          "addedLines": "15",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-lifecycle-contract.test.mjs"
+        },
+        {
+          "addedLines": "61",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.test.mjs"
+        },
+        {
+          "addedLines": "166",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-manifest-sync.ts"
+        },
+        {
+          "addedLines": "38",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-origin-policy.test.mjs"
+        },
+        {
+          "addedLines": "84",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-origin-policy.ts"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime-sdk-contract.test.mjs"
+        },
+        {
+          "addedLines": "907",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime.test.mjs"
+        },
+        {
+          "addedLines": "1223",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/script-runtime.ts"
+        },
+        {
+          "addedLines": "761",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-injection-window.ts"
+        },
+        {
+          "addedLines": "55",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-action-contract.test.mjs"
+        },
+        {
+          "addedLines": "113",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-injection.test.mjs"
+        },
+        {
+          "addedLines": "93",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-injection.ts"
+        },
+        {
+          "addedLines": "73",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-manager.test.mjs"
+        },
+        {
+          "addedLines": "64",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-manager.ts"
+        },
+        {
+          "addedLines": "172",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation-controller.ts"
+        },
+        {
+          "addedLines": "399",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation.electron.test.mjs"
+        },
+        {
+          "addedLines": "57",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation.test.mjs"
+        },
+        {
+          "addedLines": "56",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-navigation.ts"
+        },
+        {
+          "addedLines": "88",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-network.electron.test.mjs"
+        },
+        {
+          "addedLines": "131",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-network.test.mjs"
+        },
+        {
+          "addedLines": "213",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-network.ts"
+        },
+        {
+          "addedLines": "49",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-remote-image.test.mjs"
+        },
+        {
+          "addedLines": "146",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-remote-image.ts"
+        },
+        {
+          "addedLines": "65",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-sdk-host-contract.test.mjs"
+        },
+        {
+          "addedLines": "44",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-store-sdk.test.mjs"
+        },
+        {
+          "addedLines": "51",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-store-sdk.ts"
+        },
+        {
+          "addedLines": "134",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-view.ts"
+        },
+        {
+          "addedLines": "285",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/web-window-ui.ts"
+        },
+        {
+          "addedLines": "647",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/web-window.ts"
+        },
+        {
+          "addedLines": "73",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/shared/web-window-action.ts"
+        },
+        {
+          "addedLines": "234",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/shared/web-window-contract.ts"
+        },
+        {
+          "addedLines": "558",
+          "removedLines": "0",
+          "path": "docs/desktop-host-plugins/web-window-plugin/2026-10-04-Web专用窗口JSSDK接口参考.md"
+        },
+        {
+          "addedLines": "89",
+          "removedLines": "0",
+          "path": "packages/desktop-plugin-contracts/src/web-window.test.mjs"
+        },
+        {
+          "addedLines": "107",
+          "removedLines": "0",
+          "path": "packages/desktop-plugin-contracts/src/web-window.ts"
+        }
+      ]
+    },
+    {
+      "path": "prerequisites/02-web-window-plugin.patch",
+      "sha256": "f0aaf3f3a9c8edaff0cc1bf862034bbafea6b8bbc7104fad572dfc5382cab1e2",
+      "files": [
+        {
+          "addedLines": "14",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json"
+        },
+        {
+          "addedLines": "5",
+          "removedLines": "4",
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs"
+        },
+        {
+          "addedLines": "13",
+          "removedLines": "7",
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts"
+        },
+        {
+          "addedLines": "24",
+          "removedLines": "13",
+          "path": "apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs"
+        },
+        {
+          "addedLines": "89",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts"
+        },
+        {
+          "addedLines": "411",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-window-plugin-host.ts"
+        },
+        {
+          "addedLines": "2",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/plugin-host-bridge.ts"
+        },
+        {
+          "addedLines": "19",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/web-window-plugin.ts"
+        },
+        {
+          "addedLines": "12",
+          "removedLines": "0",
+          "path": "desktop-plugins/kww-web-window/v1/manifest.json"
+        },
+        {
+          "addedLines": "27",
+          "removedLines": "0",
+          "path": "desktop-plugins/kww-web-window/v1/plugin.js"
+        },
+        {
+          "addedLines": "4",
+          "removedLines": "3",
+          "path": "scripts/desktop-plugins/build-preloads.mjs"
+        },
+        {
+          "addedLines": "39",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/deploy-web-window-public.mjs"
+        },
+        {
+          "addedLines": "1",
+          "removedLines": "1",
+          "path": "scripts/desktop-plugins/package-format.mjs"
+        },
+        {
+          "addedLines": "89",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/sign-web-window.mjs"
+        },
+        {
+          "addedLines": "6",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/test-electron.mjs"
+        },
+        {
+          "addedLines": "178",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/web-window-distribution.test.mjs"
+        },
+        {
+          "addedLines": "15",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/web-window-logo-layout.test.mjs"
+        },
+        {
+          "addedLines": "636",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/web-window-plugin-host-runtime.mjs"
+        },
+        {
+          "addedLines": "16",
+          "removedLines": "0",
+          "path": "scripts/desktop-plugins/web-window-version-panel.test.mjs"
+        }
+      ]
+    },
+    {
+      "path": "prerequisites/03-desktop-host-integration.patch",
+      "sha256": "0df1e837d4db72df22175ba557d9d74fa29c946929c0d0d2d0ae3cf6bca2bd33",
+      "files": [
+        {
+          "addedLines": "1",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/electron.vite.config.ts"
+        },
+        {
+          "addedLines": "13",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/package.json"
+        },
+        {
+          "addedLines": "885",
+          "removedLines": "12",
+          "path": "apps/aicrm-desktop/src/main/app-window.ts"
+        },
+        {
+          "addedLines": "13",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/async-timeout.ts"
+        },
+        {
+          "addedLines": "4",
+          "removedLines": "3",
+          "path": "apps/aicrm-desktop/src/main/guarded-ipc.ts"
+        },
+        {
+          "addedLines": "46",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/index.ts"
+        },
+        {
+          "addedLines": "1171",
+          "removedLines": "100",
+          "path": "apps/aicrm-desktop/src/main/ipc/matrix-account-ipc.ts"
+        },
+        {
+          "addedLines": "22",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/login-space-websocket-policy.ts"
+        },
+        {
+          "addedLines": "24",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/login-space-window-counts.ts"
+        },
+        {
+          "addedLines": "30",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-debug-log.ts"
+        },
+        {
+          "addedLines": "320",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-cloud-sync.ts"
+        },
+        {
+          "addedLines": "59",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-local-state.ts"
+        },
+        {
+          "addedLines": "333",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-profile-store.ts"
+        },
+        {
+          "addedLines": "48",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-restore-diagnostics.ts"
+        },
+        {
+          "addedLines": "61",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-login-space-restore-validation.ts"
+        },
+        {
+          "addedLines": "170",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-portable-cookies.ts"
+        },
+        {
+          "addedLines": "360",
+          "removedLines": "6",
+          "path": "apps/aicrm-desktop/src/main/matrix-account-session-vault.ts"
+        },
+        {
+          "addedLines": "99",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/web-space-context.ts"
+        },
+        {
+          "addedLines": "32",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/main/window-lifecycle.ts"
+        },
+        {
+          "addedLines": "44",
+          "removedLines": "1",
+          "path": "apps/aicrm-desktop/src/preload/bridge.ts"
+        },
+        {
+          "addedLines": "64",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/index.ts"
+        },
+        {
+          "addedLines": "36",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/matrix-account-local-data-compat.ts"
+        },
+        {
+          "addedLines": "19",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/preload/types.ts"
+        },
+        {
+          "addedLines": "35",
+          "removedLines": "3",
+          "path": "apps/aicrm-desktop/src/shared/constants.ts"
+        },
+        {
+          "addedLines": "69",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/shared/login-space-protocol-whitelist.ts"
+        },
+        {
+          "addedLines": "143",
+          "removedLines": "0",
+          "path": "apps/aicrm-desktop/src/shared/types.ts"
+        },
+        {
+          "addedLines": "3",
+          "removedLines": "2",
+          "path": "packages/desktop-plugin-contracts/src/index.ts"
+        },
+        {
+          "addedLines": "189",
+          "removedLines": "0",
+          "path": "packages/ky-admin-core/src/matrix-account-desktop.ts"
+        },
+        {
+          "addedLines": "18",
+          "removedLines": "0",
+          "path": "pnpm-lock.yaml"
+        }
+      ]
+    }
+  ],
+  "coreResultFiles": [
+    {
+      "path": "apps/ky-admin-host/src/app.tsx",
+      "sha256": "675e8c2661a23d966c3732f555cea040d39448f1a7d866772ef206bbdcacc94e"
+    },
+    {
+      "path": "apps/ky-admin-host/src/nav-open-state.ts",
+      "sha256": "8e5bab871c93ff2407cfa64b2ae25ff0a649a240b103d5c97195519c2180e9ca"
+    },
+    {
+      "path": "apps/ky-admin-host/src/pages/workbench.tsx",
+      "sha256": "c4629ec777f8cd1f065650d590e44171d1ce2607fe7efa7035906b9a153a3b87"
+    },
+    {
+      "path": "apps/ky-admin-host/src/styles.css",
+      "sha256": "4f9e312c9c76466014aa857373526dfce633b459d297f88c6497dfc9aaad8cd2"
+    },
+    {
+      "path": "apps/ky-admin-host/src/workbench-menu-guard-contract.test.mjs",
+      "sha256": "a310f984105965057a8acf33ff1232a73cd4f77bc9692928f6af798c295866ac"
+    },
+    {
+      "path": "docs/workbench-menu/2026-10-10-工作台菜单需求与迭代锁定.md",
+      "sha256": "8cdf7c09de39bbcbca33662660ddc9ac98984df2fb85248220c00b0e384e7213"
+    },
+    {
+      "path": "docs/workbench-menu/2026-10-10-现有工作台菜单与权限映射.md",
+      "sha256": "503ca6d6b76d17cd448aada417f0f662aa6b32702e4ac5f704b69c14e123ac91"
+    },
+    {
+      "path": "docs/workbench-menu/2026-10-11-菜单角色与成员白名单权限.md",
+      "sha256": "45187d0957deb56a1d38d033430f11d2b594eecb44a751a77136c1ccbb4d1f6c"
+    },
+    {
+      "path": "ops/db/106_workbench_menu_authorization.sql",
+      "sha256": "e679cf91f6c0b640a460a07a0c1d871347628c69bb3155e470e920ccd4ddf0a2"
+    },
+    {
+      "path": "ops/db/108_workbench_builtin_menus.sql",
+      "sha256": "a26e07282bb4d4c5f01cb73115e27838eaeae5d8e9f8369888e01e1fbba846b5"
+    },
+    {
+      "path": "ops/db/109_management_center_menu_catalog.sql",
+      "sha256": "6a8a03c538b61c90dc0e062812574ee5843d88c449957fe8751b4aa856cc2d5e"
+    },
+    {
+      "path": "ops/db/110_menu_workspace_allowlists.sql",
+      "sha256": "09714e3c4ca24453b3d0167d8706bbf0736aed4bfca78d88deebff4f0e437c95"
+    },
+    {
+      "path": "packages/ky-admin-core/src/index.ts",
+      "sha256": "9cb1f2fbd051fb62bb2e05976dbdd94f16da2bff999497ee33e7ffe9238672df"
+    },
+    {
+      "path": "packages/ky-admin-core/src/management-list-extension.tsx",
+      "sha256": "917bef3748750c4529b1af00cba6a68866a2f3c6c45f58cdd4441261093893c1"
+    },
+    {
+      "path": "packages/ky-admin-core/src/management-menu-registry-context.tsx",
+      "sha256": "56cd7f803f07950e99251c95fd0db409ee4afb0629620209e6cc07bebff68e9c"
+    },
+    {
+      "path": "packages/ky-admin-core/src/management-menu-registry.ts",
+      "sha256": "5ea90eed7bd6c250092b79620e12ee68feafc81bf99d4931c7e596deaeb130da"
+    },
+    {
+      "path": "packages/ky-admin-core/src/permissions.tsx",
+      "sha256": "16e2e39a65d379e046e5f8f335452d419ad37c95acc58a5e5d48fd50f64eb00b"
+    },
+    {
+      "path": "plugins/ky-access-management/src/api.ts",
+      "sha256": "8ae9d2848c0166c551dda3577bba1644406fd0c1e44822a7f02531d48cb261cf"
+    },
+    {
+      "path": "plugins/ky-access-management/src/index.tsx",
+      "sha256": "08b7b2efd831c45ddfffbcce24ca4e313fab1360e7936fa2b0c1a43c40d5c21e"
+    },
+    {
+      "path": "plugins/ky-access-management/src/management-menu-merge.ts",
+      "sha256": "2a4b13c30db0b9ad3d431bd4db96ceb0b9510ee85af0db9084b388d6af73e5e4"
+    },
+    {
+      "path": "plugins/ky-access-management/src/management-menu-view.test.mjs",
+      "sha256": "75aa8712dc226f4b77641cbb2d3a7b7ac9bd296294f976c132a660a970b163a7"
+    },
+    {
+      "path": "plugins/ky-access-management/src/management-menu-view.ts",
+      "sha256": "732b47920814372c9443e8f442abe7c0fc143480a0d283c5b5e867c94d49e2dc"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-action-grid.ts",
+      "sha256": "5cc736b201850b01a5f237adc6b2f5ea5d7556118d390f4f7d1057e03fba417d"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-allowlist-drawer.tsx",
+      "sha256": "78997af74175680be43db490011305896e423745601788946bc5f86ff23bcd6d"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-allowlist.test.mjs",
+      "sha256": "a70b1a7a213e54212e8a5da1411bdb2ab8e74d542f6ea41e86a7d63a245caef2"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-catalog-components.tsx",
+      "sha256": "849570cafaa7739ba4aa4bcc048e94998806cc304fd3b4697f57f023c768233b"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-catalog-form-drawer.tsx",
+      "sha256": "033b58bd98b53ae306d16b12ce61bd9bed40ff733943d4ab918b552ce78a4e82"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-management-contract.ts",
+      "sha256": "df905d17bf657e985f92b25fbd02994d35cd39a7a84966c09afe6e2e0d550973"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-status-toggle.test.mjs",
+      "sha256": "c304167e4c1e58caa2d7a0f8e78269c9f9695b8d3d2a304b480c5c7e3c194080"
+    },
+    {
+      "path": "plugins/ky-access-management/src/menu-subtitle.ts",
+      "sha256": "704d797faa002450b56111440c399f6da8a4131cf3d1c8156f3c22975ef5f15f"
+    },
+    {
+      "path": "plugins/ky-access-management/src/pages/management-menus-tab.tsx",
+      "sha256": "cf33ed26217822c328e3fcaf61e76f25e08309ca638c3950654180744bcab4a2"
+    },
+    {
+      "path": "plugins/ky-access-management/src/pages/permissions-page.tsx",
+      "sha256": "6b4965ca0b49901f657d3231165e596fdc9d8dd38c86d4ba97d79da471b4720e"
+    },
+    {
+      "path": "plugins/ky-access-management/src/pages/roles-page.tsx",
+      "sha256": "6157d7d6d5e869782148b8129ba75d805caba8dcc70caae8c4f5dc2b2943e408"
+    },
+    {
+      "path": "plugins/ky-access-management/src/pages/workbench-menus-page.tsx",
+      "sha256": "2cdc5df664e8bd2a8872e54a36d242b2f5dc80ee69be3b9f4d78f32ac645df99"
+    },
+    {
+      "path": "plugins/ky-access-management/src/permission-labels.ts",
+      "sha256": "1dee47086fdf111fe7100626b22a5b9753a72abc13a816ad72825a3f241c0191"
+    },
+    {
+      "path": "plugins/ky-access-management/src/permission-tree.test.mjs",
+      "sha256": "f2ab1cb7b2bc4533f5e65fe4e45e3d74ed6f760285b1bc4e95bc6b1918d4f9ea"
+    },
+    {
+      "path": "plugins/ky-access-management/src/permission-tree.ts",
+      "sha256": "91411c281e16544ced8da30551ecedba35b97b70cce4e5f06217e668064026d1"
+    },
+    {
+      "path": "plugins/ky-access-management/src/role-permission-contract.test.mjs",
+      "sha256": "60a0ce7b5b4339d3608f4e189a9624eaa42ff6206714c65dc3fb8904d67447c7"
+    },
+    {
+      "path": "plugins/ky-access-management/src/role-permission-contract.ts",
+      "sha256": "d7afb60e095b6bfe2bbb4aa29ad13c39aa7e293a9bb37208ddeef6ddcfe863c3"
+    },
+    {
+      "path": "plugins/ky-access-management/src/routes.tsx",
+      "sha256": "072f3d6d50567bd61cf3f704848f59098cd558f1dc3e14960262ef586a1e4efc"
+    },
+    {
+      "path": "plugins/ky-access-management/src/workbench-menu-contract.test.mjs",
+      "sha256": "d588cde886fd58580d26216e083c38bdf113f6d3df0f9f70e4553e68dfecc281"
+    },
+    {
+      "path": "plugins/ky-access-management/src/workbench-menu-view.test.mjs",
+      "sha256": "9ccebf030a170bd94cd253053a818ec718b45d3762239255d62b9e3daf2af0d7"
+    },
+    {
+      "path": "plugins/ky-access-management/src/workbench-menu-view.ts",
+      "sha256": "86de46517a06296988cde681f308ead1f55eaf8a0f28c9b771ca1d1191f48b34"
+    },
+    {
+      "path": "services/ky-auth-service/internal/server/server.go",
+      "sha256": "3a9825cde8b2290d64ab2dd6605662a12e98f2b139b5e3660aea37e8241ad1a3"
+    },
+    {
+      "path": "services/ky-auth-service/internal/server/workbench_menu_client.go",
+      "sha256": "08770a2f06610109bf7353108827b62e0c208411747f914bd4ecf058a773f48a"
+    },
+    {
+      "path": "services/ky-auth-service/internal/server/workbench_menu_client_test.go",
+      "sha256": "6c2f26216371afdd1128520c1dbaf535ba7f07d69eaf04557f9efa7558a64cf7"
+    },
+    {
+      "path": "services/ky-auth-service/internal/store/models.go",
+      "sha256": "8900fa561b43a40377bdbe13904b555a6919331abe92d93ded40f233d9d19b81"
+    },
+    {
+      "path": "services/ky-matrix-account-service/internal/config/config.go",
+      "sha256": "a9515a4d2196446d95ed0f2dc41d0cae7b3b4afeff158487a56964675c69f6c9"
+    },
+    {
+      "path": "services/ky-matrix-account-service/internal/server/server.go",
+      "sha256": "855dd93fa23e093433c9e1170c4760adae6124f6b98c300d4b60aca7589377b0"
+    },
+    {
+      "path": "services/ky-matrix-account-service/internal/server/workbench_menu_client.go",
+      "sha256": "5f004762c2fd25ae086dc4669fd6dca6982d41dd3bb92fb3df5ad63e2a761b53"
+    },
+    {
+      "path": "services/ky-matrix-account-service/internal/server/workbench_menu_client_test.go",
+      "sha256": "bdc15fbf2f9a1091b8b3ae62ca4125be5b7a288b8ec6c346d74269e97cb65acd"
+    },
+    {
+      "path": "services/ky-matrix-account-service/internal/store/account_store.go",
+      "sha256": "df58e7a026f4c44ae0c420c24e2f4ab47bdeb16332d3ec60daab5f816a7ea04f"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/access_handlers.go",
+      "sha256": "60b8bac218dc8bef1a690d6d3e6ffa304099b78e380814f2c9df844cc15ca132"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/internal_access.go",
+      "sha256": "4fd51e315722f5bd9a7f914887520154b87feb254df32296b66fb90e14c9b91c"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/internal_access_test.go",
+      "sha256": "bc279938bceb12cc9e7f31cc6c64a9e10bf25cf91e3dc617c2c0dd85795eb845"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/internal_workbench_menu_test.go",
+      "sha256": "1aec8d9250367745550593a5ef454bc3131e1e193dd83fbd2943074f81984c76"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/management_menu_handlers.go",
+      "sha256": "e23bb66035603562581b95d512771c90760ec0cd15bcd23ecd061697c80d3a53"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/management_menu_handlers_test.go",
+      "sha256": "3f58843ffa20f80a1fd97a936b2cddff13116e8ae5e91132489dd649c438bb4a"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/server.go",
+      "sha256": "07deb40d872bb884617d3552fa77ce66f876f233333ebc78e7265bb651ef09af"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/workbench_menu_handlers.go",
+      "sha256": "0c047990f42e61332b8dfcdbdfd02676195cf461bac4e3929bb7954c2bdd1284"
+    },
+    {
+      "path": "services/ky-membership-service/internal/server/workbench_menu_handlers_test.go",
+      "sha256": "0caafd485ef7b9d0651a679ba0a9f338ede9af626cc7fc03cc6667a8af9fa0be"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/access_decision_store.go",
+      "sha256": "8831f2b7a3ae47263f14fc647303d639137726a68a1d3f8a50c5f26623533009"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/management_menu_catalog.go",
+      "sha256": "70acfb91535a145c698256d1f8064901d5f6527c70509135ff9504f9d2dc655b"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/management_menu_catalog_test.go",
+      "sha256": "9ff3133508a1c6e97306476fc6e3f3ab6bdae8463dfa6d077dfc8df8652c6439"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/menu_allowlist.go",
+      "sha256": "e7c40fe04750e891f67ba1d14534a24251a6d13f4b723f9858bbde8f7b573e42"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/menu_allowlist_test.go",
+      "sha256": "e46af6316ad45ae66e4e09281dc19a025fc98ce37f52034fa32d61343f2a87f9"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/models.go",
+      "sha256": "f854e94ed5972ebf8eb2706c25850cebe8ca74cd314ac89e119c5077cc9f176d"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/role_store.go",
+      "sha256": "f8889a457765ef717c19754de493b3b77585bbbd9d0b4c37301575284021b6db"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/role_store_test.go",
+      "sha256": "513b0b00be83bc8c9bcf784c29c38e74b75b69feddaba264da385de9bb4c4853"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/workbench_menu_access.go",
+      "sha256": "a0b606ae9b774d21312cb4ea05e9dd6839859aad3d4fc5fd22a9a25f021143ee"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/workbench_menu_access_test.go",
+      "sha256": "f2c67d6ce28c156ec59229ab413fe757c1b1884b7e80a6d6083d45c0aab67083"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/workbench_menu_admin.go",
+      "sha256": "de7efa94d3d4c8dc98cb7a1e607040d75d9a5bc3fbf628114232665be6c5862b"
+    },
+    {
+      "path": "services/ky-membership-service/internal/store/workbench_menu_migration_test.go",
+      "sha256": "4fbb3f451c3b8f5b7cd29fe8f37a47277230168a17e0d0492b26c492c1db8930"
+    }
+  ]
+}

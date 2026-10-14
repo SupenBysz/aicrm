@@ -1,0 +1,1831 @@
+diff --git a/apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json b/apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..c3c16ffba4feddf8434479d9d8126ac69c51469f
+--- /dev/null
++++ b/apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json
+@@ -0,0 +1,14 @@
++{
++  "pluginId": "cn.org.kww.desktop.web-window",
++  "scope": "web-window",
++  "publicKey": {
++    "schemaVersion": 1,
++    "purpose": "kww-desktop-plugin-signing",
++    "channel": "dev",
++    "algorithm": "Ed25519",
++    "publicKeyFormat": "raw-ed25519-base64",
++    "publicKey": "rLwqBd2pB7KJmxQhTX4AEm0m/1DZqPLYJdGaX63alcI=",
++    "fingerprint": "sha256:b6ae2baa579b52abf6e91a6d1bc50cb52e2b5c40e5335e632a7b50ddd2d492d2",
++    "keyId": "sha256:b6ae2baa579b52abf6e91a6d1bc50cb52e2b5c40e5335e632a7b50ddd2d492d2"
++  }
++}
+diff --git a/apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs b/apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs
+index 9ac335e66307d435c64d03e053b2220278844eb9..08f962fbeb353b09d04af47c0d505339eae59e84 100644
+--- a/apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs
++++ b/apps/aicrm-desktop/src/main/desktop-plugin-host/downloader.mjs
+@@ -1,7 +1,8 @@
+-import http from 'node:http';
++import https from 'node:https';
+ import { SOURCE, ensure } from '../../../../../packages/desktop-plugin-contracts/src/index.ts';
+-/** 仅固定 SSH 回环开发源；不跟随跳转、压缩或任意 URL。 */
+-export function download(name,max){ensure(name==='policy.json'||name==='index.json'||/^[a-f0-9]{64}\.kwwplugin\.json$/.test(name));return new Promise((resolve,reject)=>{
++/** 仅固定 HTTPS 分发源；不跟随跳转、压缩、HTTP 回退或任意 URL。 */
++export function downloadFrom(source,name,max){ensure(name==='policy.json'||name==='index.json'||/^[a-f0-9]{64}\.kwwplugin\.json$/.test(name));return new Promise((resolve,reject)=>{
+ let settled=false,connection;const finish=(e,b)=>{if(settled)return;settled=true;clearTimeout(total);clearTimeout(connection);if(e){req.destroy();reject(new Error('插件下载失败'));}else resolve(b);};
+-const req=http.get(new URL(name,SOURCE),{headers:{'Accept-Encoding':'identity'},agent:false},res=>{clearTimeout(connection);if(res.statusCode!==200||(res.headers['content-encoding']&&res.headers['content-encoding']!=='identity'))return finish(true);const declared=res.headers['content-length'];if(declared&&(!/^\d+$/.test(declared)||Number(declared)>max))return finish(true);const chunks=[];let size=0;res.on('data',b=>{size+=b.length;if(size>max)finish(true);else chunks.push(b);});res.on('end',()=>{if(declared&&size!==Number(declared))return finish(true);finish(null,Buffer.concat(chunks));});res.on('error',()=>finish(true));});const total=setTimeout(()=>finish(true),30000);connection=setTimeout(()=>finish(true),5000);req.on('socket',s=>s.once('connect',()=>clearTimeout(connection)));req.on('error',()=>finish(true));
++const url=new URL(name,source);ensure(url.protocol==='https:'&&url.origin==='https://plugin.kww.org.cn'&&url.pathname.startsWith('/desktop-plugin-releases/dev/'));const req=https.get(url,{headers:{'Accept-Encoding':'identity'},agent:false,rejectUnauthorized:true,servername:'plugin.kww.org.cn'},res=>{clearTimeout(connection);if(res.statusCode!==200||(res.headers['content-encoding']&&res.headers['content-encoding']!=='identity'))return finish(true);const declared=res.headers['content-length'];if(declared&&(!/^\d+$/.test(declared)||Number(declared)>max))return finish(true);const chunks=[];let size=0;res.on('data',b=>{size+=b.length;if(size>max)finish(true);else chunks.push(b);});res.on('end',()=>{if(declared&&size!==Number(declared))return finish(true);finish(null,Buffer.concat(chunks));});res.on('error',()=>finish(true));});const total=setTimeout(()=>finish(true),30000);connection=setTimeout(()=>finish(true),5000);req.on('socket',s=>s.once('secureConnect',()=>clearTimeout(connection)));req.on('error',()=>finish(true));
+ });}
++export function download(name,max){return downloadFrom(SOURCE,name,max);}
+diff --git a/apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts b/apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts
+index b0a4a0694d290fcc677efa6b09faa2dc34c1c768..d3c499ac0a27c6bc31ba2ac402c04587622fd5a0 100644
+--- a/apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts
++++ b/apps/aicrm-desktop/src/main/desktop-plugin-host/host.ts
+@@ -13,19 +13,25 @@ declare const __KWW_PLUGIN_DEV_POLICY__: BuildPolicy | null;
+ const embeddedPolicy=__KWW_PLUGIN_DEV_POLICY__;
+ // 正式构建这里为 null，没有可用开发公钥/来源配置。
+ const devPolicy=embeddedPolicy as BuildPolicy;
+-import builtinManifest from '../../../../../desktop-plugins/kww-status-bar/v1/manifest.json';
+-import builtinSource from '../../../../../desktop-plugins/kww-status-bar/v1/plugin.js?raw';
++import builtinManifest from '../../../../../desktop-plugins/kww-status-bar/v2/manifest.json';
++import builtinSource from '../../../../../desktop-plugins/kww-status-bar/v2/plugin.js?raw';
++import legacyBuiltinSource from '../../../../../desktop-plugins/kww-status-bar/v1/plugin.js?raw';
+ import offlinePage from '../../../resources/desktop-offline.html?raw';
+ import { registerSender, senderRegistration, onSenderInvalidated, scopedIpc } from '../guarded-ipc';
+ import { IPC_CHANNELS as C, DESKTOP_APPLICATION_VERSION } from '../../shared/constants';
+ import type { DesktopPluginSnapshot, DesktopPluginInventoryItem } from '../../shared/types';
++import { loadMainWindowSessionToken, openLoginTestWindow } from '../app-window';
++import { readCachedScriptSummaries } from '../script-runtime-cache';
++import { refreshWebInjectionWindows } from '../web-injection-window';
+ 
+ type Ref={digest:string;version:string;authorizationDigest:string|null};
+ type Package={manifest:Manifest;files:Map<string,Buffer>;digest:string;signatureVerified?:boolean};
+ type Instance={win:BrowserWindow;wc:WebContents;pkg:Package;hello:boolean;ready:boolean;drained:boolean;heartbeat:number;projection:Projection;pending:Set<string>;epoch:string;challenge:string;revoked:boolean;publishes:number[];messages:number[]};
+ type UI={generation:number;sessionId:string;challenge:string;ack:boolean;stamp:string};
+ const builtin:Package={manifest:builtinManifest as Manifest,files:new Map([['plugin.js',Buffer.from(builtinSource)]]),digest:sha(Buffer.from(builtinSource))};
++const legacyBuiltinDigest=sha(Buffer.from(legacyBuiltinSource));
+ const builtinRef:Ref={digest:builtin.digest,version:builtin.manifest.version,authorizationDigest:null};
++const webWindowInitializingPage = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="color-scheme" content="light dark"><style>html,body{height:100%;margin:0}body{align-items:center;background:#f7efe4;color:#3b3025;display:flex;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;justify-content:center}.card{text-align:center;min-width:320px}.spinner{animation:spin 1s linear infinite;border:3px solid rgba(173,125,47,.2);border-radius:50%;border-top-color:#c9922e;height:34px;margin:0 auto 22px;width:34px}@keyframes spin{to{transform:rotate(360deg)}}h1{font-size:22px;font-weight:600;margin:0 0 10px}p{color:#8d8174;font-size:14px;margin:0}</style></head><body><main class="card"><div class="spinner" aria-hidden="true"></div><h1>正在初始化 Web 专用窗口</h1><p>正在准备页面脚本，请稍后…</p></main></body></html>`;
+ export function registerPluginSchemes(){protocol.registerSchemesAsPrivileged([{scheme:'kww-plugin',privileges:{standard:true,secure:true,supportFetchAPI:false}},{scheme:'kww-offline',privileges:{standard:true,secure:true}}]);}
+ const delay=(ms:number)=>new Promise(r=>setTimeout(r,ms));
+ let singleton:DesktopPluginHost|null=null;
+@@ -42,7 +48,7 @@ export class DesktopPluginHost {
+  pauseAt:string|null=null;resumeCheckpoint:(()=>void)|null=null;
+  enabled=permitsDevelopmentUpdates(embeddedPolicy!==null,app.isPackaged,process.platform);
+  async initialize(){this.storage.liveReferences=()=>[...this.instances.values()].map(i=>i.pkg.digest);console.info("客户端插件构建诊断",JSON.stringify({buildMarked:embeddedPolicy!==null,isPackaged:app.isPackaged,defaultApp:process.defaultApp===true,platform:process.platform,enabled:this.enabled}));this.storage.committed=async(next:any,before:any)=>{if(!this.stopping&&this.enabled&&next.phase===this.pauseAt&&(next.phase!=='stable'||before.phase==='probation')){this.pauseAt=null;this.log('验收暂停点:'+next.phase);await new Promise<void>(resolve=>{this.resumeCheckpoint=resolve;});this.resumeCheckpoint=null;}};if(embeddedPolicy)validateBuildPolicy(embeddedPolicy);this.registerIpc();this.cleanup=onSenderInvalidated(wc=>this.removeUi(wc));
+- protocol.handle('kww-offline',request=>{const u=new URL(request.url);if(u.hostname!=='local'||u.pathname!=='/')return new Response('',{status:404});return new Response(offlinePage,{headers:{'Content-Type':'text/html','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; frame-src 'none'"}});});
++ protocol.handle('kww-offline',request=>{const u=new URL(request.url);if(u.hostname!=='local'||!['/','/web-window-initializing'].includes(u.pathname))return new Response('',{status:404});const body=u.pathname==='/web-window-initializing'?webWindowInitializingPage:offlinePage;return new Response(body,{headers:{'Content-Type':'text/html','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; frame-src 'none'"}});});
+  try{await this.storage.init();if(!this.storage.state.recovery.updatesBlocked&&this.storage.state.highWater.policyDigest){try{ensure(this.enabled);const pb=await this.storage.evidenceRead(this.storage.state.highWater.policyDigest);signed(parse(pb),devPolicy.publicKey,'kww-desktop-plugin-policy:v1');if(this.storage.state.highWater.indexDigest){const ib=await this.storage.evidenceRead(this.storage.state.highWater.indexDigest);signed(parse(ib),devPolicy.publicKey,'kww-desktop-plugin-index:v1');}}catch{await this.storage.block();}}await this.startStable();}catch{if(this.stopping)return;this.log('plugin_storage_unsafe');this.active=await this.spawn(builtin);await this.prepare(this.active);await this.activateInstance(this.active);this.projection=this.active.projection;}
+  if(this.stopping)return;this.timer=setInterval(()=>{this.refreshVisibility();if(!this.busy&&this.active&&Date.now()-this.active.heartbeat>6500){void this.recoverActive();}},1000);
+  }
+@@ -52,7 +58,7 @@ export class DesktopPluginHost {
+  const inventoryIpc=scopedIpc(['main'],args=>args.length===1&&Buffer.byteLength(JSON.stringify(args))<=65536&&args[0]!==null&&typeof args[0]==='object'&&!Array.isArray(args[0])&&Object.keys(args[0]).length===0);
+  inventoryIpc.handle(C.desktopPluginsInventory,(_e,input)=>{ensure(input!==null&&typeof input==='object'&&!Array.isArray(input)&&Object.getPrototypeOf(input)===Object.prototype&&Object.keys(input).length===0);const result=this.inventory();ensure(result.length<=200&&Buffer.byteLength(JSON.stringify(result))<=65536);return result;});
+  web.handle(C.desktopPluginsRegisterUi,(e,input)=>{object(input,['uiApiVersion','slots']);ensure(input.uiApiVersion===UI_API&&Array.isArray(input.slots)&&input.slots.length===1&&input.slots[0]==='statusBar.right');const generation=senderRegistration(e.sender)!.generation;const old=this.uis.get(e.sender);if(!old||old.generation!==generation){this.uis.set(e.sender,{generation,sessionId:randomUUID(),challenge:'',ack:false,stamp:''});this.membershipChanged();}if(!this.busy&&this.storage.state?.candidate)void this.resumeCandidate();return this.snapshot(e.sender);});
+- web.handle(C.desktopPluginsUnregisterUi,e=>{this.removeUi(e.sender);return true;});web.handle(C.desktopPluginsSnapshot,e=>this.snapshot(e.sender));
++ web.handle(C.desktopPluginsUnregisterUi,e=>{this.removeUi(e.sender);return true;});web.handle(C.desktopPluginsSnapshot,e=>this.snapshot(e.sender));web.handle(C.desktopPluginsCachedScripts,e=>readCachedScriptSummaries(join(app.getPath('userData'),'script-runtime-cache.json'),Date.now(),join(app.getPath('userData'),'script-runtime-manifest.json')));web.handle(C.desktopPluginsRefreshCachedScripts,async()=>{await refreshWebInjectionWindows();return true;});
+  web.handle(C.desktopPluginsAck,(e,ack)=>{object(ack,['uiSessionId','navigationGeneration','uiMembershipRevision','activeRevision','digest','challenge']);const ui=this.uis.get(e.sender);const expected=this.snapshot(e.sender).confirmation;if(!ui||!expected||!Object.keys(expected).every(k=>(expected as any)[k]===ack[k])||!this.visible(e.sender))return false;ui.ack=true;return true;});
+  web.handle(C.desktopPluginsAction,(e,input)=>{object(input,['actionId','activeRevision']);const i=this.active;ensure(this.uis.has(e.sender)&&this.visible(e.sender)&&i&&!i.revoked&&!this.busy&&this.storage.state?.activeRevision===input.activeRevision&&i.pkg.manifest.contributes.actions.includes(input.actionId));ensure(i.pending.size<8);const id=randomUUID();i.pending.add(id);i.win.webContents.send(C.desktopPluginsActionEvent,{requestId:id,actionId:input.actionId});setTimeout(()=>{if(i.pending.has(id)){i.pending.delete(id);this.log('plugin_action_timeout');}},5000);return true;});
+  const plugin=scopedIpc(['plugin'],args=>this.validInput(args));const instance=(e:any)=>{const i=this.instances.get(e.sender);ensure(i&&!i.revoked);const now=Date.now();i.messages=i.messages.filter(t=>now-t<1000);ensure(i.messages.length<20);i.messages.push(now);return i;};
+@@ -76,12 +82,12 @@ export class DesktopPluginHost {
+  removeUi(wc:WebContents){if(this.uis.delete(wc))this.membershipChanged();}
+  required(){return [...this.uis.keys()].filter(w=>this.visible(w));}
+  confirmed(){const required=this.required();return required.length>0&&required.every(w=>this.uis.get(w)!.ack);}
+- snapshot(wc?:WebContents):DesktopPluginSnapshot {const i=this.active;const revision=this.storage.state?.activeRevision??0;const operationId=this.storage.state?.operationId??this.epoch;const result:DesktopPluginSnapshot={id:this.epoch+':'+this.sequence,name:'desktop-plugins:changed',version:1,source:'main',scope:'app',occurredAt:new Date().toISOString(),correlationId:operationId,operationId,runtimeEpoch:this.epoch,nativeSequence:this.sequence,activeRevision:revision,digest:i?.pkg.digest??builtin.digest,pluginVersion:i?.pkg.manifest.version??builtin.manifest.version,phase:this.storage.state?.phase??'blocked',items:this.projection.items};const ui=wc&&this.uis.get(wc);if(ui&&wc&&this.visible(wc)){const stamp=[ui.generation,this.uiMembershipRevision,revision,result.digest].join(':');if(ui.stamp!==stamp){ui.stamp=stamp;ui.challenge=randomUUID();ui.ack=false;}result.confirmation={uiSessionId:ui.sessionId,navigationGeneration:ui.generation,uiMembershipRevision:this.uiMembershipRevision,activeRevision:revision,digest:result.digest,challenge:ui.challenge};}return result;}
++ snapshot(wc?:WebContents):DesktopPluginSnapshot {const i=this.active;const revision=this.storage.state?.activeRevision??0;const operationId=this.storage.state?.operationId??this.epoch;const result:DesktopPluginSnapshot={id:this.epoch+':'+this.sequence,name:'desktop-plugins:changed',version:1,source:'main',scope:'app',occurredAt:new Date().toISOString(),correlationId:operationId,operationId,runtimeEpoch:this.epoch,nativeSequence:this.sequence,activeRevision:revision,digest:i?.pkg.digest??builtin.digest,pluginVersion:i?.pkg.manifest.version??builtin.manifest.version,phase:this.storage.state?.phase??'blocked',items:this.projection.items,cachedScripts:readCachedScriptSummaries(join(app.getPath('userData'),'script-runtime-cache.json'),Date.now(),join(app.getPath('userData'),'script-runtime-manifest.json'))};const ui=wc&&this.uis.get(wc);if(ui&&wc&&this.visible(wc)){const stamp=[ui.generation,this.uiMembershipRevision,revision,result.digest].join(':');if(ui.stamp!==stamp){ui.stamp=stamp;ui.challenge=randomUUID();ui.ack=false;}result.confirmation={uiSessionId:ui.sessionId,navigationGeneration:ui.generation,uiMembershipRevision:this.uiMembershipRevision,activeRevision:revision,digest:result.digest,challenge:ui.challenge};}return result;}
+  notify(){this.sequence++;for(const wc of this.uis.keys())if(!wc.isDestroyed())wc.send(C.desktopPluginsChanged,this.snapshot(wc));}
+  async spawn(pkg:Package){ensure(!this.stopping);const id=randomUUID(),challenge=randomUUID();const ses=session.fromPartition('kww-plugin-'+id);ses.setPermissionRequestHandler((_w,_p,callback)=>callback(false));ses.setPermissionCheckHandler(()=>false);ses.webRequest.onBeforeRequest((details,callback)=>{callback({cancel:!details.url.startsWith('kww-plugin://'+pkg.digest+'/')});});
+  ses.protocol.handle('kww-plugin',async request=>{const u=new URL(request.url);if(u.hostname!==pkg.digest||u.search||u.hash)return new Response('',{status:403});if(u.pathname==='/')return new Response('<!doctype html><meta charset="utf-8"><script src="./'+pkg.manifest.entry+'"></script>',{headers:{'Content-Type':'text/html','Content-Security-Policy':"default-src 'none'; script-src 'self'; connect-src 'none'; worker-src 'none'; frame-src 'none'; object-src 'none'"}});const data=pkg.files.get(u.pathname.slice(1));return data?new Response(new Uint8Array(data),{headers:{'Content-Type':'text/javascript','Content-Security-Policy':"default-src 'none'"}}):new Response('',{status:404});});
+  const win=new BrowserWindow({show:false,webPreferences:{session:ses,preload:join(__dirname,'../preload/desktop-plugin.js'),sandbox:true,contextIsolation:true,nodeIntegration:false,nodeIntegrationInWorker:false,webSecurity:true,backgroundThrottling:false,webviewTag:false,devTools:false,additionalArguments:['--kww-plugin-bootstrap='+Buffer.from(JSON.stringify({challenge,digest:pkg.digest,pluginApi:PLUGIN_API})).toString('base64')]}});
+- const i:Instance={win,wc:win.webContents,pkg,hello:false,ready:false,drained:false,heartbeat:Date.now(),projection:{items:[]},pending:new Set(),epoch:id,challenge,revoked:false,publishes:[],messages:[]};this.instances.set(win.webContents,i);registerSender(win.webContents,'plugin',url=>url==='kww-plugin://'+pkg.digest+'/');win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',e=>e.preventDefault());win.webContents.on('will-attach-webview',e=>e.preventDefault());ses.on('will-download',e=>e.preventDefault());win.webContents.on('render-process-gone',()=>{i.heartbeat=0;});const wc=win.webContents;win.once('closed',()=>this.instances.delete(wc));try{await Promise.race([win.loadURL('kww-plugin://'+pkg.digest+'/'),delay(5000).then(()=>{throw Error('plugin_timeout');})]);ensure(!this.stopping);return i;}catch(e){this.destroy(i);throw e;}
++ const i:Instance={win,wc:win.webContents,pkg,hello:false,ready:false,drained:false,heartbeat:Date.now(),projection:{items:[]},pending:new Set(),epoch:id,challenge,revoked:false,publishes:[],messages:[]};this.instances.set(win.webContents,i);registerSender(win.webContents,'plugin',url=>url==='kww-plugin://'+pkg.digest+'/');win.webContents.setWindowOpenHandler(({url})=>{void loadMainWindowSessionToken().then(token=>openLoginTestWindow(url,token)).catch(()=>{openLoginTestWindow(url);});return {action:'deny'};});win.webContents.on('will-navigate',e=>e.preventDefault());win.webContents.on('will-attach-webview',e=>e.preventDefault());ses.on('will-download',e=>e.preventDefault());win.webContents.on('render-process-gone',()=>{i.heartbeat=0;});const wc=win.webContents;win.once('closed',()=>this.instances.delete(wc));try{await Promise.race([win.loadURL('kww-plugin://'+pkg.digest+'/'),delay(5000).then(()=>{throw Error('plugin_timeout');})]);ensure(!this.stopping);return i;}catch(e){this.destroy(i);throw e;}
+  }
+  async waitFor(check:()=>boolean,ms:number,ui=false){const deadline=Date.now()+ms;while(!check()){ensure(!this.stopping);if(ui&&this.uiLost)throw Error('waiting_ui');if(Date.now()>deadline)throw Error('plugin_timeout');await delay(30);}if(ui&&this.uiLost)throw Error('waiting_ui');}
+  async prepare(i:Instance){await this.waitFor(()=>i.hello,5000);i.ready=false;i.win.webContents.send(C.desktopPluginsLifecycle,{type:'prepare'});await this.waitFor(()=>i.ready,10000);}
+@@ -97,7 +103,7 @@ export class DesktopPluginHost {
+  // 只有持续健康 60 秒才清连续失败；10 分钟内失败窗口仍保留。
+  setTimeout(()=>{if(!this.stopping&&this.active===i&&Date.now()-i.heartbeat<6500&&!this.storage.state.recovery.updatesBlocked)void this.storage.update((s:any)=>{if(s.bootLedger[ref.digest])s.bootLedger[ref.digest].consecutiveFailures=0;}).catch(()=>{});},60000).unref();return i;
+  }
+- async startStable(){const s=this.storage.state;try{this.active=await this.boot(s.active);}catch{if(s.rollbackTarget)try{this.active=await this.boot(s.rollbackTarget);await this.storage.update((n:any)=>{const old=n.active;n.active=n.lastKnownGood=n.rollbackTarget;n.rollbackTarget=old;n.activeRevision++;});}catch{}if(!this.active){this.active=await this.spawn(builtin);await this.prepare(this.active);await this.activateInstance(this.active);if(!s.recovery.updatesBlocked)await this.storage.update((n:any)=>{n.active=n.lastKnownGood=builtinRef;n.activeRevision++;});}}this.projection=this.active!.projection;this.notify();}
++ async startStable(){const s=this.storage.state;const migrateLegacyBuiltin=s.active?.digest===legacyBuiltinDigest;const activeRef=migrateLegacyBuiltin?builtinRef:s.active;if(migrateLegacyBuiltin&&!s.recovery.updatesBlocked)await this.storage.update((n:any)=>{n.active=n.lastKnownGood=builtinRef;n.activeRevision++;});try{this.active=await this.boot(activeRef);}catch{if(s.rollbackTarget)try{this.active=await this.boot(s.rollbackTarget);await this.storage.update((n:any)=>{const old=n.active;n.active=n.lastKnownGood=n.rollbackTarget;n.rollbackTarget=old;n.activeRevision++;});}catch{}if(!this.active){this.active=await this.spawn(builtin);await this.prepare(this.active);await this.activateInstance(this.active);if(!s.recovery.updatesBlocked)await this.storage.update((n:any)=>{n.active=n.lastKnownGood=builtinRef;n.activeRevision++;});}}this.projection=this.active!.projection;this.notify();}
+  async applyRevocations(revoked:string[]){ if(this.active&&revoked.includes(this.active.pkg.digest)){this.destroy(this.active);this.active=null;await this.storage.update((s:any)=>{s.active=s.lastKnownGood=builtinRef;s.candidate=s.previousStable=null;s.phase='stable';s.activeRevision++;if(s.rollbackTarget&&revoked.includes(s.rollbackTarget.digest))s.rollbackTarget=null;});await this.startStable();this.log('plugin_revoked');}}
+  async checkUpdate(){if(this.busy||!this.enabled||this.storage.state?.recovery.updatesBlocked)return this.log('plugin_update_unavailable');this.busy=true;try{const pb=await download('policy.json',65536) as Buffer;const p=policy(pb,devPolicy.publicKey);const hw=this.storage.state.highWater;const pd=sha(pb);ensure(p.policyVersion>=hw.policyVersion);ensure(p.policyVersion!==hw.policyVersion||!hw.policyDigest||pd===hw.policyDigest);
+  if(hw.policyDigest){const old=parse(await this.storage.evidenceRead(hw.policyDigest));const oldp=parse(Buffer.from(old.signedMetadata,'base64'));ensure(oldp.revokedPackageDigests.every((d:string)=>p.revokedPackageDigests.includes(d)));}await this.storage.evidence(pb);await this.storage.update((s:any)=>{s.highWater.policyVersion=p.policyVersion;s.highWater.policyDigest=pd;});
+diff --git a/apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs b/apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs
+index 2fd002f1590d64b9e0a5ea1059cd290b77c41172..e71ca385dddcb1b8f2acb5af2408e0e84694af00 100644
+--- a/apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs
++++ b/apps/aicrm-desktop/src/main/desktop-plugin-host/storage.mjs
+@@ -4,20 +4,31 @@ import { join, dirname } from 'node:path';
+ import { randomUUID } from 'node:crypto';
+ import { parse, sha } from '../../../../../scripts/desktop-plugins/package-format.mjs';
+ import { ensure, object, integer, digest, semver, pathName, PLUGIN_ID } from '../../../../../packages/desktop-plugin-contracts/src/index.ts';
++
++function hasPrivateMetadata(stat, platform) {
++ if (platform === 'win32') return true;
++ return typeof process.getuid === 'function' && stat.uid === process.getuid() && (stat.mode & 0o077) === 0;
++}
++
++function sameFileIdentity(left, right) {
++ return left.dev === right.dev && left.ino === right.ino;
++}
++
+ export class PluginStorage {
+- constructor(root, builtin, fault=()=>{}) {this.root=root;this.builtin=builtin;this.fault=fault;this.state=null;this.queue=Promise.resolve();this.lock=null;this.committed=async(next,before)=>{};this.liveReferences=()=>/** @type {string[]} */([]);}
+- async directory(path){let created=true;await mkdir(path,{mode:0o700}).catch(e=>{if(e.code!=='EEXIST')throw e;created=false;});const s=await lstat(path);ensure(s.isDirectory()&&!s.isSymbolicLink()&&s.uid===process.getuid?.()&&(s.mode&0o077)===0,'插件目录不安全');if(created)await this.sync(dirname(path));}
+- async read(path,max=2097152){const h=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const s=await h.stat();ensure(s.isFile()&&s.nlink===1&&s.uid===process.getuid?.()&&(s.mode&0o077)===0&&s.size<=max);const b=await h.readFile();ensure(b.length<=max);return b;}finally{await h.close();}}
+- async sync(dir){const h=await open(dir,'r');try{this.fault('before-directory-sync',dir);await h.sync();this.fault('after-directory-sync',dir);}finally{await h.close();}}
++ constructor(root, builtin, fault=()=>{}, pluginId='cn.org.kww.desktop.status-bar', platform=process.platform) {this.root=root;this.builtin=builtin;this.fault=fault;this.pluginId=pluginId;this.platform=platform;this.state=null;this.queue=Promise.resolve();this.lock=null;this.committed=async(next,before)=>{};this.liveReferences=()=>/** @type {string[]} */([]);}
++ async directory(path){let created=true;await mkdir(path,{mode:0o700}).catch(e=>{if(e.code!=='EEXIST')throw e;created=false;});const s=await lstat(path);ensure(s.isDirectory()&&!s.isSymbolicLink()&&hasPrivateMetadata(s,this.platform),'插件目录不安全');if(created)await this.sync(dirname(path));}
++ async read(path,max=2097152){const before=await lstat(path);ensure(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1&&hasPrivateMetadata(before,this.platform)&&before.size<=max);const noFollow=this.platform==='win32'?0:constants.O_NOFOLLOW;const h=await open(path,constants.O_RDONLY|noFollow);try{const s=await h.stat();ensure(s.isFile()&&s.nlink===1&&hasPrivateMetadata(s,this.platform)&&sameFileIdentity(before,s)&&s.size<=max);const b=await h.readFile();ensure(b.length<=max);return b;}finally{await h.close();}}
++ async sync(dir){if(this.platform==='win32')return;const h=await open(dir,'r');try{this.fault('before-directory-sync',dir);await h.sync();this.fault('after-directory-sync',dir);}finally{await h.close();}}
+  async move(from,to){this.fault('before-rename',to);await rename(from,to);this.fault('after-rename',to);}
+  async atomic(path,bytes){const temp=path+'.tmp-'+randomUUID();const h=await open(temp,'wx',0o600);try{await h.writeFile(bytes);this.fault('before-file-sync',path);await h.sync();this.fault('after-file-sync',path);}finally{await h.close();}await this.move(temp,path);await this.sync(dirname(path));}
+- fresh(){return {schemaVersion:1,revision:0,pluginId:PLUGIN_ID,phase:'stable',operationId:null,active:this.builtin,lastKnownGood:this.builtin,rollbackTarget:null,candidate:null,previousStable:null,activeRevision:0,data:{mode:'none',schemaVersion:0},recovery:{updatesBlocked:false,reason:null},highWater:{policyVersion:0,policyDigest:null,releaseSequence:0,indexDigest:null},bootLedger:{},failures:[],waitingReason:null};}
+- validate(s){object(s,Object.keys(this.fresh()));ensure(s.schemaVersion===1&&s.pluginId===PLUGIN_ID);integer(s.revision);integer(s.activeRevision);ensure(['stable','downloading','verified','preparing','draining','activating','probation','quarantined'].includes(s.phase));for(const k of ['active','lastKnownGood','rollbackTarget','candidate','previousStable'])if(s[k]){object(s[k],['digest','version','authorizationDigest']);digest(s[k].digest);semver(s[k].version);if(s[k].authorizationDigest)digest(s[k].authorizationDigest);}object(s.highWater,['policyVersion','policyDigest','releaseSequence','indexDigest']);integer(s.highWater.policyVersion);integer(s.highWater.releaseSequence);for(const key of ['policyDigest','indexDigest'])if(s.highWater[key]!==null)digest(s.highWater[key]);object(s.recovery,['updatesBlocked','reason']);ensure(typeof s.recovery.updatesBlocked==='boolean');object(s.data,['mode','schemaVersion']);ensure(s.operationId===null||typeof s.operationId==='string');ensure([null,'waiting_ui','drain_busy'].includes(s.waitingReason));for(const [id,row] of Object.entries(s.bootLedger)){digest(id);object(row,['attemptId','startedAt','initializedAt','consecutiveFailures','failureTimes','lastFailureCode']);integer(row.consecutiveFailures,0,3);ensure(Array.isArray(row.failureTimes)&&row.failureTimes.length<=3);row.failureTimes.forEach(t=>integer(t));}ensure(s.data.mode==='none'&&s.data.schemaVersion===0&&Array.isArray(s.failures)&&s.failures.length<=32&&Object.keys(s.bootLedger).length<=32);return s;}
++ fresh(){return {schemaVersion:1,revision:0,pluginId:this.pluginId,phase:'stable',operationId:null,active:this.builtin,lastKnownGood:this.builtin,rollbackTarget:null,candidate:null,previousStable:null,activeRevision:0,data:{mode:'none',schemaVersion:0},recovery:{updatesBlocked:false,reason:null},highWater:{policyVersion:0,policyDigest:null,releaseSequence:0,indexDigest:null},bootLedger:{},failures:[],waitingReason:null};}
++ async canInitializeEmptyRoot(){const stateDir=join(this.root,'state');const stateEntries=await readdir(stateDir);if(stateEntries.some((name)=>!['writer.lock','recovery-blocked'].includes(name)))return false;for(const dir of ['packages','staging','quarantine'])if((await readdir(join(this.root,dir))).length>0)return false;return true;}
++ validate(s){object(s,Object.keys(this.fresh()));ensure(s.schemaVersion===1&&s.pluginId===this.pluginId);integer(s.revision);integer(s.activeRevision);ensure(['stable','downloading','verified','preparing','draining','activating','probation','quarantined'].includes(s.phase));for(const k of ['active','lastKnownGood','rollbackTarget','candidate','previousStable'])if(s[k]){object(s[k],['digest','version','authorizationDigest']);digest(s[k].digest);semver(s[k].version);if(s[k].authorizationDigest)digest(s[k].authorizationDigest);}object(s.highWater,['policyVersion','policyDigest','releaseSequence','indexDigest']);integer(s.highWater.policyVersion);integer(s.highWater.releaseSequence);for(const key of ['policyDigest','indexDigest'])if(s.highWater[key]!==null)digest(s.highWater[key]);object(s.recovery,['updatesBlocked','reason']);ensure(typeof s.recovery.updatesBlocked==='boolean');object(s.data,['mode','schemaVersion']);ensure(s.operationId===null||typeof s.operationId==='string');ensure([null,'waiting_ui','drain_busy'].includes(s.waitingReason));for(const [id,row] of Object.entries(s.bootLedger)){digest(id);object(row,['attemptId','startedAt','initializedAt','consecutiveFailures','failureTimes','lastFailureCode']);integer(row.consecutiveFailures,0,3);ensure(Array.isArray(row.failureTimes)&&row.failureTimes.length<=3);row.failureTimes.forEach(t=>integer(t));}ensure(s.data.mode==='none'&&s.data.schemaVersion===0&&Array.isArray(s.failures)&&s.failures.length<=32&&Object.keys(s.bootLedger).length<=32);return s;}
+  async init(){let fresh=false;try{await lstat(this.root);}catch(e){if(e.code!=='ENOENT')throw e;fresh=true;}await this.directory(this.root);for(const d of ['state','packages','staging','quarantine'])await this.directory(join(this.root,d));
+  // 单实例由 Electron 应用锁保护；额外持久锁记录 PID，重启仅清理由已不存在进程留下的锁。
+  const lockPath=join(this.root,'state','writer.lock');try{this.lock=await open(lockPath,'wx',0o600);}catch(e){if(e.code!=='EEXIST')throw e;const old=parse(await this.read(lockPath,1024));let alive=true;try{process.kill(old.pid,0);}catch(err){if(err.code==='ESRCH')alive=false;}ensure(!alive,'插件状态被另一进程占用');await unlink(lockPath);this.lock=await open(lockPath,'wx',0o600);}await this.lock.writeFile(JSON.stringify({pid:process.pid}));this.fault('before-file-sync',lockPath);await this.lock.sync();this.fault('after-file-sync',lockPath);await this.sync(dirname(lockPath));
+- try{await lstat(join(this.root,'state','recovery-blocked'));this.state=this.fresh();this.state.recovery={updatesBlocked:true,reason:'plugin_storage_unsafe'};return this.state;}catch(e){if(e.code!=='ENOENT')throw e;}
+- const path=join(this.root,'state','host-state.json');if(fresh){await this.atomic(join(this.root,'state','initialized'),Buffer.from('1'));this.state=this.fresh();await this.atomic(path,Buffer.from(JSON.stringify(this.state)));return this.state;}
++ const path=join(this.root,'state','host-state.json');const recoveryPath=join(this.root,'state','recovery-blocked');if(fresh||await this.canInitializeEmptyRoot()){await unlink(recoveryPath).catch(e=>{if(e.code!=='ENOENT')throw e;});await this.atomic(join(this.root,'state','initialized'),Buffer.from('1'));this.state=this.fresh();await this.atomic(path,Buffer.from(JSON.stringify(this.state)));return this.state;}
++ try{await lstat(recoveryPath);this.state=this.fresh();this.state.recovery={updatesBlocked:true,reason:'plugin_storage_unsafe'};return this.state;}catch(e){if(e.code!=='ENOENT')throw e;}
+  try{this.state=this.validate(parse(await this.read(path,262144)));}catch{await this.block();return this.state;}
+  if(['activating','probation'].includes(this.state.phase)&&this.state.previousStable){const previous=this.state.previousStable;await this.update(s=>{s.active=s.lastKnownGood=previous;s.candidate=null;s.previousStable=null;s.phase='stable';s.activeRevision++;});}
+  else if(this.state.phase!=='stable')await this.update(s=>{s.active=s.lastKnownGood;s.phase='stable';s.candidate=null;s.previousStable=null;s.waitingReason=null;});return this.state;
+@@ -26,15 +37,15 @@ export class PluginStorage {
+  update(fn){const operation=this.queue.then(async()=>{ensure(this.state&&!this.state.recovery.updatesBlocked,'插件存储处于恢复阻断');const before=this.state,next=structuredClone(before);fn(next);next.revision++;this.validate(next);ensure(next.highWater.policyVersion>=before.highWater.policyVersion&&next.highWater.releaseSequence>=before.highWater.releaseSequence);for(const [sequence,digestKey] of [['policyVersion','policyDigest'],['releaseSequence','indexDigest']])if(next.highWater[sequence]===before.highWater[sequence]&&before.highWater[digestKey]!==null)ensure(next.highWater[digestKey]===before.highWater[digestKey]);try{await this.atomic(join(this.root,'state','host-state.json'),Buffer.from(JSON.stringify(next)));}catch(e){this.state.recovery={updatesBlocked:true,reason:'plugin_storage_unsafe'};try{await this.atomic(join(this.root,'state','recovery-blocked'),Buffer.from('状态写入结果不确定，禁止更新'));}catch{}throw e;}this.state=next;await this.committed(next,before);return next;});this.queue=operation.catch(()=>{});return operation;}
+  async evidence(bytes){const id=sha(bytes),path=join(this.root,'state',id+'.json');await this.atomic(path,bytes);return id;}
+  async evidenceRead(id){digest(id);const b=await this.read(join(this.root,'state',id+'.json'),262144);ensure(sha(b)===id);return b;}
+- async packageWrite(bytes,id,files=new Map()){for(const name of files.keys())pathName(name);digest(id);ensure(sha(bytes)===id);await this.gc();const parent=join(this.root,'packages',PLUGIN_ID);await this.directory(parent);let total=0;for(const e of await readdir(parent)){digest(e);const path=join(parent,e);await this.directory(path);total+=(await lstat(join(path,'bundle.json'))).size;}ensure(total+bytes.length<=32*1048576,'插件缓存容量不足');
++ async packageWrite(bytes,id,files=new Map()){for(const name of files.keys())pathName(name);digest(id);ensure(sha(bytes)===id);await this.gc();const parent=join(this.root,'packages',this.pluginId);await this.directory(parent);let total=0;for(const e of await readdir(parent)){digest(e);const path=join(parent,e);await this.directory(path);total+=(await lstat(join(path,'bundle.json'))).size;}ensure(total+bytes.length<=32*1048576,'插件缓存容量不足');
+  const target=join(parent,id);try{const existing=await this.packageRead(id);ensure(existing.equals(bytes));return;}catch(e){if(e.code!=='ENOENT')throw e;}
+  const staging=join(this.root,'staging',randomUUID());await this.directory(staging);await this.atomic(join(staging,'bundle.json'),bytes);await this.directory(join(staging,'files'));
+  for(const [name,data] of files){const parts=name.split('/');let dir=join(staging,'files');for(const part of parts.slice(0,-1)){dir=join(dir,part);await this.directory(dir);}await this.atomic(join(dir,parts.at(-1)),data);}await this.sync(staging);await this.move(staging,target);await this.sync(parent);
+  }
+- async packageRead(id){digest(id);const parent=join(this.root,'packages',PLUGIN_ID);const dir=join(parent,id);for(const path of [parent,dir]){const s=await lstat(path);ensure(s.isDirectory()&&!s.isSymbolicLink()&&s.uid===process.getuid?.()&&(s.mode&0o077)===0);}const b=await this.read(join(dir,'bundle.json'));ensure(sha(b)===id);return b;}
+- async verifyFiles(id,files){const base=join(this.root,'packages',PLUGIN_ID,id,'files');const seen=new Set();const walk=async(dir,prefix='')=>{const s=await lstat(dir);ensure(s.isDirectory()&&!s.isSymbolicLink()&&(s.mode&0o077)===0);for(const name of await readdir(dir)){const rel=prefix+name,path=join(dir,name);const entry=await lstat(path);ensure(!entry.isSymbolicLink());if(entry.isDirectory())await walk(path,rel+'/');else{ensure(files.has(rel));const b=await this.read(path,524288);ensure(b.equals(files.get(rel)));seen.add(rel);}}};await walk(base);ensure(seen.size===files.size);}
+- async gc(){if(!this.state)return;const refs=new Set(['active','lastKnownGood','rollbackTarget','candidate','previousStable'].map(k=>this.state[k]?.digest));refs.add(this.builtin.digest);for(const id of this.liveReferences())refs.add(id);const dir=join(this.root,'packages',PLUGIN_ID);await this.directory(dir);const entries=[];for(const name of await readdir(dir)){digest(name);const path=join(dir,name),s=await lstat(path);ensure(s.isDirectory()&&!s.isSymbolicLink());if(!refs.has(name))entries.push({name,time:s.mtimeMs});}entries.sort((a,b)=>b.time-a.time);
+- const safeTree=async path=>{const s=await lstat(path);ensure(!s.isSymbolicLink()&&s.uid===process.getuid?.());if(s.isDirectory()){for(const name of await readdir(path))await safeTree(join(path,name));}else ensure(s.isFile()&&s.nlink===1);};
++ async packageRead(id){digest(id);const parent=join(this.root,'packages',this.pluginId);const dir=join(parent,id);for(const path of [parent,dir]){const s=await lstat(path);ensure(s.isDirectory()&&!s.isSymbolicLink()&&hasPrivateMetadata(s,this.platform));}const b=await this.read(join(dir,'bundle.json'));ensure(sha(b)===id);return b;}
++ async verifyFiles(id,files){const base=join(this.root,'packages',this.pluginId,id,'files');const seen=new Set();const walk=async(dir,prefix='')=>{const s=await lstat(dir);ensure(s.isDirectory()&&!s.isSymbolicLink()&&hasPrivateMetadata(s,this.platform));for(const name of await readdir(dir)){const rel=prefix+name,path=join(dir,name);const entry=await lstat(path);ensure(!entry.isSymbolicLink());if(entry.isDirectory())await walk(path,rel+'/');else{ensure(files.has(rel));const b=await this.read(path,524288);ensure(b.equals(files.get(rel)));seen.add(rel);}}};await walk(base);ensure(seen.size===files.size);}
++ async gc(){if(!this.state)return;const refs=new Set(['active','lastKnownGood','rollbackTarget','candidate','previousStable'].map(k=>this.state[k]?.digest));refs.add(this.builtin.digest);for(const id of this.liveReferences())refs.add(id);const dir=join(this.root,'packages',this.pluginId);await this.directory(dir);const entries=[];for(const name of await readdir(dir)){digest(name);const path=join(dir,name),s=await lstat(path);ensure(s.isDirectory()&&!s.isSymbolicLink());if(!refs.has(name))entries.push({name,time:s.mtimeMs});}entries.sort((a,b)=>b.time-a.time);
++ const safeTree=async path=>{const s=await lstat(path);ensure(!s.isSymbolicLink()&&hasPrivateMetadata(s,this.platform));if(s.isDirectory()){for(const name of await readdir(path))await safeTree(join(path,name));}else ensure(s.isFile()&&s.nlink===1);};
+  for(const e of entries.slice(3))if(Date.now()-e.time>7*86400000){const path=join(dir,e.name);await safeTree(path);await rm(path,{recursive:true});}
+  const staging=join(this.root,'staging');for(const name of await readdir(staging)){ensure(/^[a-f0-9-]{36}$/.test(name));const path=join(staging,name),s=await lstat(path);if(Date.now()-s.mtimeMs>86400000){await safeTree(path);await rm(path,{recursive:true});}}
+  }
+diff --git a/apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts b/apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9ff213c780db7a7809c5fbf37ca7c72ef567571b
+--- /dev/null
++++ b/apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts
+@@ -0,0 +1,89 @@
++import { randomUUID, createPublicKey } from "node:crypto";
++import { parse, sha, signed } from "../../../../scripts/desktop-plugins/package-format.mjs";
++import { downloadFrom } from "./desktop-plugin-host/downloader.mjs";
++import { PluginStorage } from "./desktop-plugin-host/storage.mjs";
++import { ensure, object, integer, digest, pathName } from "../../../../packages/desktop-plugin-contracts/src/index.ts";
++import { validateWebWindowManifest, type WebWindowPluginManifest } from "../../../../packages/desktop-plugin-contracts/src/web-window.ts";
++
++export const WEB_WINDOW_PLUGIN_ID = "cn.org.kww.desktop.web-window";
++export const WEB_WINDOW_PLUGIN_SOURCE = (process.env.KY_WEB_WINDOW_PLUGIN_SOURCE ?? "").trim();
++export function isWebWindowPluginPlatformSupported(platform: string): boolean { return platform === "darwin" || platform === "win32"; }
++export type WebWindowPackage = { manifest: WebWindowPluginManifest; files: Map<string, Buffer>; digest: string };
++export type WebWindowRef = { digest: string; version: string; authorizationDigest: string | null };
++type RemotePolicy = { schemaVersion: 1; kind: "desktop-plugin-trust-policy"; channel: "dev"; policyVersion: number; keyId: string; pluginId: string; capabilities: string[]; notBefore: string; expiresAt: string; revokedPackageDigests: string[] };
++type RemoteIndex = { schemaVersion: 1; kind: "desktop-plugin-release-index"; channel: "dev"; pluginId: string; policyVersion: number; releaseSequence: number; version: string; packageSha256: string; packageBytes: number; fileName: string; expiresAt: string };
++const WEB_CAPABILITIES = ["webWindow.projection.read", "webWindow.navigation.fixed"];
++
++function date(value: unknown): number { ensure(typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value)); const parsed = Date.parse(value); ensure(Number.isFinite(parsed)); return parsed; }
++function publicKey(input: any) { object(input, ["schemaVersion", "purpose", "channel", "algorithm", "publicKeyFormat", "publicKey", "fingerprint", "keyId"]); const raw = Buffer.from(input.publicKey, "base64"); ensure(raw.length === 32); const keyDigest = sha(raw); ensure(input.fingerprint === `sha256:${keyDigest}` && input.keyId === input.fingerprint); return createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: raw.toString("base64url") }, format: "jwk" }); }
++function verifyPolicy(bytes: Buffer, key: any, now = Date.now()): RemotePolicy { const payload = signed(parse(bytes, 65536), key, "kww-desktop-plugin-policy:v1") as RemotePolicy; ensure(payload.schemaVersion === 1 && payload.kind === "desktop-plugin-trust-policy" && payload.channel === "dev" && payload.pluginId === WEB_WINDOW_PLUGIN_ID); integer(payload.policyVersion, 1); ensure(payload.capabilities.every((x) => WEB_CAPABILITIES.includes(x))); ensure(date(payload.notBefore) <= now && date(payload.expiresAt) > now); payload.revokedPackageDigests.forEach(digest); return payload; }
++function verifyIndex(bytes: Buffer, key: any, policy: RemotePolicy, now = Date.now()): RemoteIndex { const payload = signed(parse(bytes, 65536), key, "kww-desktop-plugin-index:v1") as RemoteIndex; ensure(payload.schemaVersion === 1 && payload.kind === "desktop-plugin-release-index" && payload.channel === "dev" && payload.pluginId === WEB_WINDOW_PLUGIN_ID && payload.policyVersion === policy.policyVersion); integer(payload.releaseSequence, 1); digest(payload.packageSha256); integer(payload.packageBytes, 1, 2097152); ensure(payload.fileName === `${payload.packageSha256}.kwwplugin.json` && date(payload.expiresAt) > now && date(payload.expiresAt) <= date(policy.expiresAt)); return payload; }
++function verifyPackage(bytes: Buffer, key: any): WebWindowPackage { const outer = parse(bytes); const metadata = signed(outer, key, "kww-desktop-web-window-plugin:v1", ["files"]) as any; const manifest = validateWebWindowManifest(metadata.manifest) as WebWindowPluginManifest; ensure(Array.isArray(metadata.files) && metadata.files.length <= 8 && Array.isArray(outer.files) && outer.files.length === metadata.files.length); const files = new Map<string, Buffer>(); let total = 0; metadata.files.forEach((entry: any, index: number) => { object(entry, ["path", "size", "sha256"]); pathName(entry.path); integer(entry.size, 0, 524288); digest(entry.sha256); ensure(!files.has(entry.path)); const raw = object(outer.files[index], ["path", "contentBase64"]); ensure(raw.path === entry.path); const data = Buffer.from(raw.contentBase64, "base64"); ensure(data.toString("base64") === raw.contentBase64 && data.length === entry.size && sha(data) === entry.sha256); total += data.length; ensure(total <= 1048576); files.set(entry.path, data); }); ensure(files.has(manifest.entry)); return { manifest, files, digest: sha(bytes) }; }
++
++export class WebWindowPluginDistribution {
++  readonly storage: PluginStorage;
++  readonly builtin: WebWindowPackage;
++  readonly key: any;
++  readonly enabled: boolean;
++  readonly platform: string;
++  readonly onCandidate?: (pkg: WebWindowPackage, ref: WebWindowRef) => Promise<void> | void;
++  private timer: ReturnType<typeof setInterval> | null = null;
++  private activePackage: WebWindowPackage;
++  private candidatePackage: WebWindowPackage | null = null;
++  private readonly fetchRelease: (source: string, name: string, max: number) => Promise<Buffer>;
++  private readonly autoCheck: boolean;
++  lastErrorCode: string | null = null;
++  constructor(options: { root: string; builtin: WebWindowPackage; publicKey: any; platform?: string; enabled?: boolean; autoCheck?: boolean; fetchRelease?: (source: string, name: string, max: number) => Promise<Buffer>; onCandidate?: (pkg: WebWindowPackage, ref: WebWindowRef) => Promise<void> | void }) {
++    this.builtin = options.builtin; this.activePackage = options.builtin; publicKey(options.publicKey); this.key = options.publicKey; this.platform = options.platform ?? process.platform; this.enabled = options.enabled ?? (isWebWindowPluginPlatformSupported(this.platform) && Boolean(WEB_WINDOW_PLUGIN_SOURCE)); this.fetchRelease = options.fetchRelease ?? downloadFrom; this.autoCheck = options.autoCheck ?? true; this.onCandidate = options.onCandidate;
++    const ref: WebWindowRef = { digest: this.builtin.digest, version: this.builtin.manifest.version, authorizationDigest: null };
++    this.storage = new PluginStorage(options.root, ref, undefined, WEB_WINDOW_PLUGIN_ID);
++  }
++  current(): WebWindowPackage { return this.activePackage; }
++  async initialize(): Promise<void> {
++    await this.storage.init();
++    const active = this.storage.state?.active;
++    if (active && active.digest !== this.builtin.digest) {
++      try {
++        const bytes = await this.storage.packageRead(active.digest);
++        const pkg = verifyPackage(bytes, this.key);
++        ensure(pkg.manifest.platforms.includes(this.platform));
++        this.activePackage = pkg;
++      } catch {
++        this.lastErrorCode = "active_package_invalid";
++        this.activePackage = this.builtin;
++      }
++    }
++    if (!this.enabled) return; this.timer = setInterval(() => { void this.checkForUpdate(); }, 5 * 60 * 1000); if (this.autoCheck) void this.checkForUpdate();
++  }
++  async checkForUpdate(): Promise<boolean> {
++    if (!this.enabled || this.storage.state?.recovery.updatesBlocked) return false;
++    try {
++      this.lastErrorCode = null;
++      const policyBytes = await this.fetchRelease(WEB_WINDOW_PLUGIN_SOURCE, "policy.json", 65536);
++      const policy = verifyPolicy(policyBytes, this.key);
++      const state = this.storage.state; ensure(policy.policyVersion >= state.highWater.policyVersion);
++      const policyDigest = sha(policyBytes); ensure(policy.policyVersion !== state.highWater.policyVersion || state.highWater.policyDigest === null || state.highWater.policyDigest === policyDigest);
++      const indexBytes = await this.fetchRelease(WEB_WINDOW_PLUGIN_SOURCE, "index.json", 65536);
++      const index = verifyIndex(indexBytes, this.key, policy); ensure(index.releaseSequence >= state.highWater.releaseSequence);
++      const indexDigest = sha(indexBytes); ensure(index.releaseSequence !== state.highWater.releaseSequence || state.highWater.indexDigest === null || state.highWater.indexDigest === indexDigest);
++      ensure(!policy.revokedPackageDigests.includes(index.packageSha256)); if (index.packageSha256 === state.active?.digest || index.packageSha256 === state.candidate?.digest) return false;
++      const packageBytes = await this.fetchRelease(WEB_WINDOW_PLUGIN_SOURCE, index.fileName, index.packageBytes); ensure(packageBytes.length === index.packageBytes && sha(packageBytes) === index.packageSha256);
++      const pkg = verifyPackage(packageBytes, this.key); ensure(pkg.manifest.version === index.version && pkg.manifest.platforms.includes(this.platform));
++      await this.storage.evidence(policyBytes); await this.storage.evidence(indexBytes); await this.storage.packageWrite(packageBytes, pkg.digest, pkg.files);
++      const authorization = Buffer.from(JSON.stringify({ policy: policyBytes.toString("base64"), index: indexBytes.toString("base64"), installedAt: Date.now() }));
++      const authorizationDigest = await this.storage.evidence(authorization);
++      const ref: WebWindowRef = { digest: pkg.digest, version: pkg.manifest.version, authorizationDigest };
++      this.candidatePackage = pkg;
++      await this.storage.update((next: any) => { next.highWater.policyVersion = policy.policyVersion; next.highWater.policyDigest = policyDigest; next.highWater.releaseSequence = index.releaseSequence; next.highWater.indexDigest = indexDigest; next.candidate = ref; next.previousStable = next.lastKnownGood; next.phase = "verified"; next.operationId = randomUUID(); });
++      if (this.onCandidate) await this.onCandidate(pkg, ref);
++      return true;
++    } catch (error) { this.lastErrorCode = error instanceof Error ? error.message : "remote_update_failed"; return false; }
++  }
++  async setPhase(phase: "verified" | "preparing" | "draining" | "activating" | "probation" | "stable"): Promise<void> { await this.storage.update((next: any) => { next.phase = phase; }); }
++  async rollbackPackage(): Promise<{ pkg: WebWindowPackage; ref: WebWindowRef } | null> { const target = this.storage.state?.rollbackTarget as WebWindowRef | null; if (!target && this.activePackage.digest === this.builtin.digest) return null; const ref = target ?? { digest: this.builtin.digest, version: this.builtin.manifest.version, authorizationDigest: null }; const pkg = ref.digest === this.builtin.digest ? this.builtin : verifyPackage(await this.storage.packageRead(ref.digest), this.key); this.candidatePackage = pkg; await this.setPhase("verified"); return { pkg, ref }; }
++  async commitStable(ref: WebWindowRef): Promise<void> { if (this.candidatePackage?.digest === ref.digest) this.activePackage = this.candidatePackage; await this.storage.update((next: any) => { next.active = ref; next.lastKnownGood = ref; next.rollbackTarget = next.previousStable; next.candidate = null; next.previousStable = null; next.phase = "stable"; next.activeRevision++; next.operationId = null; }); }
++  async markRollback(ref: WebWindowRef): Promise<void> { await this.storage.update((next: any) => { next.active = next.lastKnownGood = ref; next.candidate = null; next.previousStable = null; next.phase = "stable"; next.activeRevision++; }); }
++  async close(): Promise<void> { if (this.timer) clearInterval(this.timer); await this.storage.close(); }
++}
++
++export const webWindowPackageFor = (manifest: WebWindowPluginManifest, source: string): WebWindowPackage => ({ manifest, files: new Map([[manifest.entry, Buffer.from(source)]]), digest: sha(Buffer.from(source)) });
+diff --git a/apps/aicrm-desktop/src/main/web-window-plugin-host.ts b/apps/aicrm-desktop/src/main/web-window-plugin-host.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..23246627bc24b4d4814473dd215fec90e6e2a7ca
+--- /dev/null
++++ b/apps/aicrm-desktop/src/main/web-window-plugin-host.ts
+@@ -0,0 +1,411 @@
++import { app, BrowserWindow, session, type WebContents } from "electron";
++import { join } from "node:path";
++import { randomUUID } from "node:crypto";
++import manifest from "../../../../desktop-plugins/kww-web-window/v1/manifest.json";
++import source from "../../../../desktop-plugins/kww-web-window/v1/plugin.js?raw";
++import webWindowPolicy from "../../resources/desktop-plugin-web-window-dev-policy.json";
++import { registerSender, scopedIpc } from "./guarded-ipc";
++import { IPC_CHANNELS } from "../shared/constants";
++import type { WebWindowPluginContext, WebWindowPluginProjection } from "../shared/web-window-contract";
++import { WebWindowSlotRegistry, validateWebWindowManifest, validateWebWindowProjection, type WebWindowPluginManifest } from "../../../../packages/desktop-plugin-contracts/src/web-window";
++import { WEB_WINDOW_PLUGIN_SOURCE, isWebWindowPluginPlatformSupported, WebWindowPluginDistribution, webWindowPackageFor, type WebWindowPackage, type WebWindowRef } from "./web-window-plugin-distribution";
++
++type Target = { target: BrowserWindow; targetContents: WebContents; plugin: BrowserWindow; pluginContents: WebContents; context: WebWindowPluginContext; ready: boolean; staging: boolean; crashed: boolean; projection: WebWindowPluginProjection | null; pkg: WebWindowPackage };
++const targets = new Map<WebContents, Target>();
++const pluginTargets = new Map<WebContents, Target>();
++const fallbackContexts = new WeakMap<BrowserWindow, WebWindowPluginContext>();
++const fallbackProjections = new WeakMap<WebContents, WebWindowPluginProjection>();
++const recovering = new Set<WebContents>();
++let hostOperationTail: Promise<void> = Promise.resolve();
++const builtinManifest = validateWebWindowManifest(manifest) as WebWindowPluginManifest;
++export const webWindowPluginSlotRegistry = new WebWindowSlotRegistry();
++const builtinPackage = webWindowPackageFor(builtinManifest, source);
++let activePackage: WebWindowPackage = builtinPackage;
++let distribution: WebWindowPluginDistribution | null = null;
++let distributionInit: Promise<WebWindowPluginDistribution> | null = null;
++validateWebWindowManifest(manifest);
++function pluginContext(context: WebWindowPluginContext, pkg: WebWindowPackage = activePackage): WebWindowPluginContext {
++  const phase = distribution?.storage.state?.phase;
++  const activeIsRemote = pkg.digest !== builtinPackage.digest;
++  const source = activeIsRemote ? "remote" : distribution?.lastErrorCode ? "fallback" : "builtin";
++  const status = phase === "probation" || phase === "preparing" || phase === "draining" || phase === "activating" ? phase : phase === "stable" ? "stable" : distribution?.lastErrorCode ? "error" : "stable";
++  return {
++    ...context,
++    plugin: { id: pkg.manifest.id, version: pkg.manifest.version, source, status },
++    client: {
++      name: app.getName(),
++      version: app.getVersion(),
++      electronVersion: process.versions.electron,
++      runtime: process.release.name,
++      channel: process.env.KWW_DESKTOP_CHANNEL ?? (app.isPackaged ? "stable" : "development"),
++      platform: process.platform,
++      arch: process.arch
++    },
++    page: context.page ?? { url: "", navigationGeneration: context.navigationGeneration }
++  };
++}
++
++function normalizeProjection(projection: WebWindowPluginProjection, context: WebWindowPluginContext): WebWindowPluginProjection {
++  const items = projection.items.filter((item) => item.id !== "web-window-injection" && item.id !== "web-window-version" && item.id !== "web-window-navigation");
++  const panel = {
++    plugin: context.plugin!,
++    client: context.client!,
++    injection: context.injection ?? {
++      script: { identifier: "", version: null, versionSource: "unknown", status: "unavailable", error: "未提供注入状态" },
++      style: { identifier: "", version: null, versionSource: "unknown", status: "not_configured", error: null }
++    },
++    page: context.page!
++  };
++  const injectedCount = [panel.injection.script, panel.injection.style].filter((asset) => asset.status === "succeeded").length;
++  const projectedItems: WebWindowPluginProjection["items"] = [
++      ...items,
++      { id: "web-window-injection", slot: "webWindow.status.right", type: "button", text: `已注入 ${injectedCount}`, title: "查看已注入业务脚本", tone: injectedCount > 0 ? "normal" : "muted", actionId: "injection-panel" },
++      { id: "web-window-version", slot: "webWindow.status.right", type: "button", text: "v" + panel.plugin.version, title: "查看 Web 专用窗口信息", tone: "muted", actionId: "version-panel" }
++  ];
++  const slotSurfaces = Object.fromEntries([...new Set(projectedItems.map((item) => item.slot))].flatMap((slot) => {
++    const surface = webWindowPluginSlotRegistry.surfaceFor(slot);
++    return surface ? [[slot, surface]] : [];
++  }));
++  return {
++    ...projection,
++    items: projectedItems,
++    slotSurfaces,
++    versionPanel: panel
++  };
++}
++
++function builtInStatusProjection(context: WebWindowPluginContext): WebWindowPluginProjection {
++  return normalizeProjection({
++    instanceId: context.instanceId,
++    navigationGeneration: context.navigationGeneration,
++    uiSessionId: context.uiSessionId,
++    activeRevision: context.activeRevision,
++    items: []
++  }, context);
++}
++
++function sendProjection(target: BrowserWindow, targetContents: WebContents, projection: WebWindowPluginProjection): void {
++  if (!target.isDestroyed()) target.webContents.send(IPC_CHANNELS.webWindowProjection, projection);
++  if (targetContents !== target.webContents && !targetContents.isDestroyed()) targetContents.send(IPC_CHANNELS.webWindowProjection, projection);
++}
++
++const pluginIpc = scopedIpc(["plugin"], (args) => args.length <= 1 && JSON.stringify(args).length <= 65536);
++
++function instance(event: { sender: WebContents }): Target {
++  const value = pluginTargets.get(event.sender);
++  if (!value || value.plugin.isDestroyed() || value.target.isDestroyed()) throw new Error("web_window_plugin_instance_invalid");
++  return value;
++}
++
++pluginIpc.handle(IPC_CHANNELS.webWindowPluginReady, (event) => {
++  const value = instance(event);
++  value.ready = true;
++  value.plugin.webContents.send(IPC_CHANNELS.webWindowPluginContext, value.context);
++  return true;
++});
++pluginIpc.handle(IPC_CHANNELS.webWindowPluginPublish, (event, value: unknown) => {
++  const target = instance(event);
++  if (!target.ready) throw new Error("web_window_plugin_not_ready");
++  const inputProjection = validateWebWindowProjection(value);
++  if (inputProjection.items.some((item) => !target.pkg.manifest.contributes.slots.includes(item.slot) || !webWindowPluginSlotRegistry.surfaceFor(item.slot))) throw new Error("web_window_projection_slot_denied");
++  const projection = normalizeProjection(inputProjection, target.context);
++  if (projection.instanceId !== target.context.instanceId || projection.uiSessionId !== target.context.uiSessionId || projection.navigationGeneration !== target.context.navigationGeneration || projection.activeRevision !== target.context.activeRevision) throw new Error("web_window_projection_stale");
++  target.projection = projection;
++  if (!target.staging) {
++      fallbackProjections.set(target.targetContents, projection);
++      sendProjection(target.target, target.targetContents, projection);
++  }
++  return true;
++});
++
++function waitReady(value: Target): Promise<void> {
++  const end = Date.now() + 5000;
++  return new Promise((resolve, reject) => {
++    const tick = () => {
++      if (value.ready) return resolve();
++      if (value.crashed || value.pluginContents.isCrashed()) return reject(new Error("web_window_plugin_renderer_crashed"));
++      if (Date.now() > end) return reject(new Error("web_window_plugin_timeout"));
++      setTimeout(tick, 25);
++    };
++    tick();
++  });
++}
++
++function waitProjection(value: Target): Promise<void> {
++  const end = Date.now() + 5000;
++  return new Promise((resolve, reject) => {
++    const tick = () => {
++      if (value.crashed || value.pluginContents.isCrashed()) return reject(new Error("web_window_plugin_renderer_crashed"));
++      if (value.projection) return resolve();
++      if (value.plugin.isDestroyed() || value.target.isDestroyed()) return reject(new Error("web_window_plugin_target_closed"));
++      if (Date.now() > end) return reject(new Error("web_window_plugin_projection_timeout"));
++      setTimeout(tick, 25);
++    };
++    tick();
++  });
++}
++
++function validatePackageSlots(pkg: WebWindowPackage): void {
++  webWindowPluginSlotRegistry.validateContributions(pkg.manifest.contributes.slots);
++}
++
++function enqueueHostOperation<T>(operation: () => Promise<T>): Promise<T> {
++  const result = hostOperationTail.then(operation);
++  hostOperationTail = result.then(() => undefined, () => undefined);
++  return result;
++}
++
++async function recoverPluginCrash(value: Target): Promise<void> {
++  if (value.target.isDestroyed()) return;
++  const targetContents = value.targetContents;
++  if (recovering.has(targetContents)) return;
++  if (targets.get(targetContents)?.plugin !== value.plugin) return;
++  recovering.add(targetContents);
++  try {
++    const rollback = await distribution?.rollbackPackage();
++    const pkg = rollback?.pkg ?? builtinPackage;
++    const ref = rollback?.ref ?? { digest: builtinPackage.digest, version: builtinPackage.manifest.version, authorizationDigest: null };
++    try {
++      await promoteCandidate(pkg, ref);
++    } catch {
++      if (pkg.digest !== builtinPackage.digest) await promoteCandidate(builtinPackage, { digest: builtinPackage.digest, version: builtinPackage.manifest.version, authorizationDigest: null });
++    }
++  } finally {
++    recovering.delete(targetContents);
++  }
++}
++
++async function createPlugin(target: BrowserWindow, context: WebWindowPluginContext, pkg: WebWindowPackage, staging = false): Promise<Target> {
++  validatePackageSlots(pkg);
++  const id = randomUUID();
++  const digest = pkg.digest;
++  const partition = session.fromPartition(`kww-web-window-plugin-${id}`);
++  partition.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
++  partition.setPermissionCheckHandler(() => false);
++  const plugin = new BrowserWindow({
++    show: false,
++    webPreferences: { preload: join(__dirname, "../preload/web-window-plugin.js"), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, devTools: false, partition: `kww-web-window-plugin-${id}` }
++  });
++  const targetContents = target.webContents;
++  const pluginContents = plugin.webContents;
++  const value: Target = { target, targetContents, plugin, pluginContents, context: pluginContext(context, pkg), ready: false, staging, crashed: false, projection: null, pkg };
++  pluginTargets.set(pluginContents, value);
++  registerSender(pluginContents, "plugin", (url) => url.startsWith("data:text/html"));
++  const html = "<!doctype html><meta charset=\"utf-8\"><title>Web Window Plugin</title>";
++  plugin.once("closed", () => { pluginTargets.delete(pluginContents); if (targets.get(targetContents)?.plugin === plugin) targets.delete(targetContents); });
++  pluginContents.once("render-process-gone", () => {
++    value.crashed = true;
++    if (!staging) void recoverPluginCrash(value);
++  });
++  try {
++    await plugin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
++    // data: 文档中的 inline script 会早于 did-frame-navigate 和 sender 授权执行，
++    // 首次 ready IPC 因而被拒绝。先完成受信文档登记，再执行已验签的插件入口。
++    const entry = pkg.files.get(pkg.manifest.entry)?.toString("utf8") ?? "";
++    await pluginContents.executeJavaScript(`${entry}\n//# sourceURL=kww-web-window-plugin-${digest}.js\nvoid 0;`, true);
++    await waitReady(value);
++    return value;
++  } catch (error) {
++    pluginTargets.delete(pluginContents);
++    if (!plugin.isDestroyed()) plugin.destroy();
++    throw error;
++  }
++}
++
++async function ensureDistribution(): Promise<WebWindowPluginDistribution> {
++  if (distributionInit) return distributionInit;
++  distributionInit = (async () => {
++    const result = new WebWindowPluginDistribution({
++      root: join((await import("electron")).app.getPath("userData"), "desktop-host-plugins", "web-window"),
++      builtin: builtinPackage,
++      publicKey: (webWindowPolicy as any).publicKey,
++      platform: process.platform,
++      enabled: isWebWindowPluginPlatformSupported(process.platform) && Boolean(WEB_WINDOW_PLUGIN_SOURCE),
++      onCandidate: promoteCandidate
++    });
++    distribution = result;
++    await result.initialize();
++    activePackage = result.current();
++    return result;
++  })();
++  return distributionInit;
++}
++
++async function promoteCandidate(pkg: WebWindowPackage, ref: WebWindowRef): Promise<void> {
++  await enqueueHostOperation(() => promoteCandidateUnsafe(pkg, ref));
++}
++
++async function promoteCandidateUnsafe(pkg: WebWindowPackage, ref: WebWindowRef): Promise<void> {
++  const oldTargets = [...targets.values()].filter((value) => !value.target.isDestroyed());
++  const previousPackage = activePackage;
++  const previousRef = distribution?.storage.state?.active ?? { digest: previousPackage.digest, version: previousPackage.manifest.version, authorizationDigest: null };
++  const candidates: Target[] = [];
++  let committed = false;
++  try {
++    await distribution?.setPhase("preparing");
++    for (const old of oldTargets) {
++      if (old.target.isDestroyed() || targets.get(old.targetContents) !== old) continue;
++      let candidate: Target;
++      try {
++        candidate = await createPlugin(old.target, old.context, pkg, true);
++      } catch (error) {
++        if (old.target.isDestroyed() || targets.get(old.targetContents) !== old) continue;
++        throw error;
++      }
++      candidates.push(candidate);
++      try {
++        await waitProjection(candidate);
++      } catch (error) {
++        if (old.target.isDestroyed() || targets.get(old.targetContents) !== old) {
++          candidates.splice(candidates.indexOf(candidate), 1);
++          pluginTargets.delete(candidate.pluginContents);
++          if (!candidate.plugin.isDestroyed()) candidate.plugin.destroy();
++          continue;
++        }
++        throw error;
++      }
++    }
++    await distribution?.setPhase("draining");
++    await distribution?.setPhase("activating");
++    await distribution?.setPhase("probation");
++    // 所有活动窗口都必须完成候选插件的 ready 与首次投影 ACK，才提交新版本。
++    await distribution?.commitStable(ref);
++    committed = Boolean(distribution);
++    activePackage = pkg;
++    for (const candidate of candidates) {
++      if (candidate.target.isDestroyed() || !targets.has(candidate.targetContents)) {
++        pluginTargets.delete(candidate.pluginContents);
++        if (!candidate.plugin.isDestroyed()) candidate.plugin.destroy();
++        continue;
++      }
++      targets.set(candidate.targetContents, candidate);
++      candidate.staging = false;
++      fallbackContexts.set(candidate.target, candidate.context);
++      const projection = candidate.projection ?? builtInStatusProjection(candidate.context);
++      candidate.projection = projection;
++      fallbackProjections.set(candidate.targetContents, projection);
++      sendProjection(candidate.target, candidate.targetContents, projection);
++    }
++    for (const old of oldTargets) {
++      pluginTargets.delete(old.pluginContents);
++      if (!old.plugin.isDestroyed()) old.plugin.destroy();
++    }
++  } catch {
++    activePackage = previousPackage;
++    for (const old of oldTargets) {
++      if (old.target.isDestroyed()) continue;
++      targets.set(old.targetContents, old);
++      if (old.projection) {
++        try { fallbackProjections.set(old.targetContents, old.projection); sendProjection(old.target, old.targetContents, old.projection); } catch { /* 已关闭的 renderer 不影响其他实例回退。 */ }
++      }
++    }
++    for (const candidate of candidates) {
++      pluginTargets.delete(candidate.pluginContents);
++      if (!candidate.plugin.isDestroyed()) candidate.plugin.destroy();
++    }
++    if (distribution && committed) {
++      const rollback = await distribution.rollbackPackage().catch(() => null);
++      if (rollback) await distribution.commitStable(rollback.ref).catch(() => undefined);
++      else await distribution.markRollback(previousRef).catch(() => undefined);
++    } else if (distribution) {
++      await distribution.setPhase("verified").catch(() => undefined);
++    }
++    throw new Error("web_window_plugin_candidate_rejected");
++  }
++}
++
++export const webWindowPluginHost = {
++  getProjection(target: BrowserWindow): WebWindowPluginProjection | null {
++    if (target.isDestroyed()) return null;
++    const value = targets.get(target.webContents);
++    return value?.projection ?? fallbackProjections.get(target.webContents) ?? null;
++  },
++  replayProjection(target: BrowserWindow): WebWindowPluginProjection | null {
++    if (target.isDestroyed()) return null;
++    const value = targets.get(target.webContents);
++    const projection = value?.projection ?? fallbackProjections.get(target.webContents);
++    if (!projection) return null;
++    sendProjection(target, value?.targetContents ?? target.webContents, projection);
++    return projection;
++  },
++  async start(target: BrowserWindow, context: WebWindowPluginContext): Promise<void> {
++    if (target.isDestroyed()) return;
++    const targetContents = target.webContents;
++    if (targets.has(targetContents)) return;
++    const fallbackContext = pluginContext(context);
++    fallbackContexts.set(target, fallbackContext);
++    const fallbackProjection = builtInStatusProjection(fallbackContext);
++    fallbackProjections.set(targetContents, fallbackProjection);
++    await ensureDistribution();
++    const initializedContext = pluginContext(fallbackContexts.get(target) ?? context);
++    fallbackContexts.set(target, initializedContext);
++    fallbackProjections.set(targetContents, builtInStatusProjection(initializedContext));
++    await enqueueHostOperation(async () => {
++      if (target.isDestroyed() || targets.has(targetContents)) return;
++      const currentContext = pluginContext(fallbackContexts.get(target) ?? context);
++      const value = await createPlugin(target, currentContext, activePackage);
++      if (target.isDestroyed()) {
++        pluginTargets.delete(value.pluginContents);
++        if (!value.plugin.isDestroyed()) value.plugin.destroy();
++        return;
++      }
++      targets.set(targetContents, value);
++      target.once("closed", () => stopByContents(targetContents));
++    });
++  },
++  update(target: BrowserWindow, context: WebWindowPluginContext): void {
++    if (target.isDestroyed()) return;
++    const value = targets.get(target.webContents);
++    const previous = value?.context ?? fallbackContexts.get(target) ?? context;
++    const nextContext = pluginContext({ ...context, injection: context.injection ?? previous.injection, page: context.page ?? previous.page }, value?.pkg ?? activePackage);
++    fallbackContexts.set(target, nextContext);
++    const projection = builtInStatusProjection(nextContext);
++    fallbackProjections.set(target.webContents, projection);
++    if (value) {
++      value.context = nextContext;
++      value.projection = projection;
++      sendProjection(value.target, value.targetContents, projection);
++    } else {
++      sendProjection(target, target.webContents, projection);
++    }
++    if (value?.ready && !value.plugin.isDestroyed()) value.plugin.webContents.send(IPC_CHANNELS.webWindowPluginContext, value.context);
++  },
++  updateInjection(target: BrowserWindow, injection: WebWindowPluginContext["injection"], state: string): void {
++    if (target.isDestroyed()) return;
++    const value = targets.get(target.webContents);
++    const context = value?.context ?? fallbackContexts.get(target);
++    if (!context) return;
++    this.update(target, { ...context, injection, injectionState: state, page: { ...(context.page ?? { url: target.webContents.getURL(), navigationGeneration: context.navigationGeneration }), url: target.webContents.getURL() || context.page?.url || "" } });
++  },
++  stop(target: BrowserWindow): void {
++    if (target.isDestroyed()) return;
++    fallbackContexts.delete(target);
++    fallbackProjections.delete(target.webContents);
++    stopByContents(target.webContents);
++  },
++  async rollback(): Promise<boolean> {
++    if (!distribution) return false;
++    const rollback = await distribution.rollbackPackage();
++    if (!rollback) return false;
++    await promoteCandidate(rollback.pkg, rollback.ref);
++    return true;
++  }
++};
++
++const projectionRequestIpc = scopedIpc(["controlled"], (args) => args.length === 0);
++projectionRequestIpc.handle(IPC_CHANNELS.webWindowProjectionRequest, (event) => {
++  const target = BrowserWindow.fromWebContents(event.sender);
++  return target ? webWindowPluginHost.getProjection(target) : null;
++});
++
++function stopByContents(targetContents: WebContents): void {
++  const value = targets.get(targetContents);
++  if (!value) return;
++  targets.delete(targetContents);
++  fallbackContexts.delete(value.target);
++  fallbackProjections.delete(targetContents);
++  pluginTargets.delete(value.pluginContents);
++  if (!value.plugin.isDestroyed()) value.plugin.destroy();
++}
++
++export { manifest };
+diff --git a/apps/aicrm-desktop/src/preload/plugin-host-bridge.ts b/apps/aicrm-desktop/src/preload/plugin-host-bridge.ts
+index 80517e7a84a5787143beaccba3edb9df67116774..8811c0f462e15b653c6fb163feba18d79f0b28fe 100644
+--- a/apps/aicrm-desktop/src/preload/plugin-host-bridge.ts
++++ b/apps/aicrm-desktop/src/preload/plugin-host-bridge.ts
+@@ -7,6 +7,8 @@ export const desktopPlugins:DesktopPluginsBridge={
+  registerUi:input=>call(C.desktopPluginsRegisterUi,input),
+  unregisterUi:()=>call(C.desktopPluginsUnregisterUi),
+  getSnapshot:()=>call(C.desktopPluginsSnapshot),
++ getCachedScripts:()=>call(C.desktopPluginsCachedScripts),
++ refreshCachedScripts:()=>call(C.desktopPluginsRefreshCachedScripts),
+  ackRendered:input=>call(C.desktopPluginsAck,input),
+  action:input=>call(C.desktopPluginsAction,input),
+  onChanged(listener){const fn=(_e:unknown,p:DesktopPluginSnapshot)=>{try{listener(p);}catch{}};ipcRenderer.on(C.desktopPluginsChanged,fn);return()=>ipcRenderer.off(C.desktopPluginsChanged,fn);}
+diff --git a/apps/aicrm-desktop/src/preload/web-window-plugin.ts b/apps/aicrm-desktop/src/preload/web-window-plugin.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e167f5384b1fa1b883bee7469ae18f8b8bc6a20d
+--- /dev/null
++++ b/apps/aicrm-desktop/src/preload/web-window-plugin.ts
+@@ -0,0 +1,19 @@
++import { contextBridge, ipcRenderer } from "electron";
++import { WEB_WINDOW_CHANNELS } from "../shared/web-window-contract";
++
++const call = async (channel: string, value?: unknown) => {
++  const result = await ipcRenderer.invoke(channel, ...(value === undefined ? [] : [value]));
++  if (!result.ok) throw new Error(result.error?.code ?? "web_window_plugin_unavailable");
++  return result.data;
++};
++const subscribe = (channel: string, listener: (value: unknown) => void) => {
++  const fn = (_event: unknown, value: unknown) => { try { listener(value); } catch { /* 插件错误不得越过桥 */ } };
++  ipcRenderer.on(channel, fn);
++  return () => ipcRenderer.off(channel, fn);
++};
++
++contextBridge.exposeInMainWorld("kwwWebWindowPlugin", {
++  publish: (projection: unknown) => call(WEB_WINDOW_CHANNELS.pluginPublish, projection),
++  ready: () => call(WEB_WINDOW_CHANNELS.pluginReady),
++  onContext: (listener: (context: unknown) => void) => subscribe(WEB_WINDOW_CHANNELS.pluginContext, listener)
++});
+diff --git a/desktop-plugins/kww-web-window/v1/manifest.json b/desktop-plugins/kww-web-window/v1/manifest.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9f43be72f8b4a1d1095a316b5c79ed0585a257f
+--- /dev/null
++++ b/desktop-plugins/kww-web-window/v1/manifest.json
+@@ -0,0 +1,12 @@
++{
++  "schemaVersion": 1,
++  "kind": "desktop-web-window-plugin",
++  "id": "cn.org.kww.desktop.web-window",
++  "version": "1.0.0",
++  "entry": "plugin.js",
++  "engines": { "host": ">=0.1.0 <1.0.0", "pluginApi": "1.0.0", "uiApi": "1.0.0" },
++  "platforms": ["darwin", "win32"],
++  "capabilities": ["webWindow.projection.read", "webWindow.navigation.fixed"],
++  "contributes": { "slots": ["webWindow.header.navigation", "webWindow.header.status", "webWindow.status.left", "webWindow.status.right"] },
++  "data": { "mode": "declarative", "schemaVersion": 1 }
++}
+diff --git a/desktop-plugins/kww-web-window/v1/plugin.js b/desktop-plugins/kww-web-window/v1/plugin.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bdfb1b1fc4ee9b242550a15acbac9daf584b3d3
+--- /dev/null
++++ b/desktop-plugins/kww-web-window/v1/plugin.js
+@@ -0,0 +1,27 @@
++// Web Window 增量插件：只发布受限 UI 投影，不访问网络或页面源码。
++(() => {
++  const api = globalThis.kwwWebWindowPlugin;
++  if (!api) return;
++  const asset = (value) => ({
++    identifier: value?.identifier || "DD_LOGIN",
++    version: value?.version || null,
++    versionSource: value?.versionSource || "unknown",
++    status: value?.status || "unavailable",
++    error: value?.error || null
++  });
++  const publish = (instance) => api.publish({
++    instanceId: instance.instanceId,
++    navigationGeneration: instance.navigationGeneration,
++    uiSessionId: instance.uiSessionId,
++    activeRevision: instance.activeRevision,
++    items: [],
++    versionPanel: {
++      plugin: instance.plugin || { id: "cn.org.kww.desktop.web-window", version: "1.0.0", source: "builtin", status: "stable" },
++      client: instance.client || { name: "AiCRM", version: "未知", electronVersion: "未知", runtime: "electron", channel: "development", platform: "unknown", arch: "unknown" },
++      injection: { script: asset(instance.injection?.script), style: asset(instance.injection?.style) },
++      page: instance.page || { url: "", navigationGeneration: instance.navigationGeneration }
++    }
++  });
++  api.onContext((context) => { void publish(context).catch(() => undefined); });
++  void api.ready().catch(() => undefined);
++})();
+diff --git a/scripts/desktop-plugins/build-preloads.mjs b/scripts/desktop-plugins/build-preloads.mjs
+index 00fff2b1c8fadae5e45043695cc91be0b305f75c..3e39c453762b8d68ec0c91c2714df448c9b35656 100644
+--- a/scripts/desktop-plugins/build-preloads.mjs
++++ b/scripts/desktop-plugins/build-preloads.mjs
+@@ -1,6 +1,7 @@
+ import { createRequire } from 'node:module';
+ import { resolve } from 'node:path';
++import { fileURLToPath } from 'node:url';
+ import { rm, readFile } from 'node:fs/promises';
+-const require=createRequire(new URL('../../apps/aicrm-desktop/package.json',import.meta.url));const {build}=require('esbuild');const root=new URL('../../apps/aicrm-desktop/',import.meta.url).pathname;
+-for(const name of ['index','desktop-plugin','desktop-offline']){const output=resolve(root,'out/preload',name+'.js');await build({entryPoints:[resolve(root,'src/preload',name+'.ts')],outfile:output,bundle:true,platform:'node',format:'cjs',target:'node22',external:['electron'],logLevel:'silent'});const text=await readFile(output,'utf8');if(/require\(["']\./.test(text))throw Error('preload 存在沙箱不支持的本地分块引用');}
+-await rm(resolve(root,'out/preload/chunks'),{recursive:true,force:true});console.log('三个固定 preload 已分别独立打包，无本地 require 分块');
++const require=createRequire(new URL('../../apps/aicrm-desktop/package.json',import.meta.url));const {build}=require('esbuild');const root=fileURLToPath(new URL('../../apps/aicrm-desktop/',import.meta.url));
++for(const name of ['index','desktop-plugin','desktop-offline','web-window','web-window-plugin']){const output=resolve(root,'out/preload',name+'.js');await build({entryPoints:[resolve(root,'src/preload',name+'.ts')],outfile:output,bundle:true,platform:'node',format:'cjs',target:'node22',external:['electron'],logLevel:'silent'});const text=await readFile(output,'utf8');if(/require\(["']\./.test(text))throw Error('preload 存在沙箱不支持的本地分块引用');}
++await rm(resolve(root,'out/preload/chunks'),{recursive:true,force:true});console.log('五个固定 preload 已分别独立打包，无本地 require 分块');
+diff --git a/scripts/desktop-plugins/deploy-web-window-public.mjs b/scripts/desktop-plugins/deploy-web-window-public.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..38b341054909b3b2a2fde84242600cc72302ec22
+--- /dev/null
++++ b/scripts/desktop-plugins/deploy-web-window-public.mjs
+@@ -0,0 +1,39 @@
++/** 仅部署已验签的 Web Window 开发包；不会改写 status-bar 根目录产物。 */
++import { readFile, mkdir, writeFile, rename, chmod } from "node:fs/promises";
++import { resolve, join } from "node:path";
++import { parse, signed, sha } from "./package-format.mjs";
++import { ensure, digest, integer } from "../../packages/desktop-plugin-contracts/src/index.ts";
++import { validateWebWindowManifest } from "../../packages/desktop-plugin-contracts/src/web-window.ts";
++
++const PLUGIN_ID = "cn.org.kww.desktop.web-window";
++const destinationInput = process.env.KY_WEB_WINDOW_PLUGIN_DEPLOY_ROOT?.trim();
++const destination = destinationInput ? resolve(destinationInput) : "";
++const source = resolve(process.argv[2] ?? "");
++const publicKeyDocument = parse(await readFile(new URL("../../apps/aicrm-desktop/resources/desktop-plugin-web-window-dev-policy.json", import.meta.url)), 65536).publicKey;
++const date = (value) => { ensure(typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value)); const parsed = Date.parse(value); ensure(Number.isFinite(parsed)); return parsed; };
++try {
++  ensure(Boolean(destinationInput), "必须配置 KY_WEB_WINDOW_PLUGIN_DEPLOY_ROOT");
++  ensure(process.argv.length === 3, "用法：node scripts/desktop-plugins/deploy-web-window-public.mjs 已验签Web Window目录");
++  const policyBytes = await readFile(join(source, "policy.json"));
++  const policy = signed(parse(policyBytes, 65536), publicKeyDocument, "kww-desktop-plugin-policy:v1");
++  ensure(policy.schemaVersion === 1 && policy.kind === "desktop-plugin-trust-policy" && policy.channel === "dev" && policy.pluginId === PLUGIN_ID);
++  integer(policy.policyVersion, 1); ensure(date(policy.expiresAt) > Date.now());
++  const indexBytes = await readFile(join(source, "index.json"));
++  const index = signed(parse(indexBytes, 65536), publicKeyDocument, "kww-desktop-plugin-index:v1");
++  ensure(index.schemaVersion === 1 && index.kind === "desktop-plugin-release-index" && index.channel === "dev" && index.pluginId === PLUGIN_ID && index.policyVersion === policy.policyVersion);
++  integer(index.releaseSequence, 1); digest(index.packageSha256); integer(index.packageBytes, 1, 2097152); ensure(index.fileName === `${index.packageSha256}.kwwplugin.json` && date(index.expiresAt) > Date.now());
++  const packageBytes = await readFile(join(source, index.fileName));
++  ensure(packageBytes.length === index.packageBytes && sha(packageBytes) === index.packageSha256);
++  const outer = parse(packageBytes, 2097152);
++  const metadata = signed(outer, publicKeyDocument, "kww-desktop-web-window-plugin:v1", ["files"]);
++  validateWebWindowManifest(metadata.manifest);
++  ensure(Array.isArray(metadata.files) && metadata.files.length === 1 && metadata.files[0].path === metadata.manifest.entry);
++  ensure(Array.isArray(outer.files) && outer.files.length === metadata.files.length);
++  await mkdir(destination, { recursive: true, mode: 0o755 });
++  for (const [name, data] of [[index.fileName, packageBytes], ["policy.json", policyBytes], ["index.json", indexBytes]]) {
++    const temporary = join(destination, `${name}.next`); await writeFile(temporary, data, { mode: 0o644 }); await chmod(temporary, 0o644); await rename(temporary, join(destination, name));
++  }
++  console.log(JSON.stringify({ 结果: "Web Window 公共包验签并部署", 版本: index.version, 序号: index.releaseSequence, digest: index.packageSha256, 目录: destination }));
++} catch {
++  console.error("Web Window 公共包验证或部署失败，未输出原始异常"); process.exitCode = 1;
++}
+diff --git a/scripts/desktop-plugins/package-format.mjs b/scripts/desktop-plugins/package-format.mjs
+index 909d210062df52ef044825a0f06a52abe0e5cd86..d330aadeabe9390dbbc301cc9688618582850c02 100644
+--- a/scripts/desktop-plugins/package-format.mjs
++++ b/scripts/desktop-plugins/package-format.mjs
+@@ -4,7 +4,7 @@ export const sha = b => createHash('sha256').update(b).digest('hex');
+ export function base64(s, size) { ensure(typeof s==='string' && s.length<=3*1024*1024);const b=Buffer.from(s,'base64');ensure(b.toString('base64')===s && (size===undefined||b.length===size));return b; }
+ export function parse(bytes, max=2097152){ensure(bytes.length<=max);return strictJson(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
+ export function publicKey(input){const o=object(input,['schemaVersion','purpose','channel','algorithm','publicKeyFormat','publicKey','fingerprint','keyId']);ensure(o.schemaVersion===1&&o.purpose==='kww-desktop-plugin-signing'&&o.channel==='dev'&&o.algorithm==='Ed25519'&&o.publicKeyFormat==='raw-ed25519-base64');const raw=base64(o.publicKey,32);ensure(o.fingerprint===`sha256:${sha(raw)}`&&o.keyId===o.fingerprint);return createPublicKey({key:{kty:'OKP',crv:'Ed25519',x:raw.toString('base64url')},format:'jwk'});}
+-export function buildPolicy(key){publicKey(key);return {schemaVersion:1,kind:'desktop-plugin-build-policy',channel:'dev',enabled:true,productionEnabled:false,updateBaseUrl:SOURCE,allowLoopbackHttp:true,publicKey:key,pluginId:PLUGIN_ID,capabilities:[...CAPABILITIES],platforms:['darwin'],policyFile:'policy.json',indexFile:'index.json'};}
++export function buildPolicy(key){publicKey(key);return {schemaVersion:1,kind:'desktop-plugin-build-policy',channel:'dev',enabled:true,productionEnabled:false,updateBaseUrl:SOURCE,allowLoopbackHttp:false,publicKey:key,pluginId:PLUGIN_ID,capabilities:[...CAPABILITIES],platforms:['darwin'],policyFile:'policy.json',indexFile:'index.json'};}
+ export function validateBuildPolicy(p){object(p,Object.keys(buildPolicy(p.publicKey)));ensure(JSON.stringify(p)===JSON.stringify(buildPolicy(p.publicKey)) || Object.keys(p).every(k=>JSON.stringify(p[k])===JSON.stringify(buildPolicy(p.publicKey)[k])));return p;}
+ export function signed(o,key,domain,extra=[]){object(o,['schemaVersion','keyId','signedMetadata','signature',...extra]);ensure(o.schemaVersion===1&&o.keyId===key.keyId);const bytes=base64(o.signedMetadata);ensure(verify(null,Buffer.concat([Buffer.from(domain+'\n'),bytes]),publicKey(key),base64(o.signature,64)));return parse(bytes,65536);}
+ export function policy(bytes,key,now=Date.now()){const o=signed(parse(bytes,65536),key,'kww-desktop-plugin-policy:v1');object(o,['schemaVersion','kind','policyVersion','channel','keyId','pluginId','capabilities','notBefore','expiresAt','revokedPackageDigests']);ensure(o.schemaVersion===1&&o.kind==='desktop-plugin-trust-policy'&&o.channel==='dev'&&o.keyId===key.keyId&&o.pluginId===PLUGIN_ID);integer(o.policyVersion,1);ensure(uniqueStrings(o.capabilities,4).every(x=>CAPABILITIES.includes(x)));o.revokedPackageDigests=uniqueStrings(o.revokedPackageDigests,128);o.revokedPackageDigests.forEach(digest);const start=date(o.notBefore),end=date(o.expiresAt);ensure(start<end && now>=start&&now<end);return o;}
+diff --git a/scripts/desktop-plugins/sign-web-window.mjs b/scripts/desktop-plugins/sign-web-window.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c424abd01c8d2e955c0edf5590d5ea03bfefd11f
+--- /dev/null
++++ b/scripts/desktop-plugins/sign-web-window.mjs
+@@ -0,0 +1,89 @@
++/** Web Window 开发分发签名工具；只接受专用 Ed25519 私钥，不输出密钥或源码。 */
++import { readFile, writeFile, mkdir, lstat } from "node:fs/promises";
++import { dirname, resolve } from "node:path";
++import { createPrivateKey, createPublicKey, sign } from "node:crypto";
++import { parse, sha } from "./package-format.mjs";
++import { ensure, digest, pathName, semver } from "../../packages/desktop-plugin-contracts/src/index.ts";
++import { validateWebWindowManifest } from "../../packages/desktop-plugin-contracts/src/web-window.ts";
++
++const PLUGIN_ID = "cn.org.kww.desktop.web-window";
++const DOMAIN = "kww-desktop-web-window-plugin:v1";
++const POLICY_DOMAIN = "kww-desktop-plugin-policy:v1";
++const INDEX_DOMAIN = "kww-desktop-plugin-index:v1";
++const CAPABILITIES = ["webWindow.projection.read", "webWindow.navigation.fixed"];
++const args = process.argv.slice(2);
++const opts = {};
++for (let i = 1; i < args.length; i += 2) {
++  ensure(args[i]?.startsWith("--") && args[i + 1], "参数格式无效");
++  opts[args[i].slice(2)] = args[i + 1];
++}
++
++const usage = "用法：node scripts/desktop-plugins/sign-web-window.mjs release --private-key 路径 --public-key 路径 --source 目录 --output 目录 --sequence 整数";
++const iso = (value) => new Date(Math.floor(value / 1000) * 1000).toISOString().replace(".000Z", "Z");
++const signed = (payload, domain, privateKey, keyId) => {
++  const bytes = Buffer.from(JSON.stringify(payload));
++  return {
++    schemaVersion: 1,
++    keyId,
++    signedMetadata: bytes.toString("base64"),
++    signature: sign(null, Buffer.concat([Buffer.from(`${domain}\n`), bytes]), privateKey).toString("base64")
++  };
++};
++
++try {
++  ensure(args[0] === "release", usage);
++  const keyPath = resolve(opts["private-key"]);
++  const stat = await lstat(keyPath);
++  const parent = await lstat(dirname(keyPath));
++  ensure(stat.isFile() && !stat.isSymbolicLink() && parent.isDirectory() && !parent.isSymbolicLink());
++  ensure((stat.mode & 0o777) === 0o600 && (parent.mode & 0o777) === 0o700 && stat.uid === process.getuid?.(), "私钥权限或所有者无效");
++  const privateKey = createPrivateKey(await readFile(keyPath));
++  ensure(privateKey.asymmetricKeyType === "ed25519");
++  const publicDocument = parse(await readFile(opts["public-key"]), 4096);
++  const rawPublic = Buffer.from(publicDocument.publicKey, "base64");
++  ensure(rawPublic.length === 32 && publicDocument.fingerprint === `sha256:${sha(rawPublic)}` && publicDocument.keyId === publicDocument.fingerprint);
++  const publicKey = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: rawPublic.toString("base64url") }, format: "jwk" });
++  ensure(createPublicKey(privateKey).export({ format: "der", type: "spki" }).equals(publicKey.export({ format: "der", type: "spki" })), "公私钥不一致");
++
++  const source = resolve(opts.source);
++  const output = resolve(opts.output);
++  const manifest = validateWebWindowManifest(parse(await readFile(`${source}/manifest.json`), 65536));
++  semver(manifest.version);
++  const files = [];
++  for (const relative of [manifest.entry]) {
++    pathName(relative);
++    const content = await readFile(`${source}/${relative}`);
++    ensure(content.length <= 524288);
++    files.push({ path: relative, content, size: content.length, sha256: sha(content) });
++  }
++  const metadata = signed({ manifest, files: files.map(({ path, size, sha256 }) => ({ path, size, sha256 })) }, DOMAIN, privateKey, publicDocument.keyId);
++  const packageBytes = Buffer.from(JSON.stringify({ ...metadata, files: files.map(({ path, content }) => ({ path, contentBase64: content.toString("base64") })) }));
++  const packageSha256 = sha(packageBytes);
++  digest(packageSha256);
++  const sequence = Number(opts.sequence);
++  ensure(Number.isSafeInteger(sequence) && sequence > 0);
++  const policyVersion = Number(opts["policy-version"] ?? 1);
++  ensure(Number.isSafeInteger(policyVersion) && policyVersion > 0);
++  const now = Date.now();
++  const policy = { schemaVersion: 1, kind: "desktop-plugin-trust-policy", channel: "dev", policyVersion, keyId: publicDocument.keyId, pluginId: PLUGIN_ID, capabilities: CAPABILITIES, notBefore: iso(now - 60000), expiresAt: iso(now + 30 * 86400000), revokedPackageDigests: [] };
++  await mkdir(output, { recursive: true });
++  let policyBytes;
++  try {
++    policyBytes = await readFile(`${output}/policy.json`);
++    const existing = parse(Buffer.from(parse(policyBytes, 65536).signedMetadata, "base64"));
++    ensure(existing.policyVersion === policyVersion && Date.parse(existing.expiresAt) > now, "策略版本冲突或过期");
++    policy.expiresAt = existing.expiresAt;
++  } catch (error) {
++    if (error.code !== "ENOENT") throw error;
++    policyBytes = Buffer.from(JSON.stringify(signed(policy, POLICY_DOMAIN, privateKey, publicDocument.keyId)));
++  }
++  const packageName = `${packageSha256}.kwwplugin.json`;
++  await writeFile(`${output}/${packageName}`, packageBytes, { flag: "wx" }).catch((error) => { if (error.code !== "EEXIST") throw error; });
++  await writeFile(`${output}/policy.json`, policyBytes);
++  const index = { schemaVersion: 1, kind: "desktop-plugin-release-index", channel: "dev", pluginId: PLUGIN_ID, policyVersion, keyId: publicDocument.keyId, releaseSequence: sequence, version: manifest.version, packageSha256, packageBytes: packageBytes.length, fileName: packageName, expiresAt: policy.expiresAt };
++  await writeFile(`${output}/index.json`, JSON.stringify(signed(index, INDEX_DOMAIN, privateKey, publicDocument.keyId)));
++  console.log(JSON.stringify({ 结果: "Web Window 开发包签名完成", 插件版本: manifest.version, 序号: sequence, 文件: packageName, 目录: output }));
++} catch {
++  console.error("签名失败：请检查参数、专用密钥权限、公私钥一致性及策略版本；未输出原始异常。");
++  process.exitCode = 1;
++}
+diff --git a/scripts/desktop-plugins/test-electron.mjs b/scripts/desktop-plugins/test-electron.mjs
+index 84b971b627d42c084d486594ae14869365ef77d2..0cc885ee8d53a9fa1b80cdc3ca00831374bdbc0b 100644
+--- a/scripts/desktop-plugins/test-electron.mjs
++++ b/scripts/desktop-plugins/test-electron.mjs
+@@ -5,6 +5,12 @@ export const ipcMain={handle:(c,f)=>{if(handles.has(c))throw Error('重复');han
+ let id=0;
+ export class FakeContents extends EventEmitter{constructor(){super();this.id=++id;this.mainFrame={url:'https://example.test/'};this.sent=[];this.dead=false;}isDestroyed(){return this.dead;}send(c,p){this.sent.push({c,p});}getURL(){return this.mainFrame.url;}setWindowOpenHandler(){} }
+ export class BrowserWindow extends EventEmitter{static windows=[];static fromWebContents(wc){return this.windows.find(w=>w.webContents===wc);}constructor(){super();this.webContents=new FakeContents();this.visible=true;this.minimized=false;this.dead=false;BrowserWindow.windows.push(this);}isVisible(){return this.visible;}isMinimized(){return this.minimized;}isDestroyed(){return this.dead;}destroy(){this.dead=true;this.webContents.dead=true;this.webContents.emit('destroyed');this.emit('closed');} }
++export class WebContentsView{constructor(){this.webContents=new FakeContents();this.visible=true;this.bounds={x:0,y:0,width:0,height:0};}getVisible(){return this.visible;}setVisible(value){this.visible=value;}getBounds(){return {...this.bounds};}setBounds(bounds){this.bounds={...bounds};}}
+ export const app={isPackaged:false,getPath:()=>'/tmp/kww-unit-only'};
++// 插件单测不模拟系统密钥链；依赖安全存储的产品路径应在此环境中 fail closed。
++export const safeStorage={isEncryptionAvailable:()=>false,encryptString(){throw Error('测试 Electron 替身不提供系统安全存储');},decryptString(){throw Error('测试 Electron 替身不提供系统安全存储');}};
++export const Menu={buildFromTemplate(){throw Error('测试 Electron 替身不提供应用菜单');},setApplicationMenu(){}};
++export const nativeTheme=Object.assign(new EventEmitter(),{shouldUseDarkColors:false});
++export const shell={openExternal(){throw Error('测试 Electron 替身不提供外部浏览器');}};
+ export const protocol={registerSchemesAsPrivileged(){},handle(){}};
+ export const session={};
+diff --git a/scripts/desktop-plugins/web-window-distribution.test.mjs b/scripts/desktop-plugins/web-window-distribution.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..28601f752d4a56b8035278c8c2497a77a6bee543
+--- /dev/null
++++ b/scripts/desktop-plugins/web-window-distribution.test.mjs
+@@ -0,0 +1,178 @@
++import "./test-loader.mjs";
++import test from "node:test";
++import assert from "node:assert/strict";
++import { generateKeyPairSync, sign } from "node:crypto";
++import { mkdtemp, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { readFile } from "node:fs/promises";
++import { parse, sha } from "./package-format.mjs";
++import { isWebWindowPluginPlatformSupported, WebWindowPluginDistribution, webWindowPackageFor, WEB_WINDOW_PLUGIN_ID } from "../../apps/aicrm-desktop/src/main/web-window-plugin-distribution.ts";
++
++const pair = generateKeyPairSync("ed25519");
++const raw = Buffer.from(pair.publicKey.export({ format: "jwk" }).x, "base64url");
++const key = { schemaVersion: 1, purpose: "kww-desktop-plugin-signing", channel: "dev", algorithm: "Ed25519", publicKeyFormat: "raw-ed25519-base64", publicKey: raw.toString("base64"), fingerprint: "sha256:"+sha(raw), keyId: "sha256:"+sha(raw) };
++const signed = (value, domain, extra = []) => { const bytes = Buffer.from(JSON.stringify(value)); return { schemaVersion: 1, keyId: key.keyId, signedMetadata: bytes.toString("base64"), signature: sign(null, Buffer.concat([Buffer.from(domain+"\n"), bytes]), pair.privateKey).toString("base64"), ...Object.fromEntries(extra.map((name) => [name, undefined])) }; };
++const date = (ms) => new Date(Math.floor(ms/1000)*1000).toISOString().replace(".000Z","Z");
++const manifest = JSON.parse(await readFile(new URL("../../desktop-plugins/kww-web-window/v1/manifest.json", import.meta.url)));
++const builtin = webWindowPackageFor(manifest, await readFile(new URL("../../desktop-plugins/kww-web-window/v1/plugin.js", import.meta.url), "utf8"));
++
++function releaseFixture({ platforms = manifest.platforms } = {}) {
++  const now = Date.now();
++  const nextManifest = { ...manifest, version: "1.0.1", platforms };
++  const source = Buffer.from("globalThis.__webWindowRemote = true;");
++  const metadata = signed({ manifest: nextManifest, files: [{ path: "plugin.js", size: source.length, sha256: sha(source) }] }, "kww-desktop-web-window-plugin:v1");
++  const packageBytes = Buffer.from(JSON.stringify({ ...metadata, files: [{ path: "plugin.js", contentBase64: source.toString("base64") }] }));
++  const packageDigest = sha(packageBytes);
++  const policyPayload = { schemaVersion: 1, kind: "desktop-plugin-trust-policy", channel: "dev", policyVersion: 1, keyId: key.keyId, pluginId: WEB_WINDOW_PLUGIN_ID, capabilities: ["webWindow.projection.read","webWindow.navigation.fixed"], notBefore: date(now-1000), expiresAt: date(now+60000), revokedPackageDigests: [] };
++  const indexPayload = { schemaVersion: 1, kind: "desktop-plugin-release-index", channel: "dev", pluginId: WEB_WINDOW_PLUGIN_ID, policyVersion: 1, releaseSequence: 1, version: "1.0.1", packageSha256: packageDigest, packageBytes: packageBytes.length, fileName: packageDigest+".kwwplugin.json", expiresAt: date(now+30000) };
++  return { policy: Buffer.from(JSON.stringify(signed(policyPayload, "kww-desktop-plugin-policy:v1"))), index: Buffer.from(JSON.stringify(signed(indexPayload, "kww-desktop-plugin-index:v1"))), packageBytes, fileName: indexPayload.fileName, version: "1.0.1" };
++}
++
++test("Web Window 远程更新在 macOS 和 Windows 启用，其他平台关闭", () => {
++  assert.equal(isWebWindowPluginPlatformSupported("darwin"), true);
++  assert.equal(isWebWindowPluginPlatformSupported("win32"), true);
++  assert.equal(isWebWindowPluginPlatformSupported("linux"), false);
++});
++
++test("Web Window 远程分发失败时保留内置稳定包", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-fallback-")), "state-root");
++  try {
++    const d = new WebWindowPluginDistribution({ root, builtin, publicKey: key, platform: "darwin", enabled: true, autoCheck: false, fetchRelease: async () => { throw new Error("offline"); } });
++    await d.initialize();
++    assert.equal(await d.checkForUpdate(), false);
++    assert.equal(d.current().manifest.version, "1.0.0");
++    assert.equal(d.storage.state.phase, "stable");
++    await d.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++test("Web Window 远程包经过签名校验后进入 candidate 并可稳定切换", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-candidate-")), "state-root");
++  const fixture = releaseFixture();
++  const responses = new Map([["policy.json", fixture.policy],["index.json", fixture.index],[fixture.fileName, fixture.packageBytes]]);
++  try {
++    let candidate = null;
++    const d = new WebWindowPluginDistribution({ root, builtin, publicKey: key, platform: "darwin", enabled: true, autoCheck: false, fetchRelease: async (_source, name) => responses.get(name), onCandidate: async (pkg, ref) => { candidate = { pkg, ref }; } });
++    await d.initialize();
++    const updated = await d.checkForUpdate(); assert.equal(updated, true);
++    assert.equal(d.storage.state.phase, "verified");
++    assert.equal(d.storage.state.candidate.version, "1.0.1");
++    assert.equal(candidate.pkg.manifest.version, "1.0.1");
++    await d.commitStable(candidate.ref);
++    assert.equal(d.current().manifest.version, "1.0.1");
++    assert.equal(d.storage.state.phase, "stable");
++    await d.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++test("Windows 接受声明 win32 的签名 Web Window 插件更新", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-win-update-")), "state-root");
++  const fixture = releaseFixture({ platforms: ["darwin", "win32"] });
++  const responses = new Map([["policy.json", fixture.policy],["index.json", fixture.index],[fixture.fileName, fixture.packageBytes]]);
++  try {
++    let candidate = null;
++    const d = new WebWindowPluginDistribution({ root, builtin, publicKey: key, platform: "win32", enabled: true, autoCheck: false, fetchRelease: async (_source, name) => responses.get(name), onCandidate: async (pkg, ref) => { candidate = { pkg, ref }; } });
++    await d.initialize();
++    assert.equal(await d.checkForUpdate(), true);
++    assert.equal(candidate.pkg.manifest.platforms.includes("win32"), true);
++    assert.equal(candidate.pkg.manifest.version, "1.0.1");
++    await d.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++test("Windows 拒绝未声明 win32 的远程插件包并保留内置版本", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-win-platform-")), "state-root");
++  const fixture = releaseFixture({ platforms: ["darwin"] });
++  const responses = new Map([["policy.json", fixture.policy],["index.json", fixture.index],[fixture.fileName, fixture.packageBytes]]);
++  try {
++    const d = new WebWindowPluginDistribution({ root, builtin, publicKey: key, platform: "win32", enabled: true, autoCheck: false, fetchRelease: async (_source, name) => responses.get(name) });
++    await d.initialize();
++    assert.equal(await d.checkForUpdate(), false);
++    assert.equal(d.current().manifest.version, "1.0.0");
++    assert.equal(d.storage.state.phase, "stable");
++    await d.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++test("Windows 启动时回退此前缓存的 macOS 专用远程包", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-win-cached-platform-")), "state-root");
++  const fixture = releaseFixture({ platforms: ["darwin"] });
++  const responses = new Map([["policy.json", fixture.policy],["index.json", fixture.index],[fixture.fileName, fixture.packageBytes]]);
++  try {
++    const mac = new WebWindowPluginDistribution({ root, builtin, publicKey: key, platform: "darwin", enabled: true, autoCheck: false, fetchRelease: async (_source, name) => responses.get(name) });
++    await mac.initialize();
++    assert.equal(await mac.checkForUpdate(), true);
++    await mac.commitStable(mac.storage.state.candidate);
++    await mac.close();
++
++    const win = new WebWindowPluginDistribution({ root, builtin, publicKey: key, platform: "win32", enabled: true, autoCheck: false });
++    await win.initialize();
++    assert.equal(win.current().manifest.version, "1.0.0");
++    assert.equal(win.lastErrorCode, "active_package_invalid");
++    await win.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++
++test("Web Window 生命周期显式经过准备、排空、激活、试运行并稳定提交", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-phase-")), "state-root");
++  try {
++    const d = new WebWindowPluginDistribution({ root, builtin, publicKey: key, enabled: false, autoCheck: false });
++    await d.initialize();
++    for (const phase of ["preparing", "draining", "activating", "probation", "stable"]) {
++      await d.setPhase(phase);
++      assert.equal(d.storage.state.phase, phase);
++    }
++    await d.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++test("Web Window 宿主保留 ready ACK 与候选失败回退路径", async () => {
++  const host = await readFile(new URL("../../apps/aicrm-desktop/src/main/web-window-plugin-host.ts", import.meta.url), "utf8");
++  assert.match(host, /await waitReady\(value\)/);
++  assert.match(host, /await plugin\.loadURL\(/);
++  assert.match(host, /await pluginContents\.executeJavaScript\(/);
++  assert.ok(host.indexOf("await plugin.loadURL(") < host.indexOf("await pluginContents.executeJavaScript("));
++  assert.match(host, /setPhase\("draining"\)/);
++  assert.match(host, /web_window_plugin_candidate_rejected/);
++  assert.match(host, /targets\.set\(candidate\.targetContents, candidate\)/);
++  assert.match(host, /value\.target\.isDestroyed\(\)/);
++  assert.doesNotMatch(host, /old\.target\.destroy\(\)/);
++  assert.match(host, /for \(const old of oldTargets\) \{\s*if \(old\.target\.isDestroyed\(\)\) continue;\s*targets\.set\(old\.targetContents, old\)/);
++  assert.match(host, /distribution\.rollbackPackage\(\)/);
++  assert.match(host, /const pluginContents = plugin\.webContents/);
++  assert.match(host, /pluginTargets\.delete\(pluginContents\)/);
++  assert.doesNotMatch(host, /plugin\.once\("closed",[^\n]*plugin\.webContents/);
++  assert.match(host, /render-process-gone/);
++  assert.match(host, /recoverPluginCrash/);
++  assert.match(host, /distribution = result;\s+await result\.initialize\(\)/);
++});
++
++test("Web Window 生命周期按实例隔离且无权限能力", async () => {
++  const host = await readFile(new URL("../../apps/aicrm-desktop/src/main/web-window-plugin-host.ts", import.meta.url), "utf8");
++  const contract = await readFile(new URL("../../packages/desktop-plugin-contracts/src/web-window.ts", import.meta.url), "utf8");
++  assert.match(host, /targets = new Map/);
++  assert.match(host, /pluginTargets = new Map/);
++  assert.match(host, /navigationGeneration/);
++  assert.match(contract, /webWindow\.projection\.read/);
++  assert.match(contract, /webWindow\.navigation\.fixed/);
++  assert.doesNotMatch(contract, /executeJavaScript|insertCSS|network|cookie|storage/i);
++});
++
++test("Web Window 稳定版本保留回滚引用并可恢复内置包", async () => {
++  const root = join(await mkdtemp(join(tmpdir(), "kww-web-window-rollback-")), "state-root");
++  const fixture = releaseFixture();
++  const responses = new Map([["policy.json", fixture.policy],["index.json", fixture.index],[fixture.fileName, fixture.packageBytes]]);
++  try {
++    let candidate = null;
++    const d = new WebWindowPluginDistribution({ root, builtin, publicKey: key, enabled: true, autoCheck: false, fetchRelease: async (_source, name) => responses.get(name), onCandidate: async (pkg, ref) => { candidate = { pkg, ref }; } });
++    await d.initialize();
++    await d.checkForUpdate();
++    await d.commitStable(candidate.ref);
++    const rollback = await d.rollbackPackage();
++    assert.equal(rollback.pkg.manifest.version, "1.0.0");
++    assert.equal(rollback.ref.digest, builtin.digest);
++    await d.close();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
+diff --git a/scripts/desktop-plugins/web-window-logo-layout.test.mjs b/scripts/desktop-plugins/web-window-logo-layout.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6a3ccfec5909ca5ad0752d4ce16eb4c04b1e21b
+--- /dev/null
++++ b/scripts/desktop-plugins/web-window-logo-layout.test.mjs
+@@ -0,0 +1,15 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { readFile } from "node:fs/promises";
++
++test("Web Window LOGO 与导航挂载点保持同一横向 flex 行", async () => {
++  const source = await readFile(new URL("../../apps/aicrm-desktop/src/preload/web-window.ts", import.meta.url), "utf8");
++  const chromeRule = /#kww-web-window-chrome\s*\{([^}]*)\}/s.exec(source)?.[1] ?? "";
++  const mountRule = /#kww-web-window-header-mount\s*\{([^}]*)\}/s.exec(source)?.[1] ?? "";
++  assert.match(chromeRule, /display:\s*flex;/);
++  assert.match(chromeRule, /align-items:\s*center;/);
++  assert.match(mountRule, /display:\s*contents;/);
++  assert.match(source, /id="kww-web-window-header-mount"/);
++  assert.match(source, /class="kww-web-window-brand"/);
++  assert.match(source, /class="kww-web-window-navigation"/);
++});
+diff --git a/scripts/desktop-plugins/web-window-plugin-host-runtime.mjs b/scripts/desktop-plugins/web-window-plugin-host-runtime.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0995d8ceaf49f404ed7fae244464cd44a49e4206
+--- /dev/null
++++ b/scripts/desktop-plugins/web-window-plugin-host-runtime.mjs
+@@ -0,0 +1,636 @@
++import assert from "node:assert/strict";
++import { createRequire } from "node:module";
++import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { dirname, join, resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import { once } from "node:events";
++import { spawn } from "node:child_process";
++import { createServer } from "node:http";
++import { generateKeyPairSync, sign } from "node:crypto";
++import { sha } from "./package-format.mjs";
++
++const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
++const root = await mkdtemp(join(tmpdir(), "kww-web-window-host-runtime-"));
++const output = resolve(repoRoot, "apps/aicrm-desktop/out/web-window-host-runtime-test");
++const appNodeModules = resolve(repoRoot, "apps/aicrm-desktop/node_modules");
++const electronBin = resolve(appNodeModules, ".bin/electron");
++const hostPath = resolve(repoRoot, "apps/aicrm-desktop/src/main/web-window-plugin-host.ts");
++const webInjectionPath = resolve(repoRoot, "apps/aicrm-desktop/src/main/web-injection-window.ts");
++const manifest = JSON.parse(await readFile(resolve(repoRoot, "desktop-plugins/kww-web-window/v1/manifest.json"), "utf8"));
++const builtinSource = await readFile(resolve(repoRoot, "desktop-plugins/kww-web-window/v1/plugin.js"), "utf8");
++const strictDocumentStartSource = "window.__kwwStrictDocumentStart = { readyState: document.readyState };";
++const strictDocumentStartSha = sha(Buffer.from(strictDocumentStartSource));
++let pageFirstManifestResponded = false;
++const pair = generateKeyPairSync("ed25519");
++const server = createServer((request, response) => {
++  const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
++  if (path === "/api/v1/script-runtime/manifest") {
++    const sendManifest = () => {
++      if (request.headers["x-ky-workspace-id"] === "page-first-late-fixture") pageFirstManifestResponded = true;
++      if (response.destroyed) return;
++      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
++      response.end(JSON.stringify({ schemaVersion: 1, workspaceType: "platform", workspaceId: request.headers["x-ky-workspace-id"] ?? "local-runtime-fixture", platform: "generic", manifestRevision: "fixture-revision-1", assets: [] }));
++    };
++    if (request.headers["x-ky-workspace-id"] === "page-first-late-fixture") setTimeout(sendManifest, 700);
++    else sendManifest();
++    return;
++  }
++  if (path === "/api/v1/script-runtime/resolve") {
++    if (request.headers["x-ky-workspace-id"] === "strict-resolver-failure-fixture") {
++      response.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
++      response.end(JSON.stringify({ error: "fixture_forbidden" }));
++      return;
++    }
++    if (request.headers["x-ky-workspace-id"] === "strict-hash-failure-fixture") {
++      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
++      response.end(JSON.stringify({ assets: [{
++        assetType: "script", platform: "generic", identifier: "STRICT_DOCUMENT_START_FIXTURE", version: "1.0.0",
++        effectiveVersionId: "strict-document-start-v1", enabled: true, runAt: "document_start", priority: 1,
++        source: strictDocumentStartSource, sourceSha256: "0".repeat(64)
++      }] }));
++      return;
++    }
++    if (request.headers["x-ky-workspace-id"] === "strict-timeout-fixture") {
++      setTimeout(() => {
++        if (response.destroyed || response.writableEnded) return;
++        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
++        response.end(JSON.stringify({ assets: [{
++          assetType: "script", platform: "generic", identifier: "STRICT_DOCUMENT_START_FIXTURE", version: "1.0.0",
++          effectiveVersionId: "strict-document-start-v1", enabled: true, runAt: "document_start", priority: 1,
++          source: strictDocumentStartSource, sourceSha256: strictDocumentStartSha
++        }] }));
++      }, 3800);
++      return;
++    }
++    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
++    response.end(JSON.stringify({ assets: [{
++      assetType: "script", platform: "generic", identifier: "STRICT_DOCUMENT_START_FIXTURE", version: "1.0.0",
++      effectiveVersionId: "strict-document-start-v1", enabled: true, runAt: "document_start", priority: 1,
++      source: strictDocumentStartSource, sourceSha256: strictDocumentStartSha
++    }] }));
++    return;
++  }
++  if (path === "/fixture/strict-redirect") {
++    response.writeHead(302, { Location: "/fixture/strict-landing" });
++    response.end();
++    return;
++  }
++  if (path === "/fixture/strict" || path === "/fixture/strict-landing") {
++    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
++    response.end(`<!doctype html><html><body><script>window.__siteObservedDocumentStart = window.__kwwStrictDocumentStart?.readyState === 'loading' && document.readyState === 'loading';</script><h1 id="strict-title">${path === "/fixture/strict" ? "严格时序验收页" : "未预登记的重定向页"}</h1></body></html>`);
++    return;
++  }
++  if (path === "/fixture/page-first-late") {
++    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
++    response.end(`<!doctype html><html><body><script>window.__pageStartedBeforeManifest = ${!pageFirstManifestResponded};window.__siteObservedDocumentStart = Boolean(window.__kwwStrictDocumentStart);</script><h1 id="page-title">页面优先验收页</h1></body></html>`);
++    return;
++  }
++  response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
++  const title = path === "/fixture/navigation-next" ? "导航验收页" : "真实 WebWindow 验收页";
++  response.end(`<!doctype html><meta charset='utf-8'><title>web-window-runtime-fixture</title><h1 id='page-title'>${title}</h1><input id='preserved' value='before-update'>`);
++});
++server.listen(0, "127.0.0.1");
++await once(server, "listening");
++const fixtureUrl = `http://127.0.0.1:${server.address().port}/fixture`;
++const publicKeyBytes = Buffer.from(pair.publicKey.export({ format: "jwk" }).x, "base64url");
++const keyDigest = sha(publicKeyBytes);
++const publicKey = {
++  schemaVersion: 1,
++  purpose: "kww-desktop-plugin-signing",
++  channel: "dev",
++  algorithm: "Ed25519",
++  publicKeyFormat: "raw-ed25519-base64",
++  publicKey: publicKeyBytes.toString("base64"),
++  fingerprint: `sha256:${keyDigest}`,
++  keyId: `sha256:${keyDigest}`
++};
++
++function signMetadata(value, domain) {
++  const bytes = Buffer.from(JSON.stringify(value));
++  return {
++    schemaVersion: 1,
++    keyId: publicKey.keyId,
++    signedMetadata: bytes.toString("base64"),
++    signature: sign(null, Buffer.concat([Buffer.from(`${domain}\n`), bytes]), pair.privateKey).toString("base64")
++  };
++}
++
++function utcDate(milliseconds) {
++  return new Date(Math.floor(milliseconds / 1000) * 1000).toISOString().replace(".000Z", "Z");
++}
++
++function createRelease(version, releaseSequence, source, policyBytes) {
++  const sourceBytes = Buffer.from(source);
++  const versionManifest = { ...manifest, version };
++  const packageMetadata = signMetadata({
++    manifest: versionManifest,
++    files: [{ path: versionManifest.entry, size: sourceBytes.length, sha256: sha(sourceBytes) }]
++  }, "kww-desktop-web-window-plugin:v1");
++  const packageBytes = Buffer.from(JSON.stringify({
++    ...packageMetadata,
++    files: [{ path: versionManifest.entry, contentBase64: sourceBytes.toString("base64") }]
++  }));
++  const packageDigest = sha(packageBytes);
++  const policy = JSON.parse(policyBytes.toString("utf8"));
++  const policyMetadata = JSON.parse(Buffer.from(policy.signedMetadata, "base64").toString("utf8"));
++  const index = signMetadata({
++    schemaVersion: 1,
++    kind: "desktop-plugin-release-index",
++    channel: "dev",
++    pluginId: manifest.id,
++    policyVersion: policyMetadata.policyVersion,
++    releaseSequence,
++    version,
++    packageSha256: packageDigest,
++    packageBytes: packageBytes.length,
++    fileName: `${packageDigest}.kwwplugin.json`,
++    expiresAt: utcDate(Date.now() + 8 * 60 * 1000)
++  }, "kww-desktop-plugin-index:v1");
++  return {
++    index: Buffer.from(JSON.stringify(index)),
++    packageBytes,
++    fileName: `${packageDigest}.kwwplugin.json`
++  };
++}
++
++const policyPayload = {
++  schemaVersion: 1,
++  kind: "desktop-plugin-trust-policy",
++  channel: "dev",
++  policyVersion: 1,
++  keyId: publicKey.keyId,
++  pluginId: manifest.id,
++  capabilities: ["webWindow.projection.read", "webWindow.navigation.fixed"],
++  notBefore: utcDate(Date.now() - 60 * 1000),
++  expiresAt: utcDate(Date.now() + 10 * 60 * 1000),
++  revokedPackageDigests: []
++};
++const policyBytes = Buffer.from(JSON.stringify(signMetadata(policyPayload, "kww-desktop-plugin-policy:v1")));
++const successfulSource = builtinSource.replace('items: [],', 'items: [{ id: "web-window-navigation", slot: "webWindow.header.navigation", type: "status", text: "网页导航", tone: "muted" }, { id: "runtime-update-status", slot: "webWindow.header.status", type: "status", text: "插件 UI 已更新 1.0.1", tone: "normal" }],');
++assert.notEqual(successfulSource, builtinSource, "fixture must change the rendered plugin UI");
++const successfulRelease = createRelease("1.0.1", 1, successfulSource, policyBytes);
++const rejectedRelease = createRelease("1.0.2", 2, 'throw new Error("candidate_fixture_failure");', policyBytes);
++const crashedRelease = createRelease("1.0.3", 3, "void 0;", policyBytes);
++const racingSource = `setTimeout(() => { ${successfulSource.replaceAll("1.0.1", "1.0.4")} }, 700);`;
++const racingRelease = createRelease("1.0.4", 4, racingSource, policyBytes);
++const releases = {
++  "policy.json": policyBytes.toString("base64"),
++  "1.0.1/index.json": successfulRelease.index.toString("base64"),
++  [`1.0.1/${successfulRelease.fileName}`]: successfulRelease.packageBytes.toString("base64"),
++  "1.0.2/index.json": rejectedRelease.index.toString("base64"),
++  [`1.0.2/${rejectedRelease.fileName}`]: rejectedRelease.packageBytes.toString("base64"),
++  "1.0.3/index.json": crashedRelease.index.toString("base64"),
++  [`1.0.3/${crashedRelease.fileName}`]: crashedRelease.packageBytes.toString("base64"),
++  "1.0.4/index.json": racingRelease.index.toString("base64"),
++  [`1.0.4/${racingRelease.fileName}`]: racingRelease.packageBytes.toString("base64")
++};
++
++const testEntry = join(output, "bootstrap.mjs");
++const entrySource = `
++import assert from "node:assert/strict";
++import { app, BrowserWindow, ipcMain } from "electron";
++import * as host from ${JSON.stringify(hostPath)};
++import { createWebInjectionWindow, getBusinessWebContents, webWindowManager } from ${JSON.stringify(webInjectionPath)};
++
++const report = { builtinStatusProjection: false, statusProjectionFallbackWithoutPlugin: false, signedCandidateUpdatedOpenWebWindow: false, allOpenWindowsUpdated: false, businessViewAndInputPreserved: false, productNavigationAddressAndHistorySync: false, rejectedCandidateKeptStableUi: false, candidateRendererCrashKeptStableUi: false, candidateUpdateOpenCloseRace: false, closingOneWindowKeepsOtherAlive: false, pageFirstOpensBeforeManifestAndReportsMissed: false, strictDocumentStartPrecedesPageScript: false, strictResolverFailureShowsErrorPage: false, strictHashFailureShowsErrorPage: false, strictPreparationTimeoutShowsErrorPage: false, unknownStrictRedirectRejected: false };
++let target;
++let secondTarget;
++let racingTarget;
++let pageFirstLateTarget;
++let strictTarget;
++let strictRedirectTarget;
++const strictFailureTargets = [];
++let timer;
++let finished = false;
++const finish = async (error) => {
++  if (finished) return;
++  finished = true;
++  clearTimeout(timer);
++  if (error) console.error(error);
++  try { if (target && !target.isDestroyed()) host.webWindowPluginHost.stop(target); } catch { /* cleanup */ }
++  try { if (secondTarget && !secondTarget.isDestroyed()) host.webWindowPluginHost.stop(secondTarget); } catch { /* cleanup */ }
++  try { if (racingTarget && !racingTarget.isDestroyed()) host.webWindowPluginHost.stop(racingTarget); } catch { /* cleanup */ }
++  try { if (pageFirstLateTarget && !pageFirstLateTarget.isDestroyed()) host.webWindowPluginHost.stop(pageFirstLateTarget); } catch { /* cleanup */ }
++  try { if (strictTarget && !strictTarget.isDestroyed()) host.webWindowPluginHost.stop(strictTarget); } catch { /* cleanup */ }
++  try { if (strictRedirectTarget && !strictRedirectTarget.isDestroyed()) host.webWindowPluginHost.stop(strictRedirectTarget); } catch { /* cleanup */ }
++  for (const failureTarget of strictFailureTargets) { try { if (!failureTarget.isDestroyed()) host.webWindowPluginHost.stop(failureTarget); } catch { /* cleanup */ } }
++  try { if (host.distribution) await host.distribution.close(); } catch { /* cleanup */ }
++  for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.destroy();
++  console.log(JSON.stringify({ 验收: "Web 专用窗口插件热更新", 结果: report, 全部通过: !error }));
++  const exitCode = error ? 1 : 0;
++  process.exit(exitCode);
++};
++const waitFor = async (predicate, name, timeoutMs = 12000) => {
++  const end = Date.now() + timeoutMs;
++  while (Date.now() < end) {
++    if (await predicate()) return;
++    await new Promise((resolve) => setTimeout(resolve, 40));
++  }
++  throw new Error("timeout:" + name);
++};
++timer = setTimeout(() => { void finish(new Error("web_window_plugin_host_runtime_timeout")); }, 90000);
++app.setPath("userData", ${JSON.stringify(join(root, "user-data"))});
++globalThis.__kwwWebWindowRuntimeReleaseFiles = new Map(Object.entries(${JSON.stringify(releases)}).map(([name, bytes]) => [name, Buffer.from(bytes, "base64")]));
++globalThis.__kwwWebWindowRuntimeRelease = async (_source, name) => {
++  const [version, file] = name === "policy.json" ? ["", name] : name === "index.json" ? [globalThis.__kwwWebWindowRuntimeReleaseVersion, name] : [globalThis.__kwwWebWindowRuntimeReleaseVersion, name];
++  const path = version ? version + "/" + file : file;
++  const result = globalThis.__kwwWebWindowRuntimeReleaseFiles.get(path);
++  if (!result) throw new Error("fixture_release_missing:" + path);
++  return result;
++};
++globalThis.__kwwWebWindowRuntimeReleaseVersion = "1.0.1";
++app.whenReady().then(async () => {
++  try {
++    console.log("phase:electron-ready");
++    process.env.AICRM_API_BASE_URL = new URL(${JSON.stringify(fixtureUrl)}).origin;
++    ipcMain.handle("aicrm:web-window-sdk-context", () => ({ currentUser: null }));
++    target = createWebInjectionWindow({
++      url: ${JSON.stringify(fixtureUrl)},
++      title: "本地 WebWindow 热更新验收",
++      allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++      platform: "generic",
++      workspaceType: "platform",
++      workspaceId: "local-runtime-fixture",
++      themeChannel: "fixture-theme",
++      windows: new Set(),
++      showContextMenu: () => undefined,
++      scheduleMode: "page_first"
++    });
++    const business = getBusinessWebContents(target);
++    console.log("phase:product-web-window-created");
++    await waitFor(() => target.webContents.executeJavaScript("Boolean(document.querySelector('#kww-web-window-chrome'))"), "shell_preload");
++    console.log("phase:preload-ready");
++    await waitFor(() => business.executeJavaScript("document.querySelector('#page-title')?.textContent === '真实 WebWindow 验收页'"), "business_view_loaded");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-status')?.textContent.includes('已注入 0') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.0') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航')"), "builtin_plugin_projection").catch(async (error) => {
++      const active = host.targets.get(target.webContents);
++      console.error("plugin projection diagnostic", JSON.stringify({
++        target: active ? { ready: active.ready, staging: active.staging, projection: active.projection, pluginDestroyed: active.plugin.isDestroyed(), pluginUrl: active.pluginContents.getURL() } : null,
++        shell: await target.webContents.executeJavaScript("JSON.stringify({ nav: document.querySelector('#kww-web-window-navigation')?.outerHTML, address: document.querySelector('#kww-web-window-address')?.value, projection: document.querySelector('[data-web-window-mount]')?.outerHTML })"),
++        windows: BrowserWindow.getAllWindows().map((window) => ({ title: window.getTitle(), destroyed: window.isDestroyed(), url: window.webContents.getURL() }))
++      }));
++      throw error;
++    });
++    report.builtinStatusProjection = true;
++    const initialProjectionSnapshot = host.webWindowPluginHost.getProjection(target);
++    assert.ok(initialProjectionSnapshot, "the shell must be able to pull its current status projection");
++    assert.ok(initialProjectionSnapshot.items.some((item) => item.id === "web-window-injection" && item.text === "已注入 0"));
++    assert.ok(initialProjectionSnapshot.items.some((item) => item.id === "web-window-version" && item.text === "v1.0.0"));
++    console.log("phase:builtin-projection");
++    const pageUrl = business.getURL();
++    const webContentsId = business.id;
++    const view = target.contentView.children.find((child) => child.webContents?.id === business.id);
++    assert.ok(view, "product WebWindow must contain its business WebContentsView");
++    assert.ok(host.distribution, "distribution must be initialized by the active host");
++    secondTarget = createWebInjectionWindow({
++      url: ${JSON.stringify(fixtureUrl)},
++      title: "本地 WebWindow 多实例热更新验收",
++      allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++      platform: "generic",
++      workspaceType: "platform",
++      workspaceId: "local-runtime-fixture",
++      themeChannel: "fixture-theme",
++      windows: new Set(),
++      showContextMenu: () => undefined,
++      instanceId: "runtime-test-window-two",
++      uiSessionId: "runtime-test-session-two",
++      scheduleMode: "page_first"
++    });
++    const secondBusiness = getBusinessWebContents(secondTarget);
++    await waitFor(() => secondTarget.webContents.executeJavaScript("Boolean(document.querySelector('#kww-web-window-chrome'))"), "second_shell_preload");
++    await waitFor(() => secondBusiness.executeJavaScript("document.querySelector('#page-title')?.textContent === '真实 WebWindow 验收页'"), "second_business_view_loaded");
++    await waitFor(() => secondTarget.webContents.executeJavaScript("document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.0') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航')"), "second_builtin_plugin_projection");
++    const secondPageUrl = secondBusiness.getURL();
++    const secondWebContentsId = secondBusiness.id;
++    const secondView = secondTarget.contentView.children.find((child) => child.webContents?.id === secondBusiness.id);
++    assert.ok(secondView, "second product WebWindow must contain its own business WebContentsView");
++
++    const nextUrl = ${JSON.stringify(`${fixtureUrl}/navigation-next`)};
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-address')?.value === " + JSON.stringify(pageUrl)), "initial_address_matches_business_url");
++    await target.webContents.executeJavaScript("(() => { const input = document.querySelector('#kww-web-window-address'); input.value = " + JSON.stringify(nextUrl) + "; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()");
++    await waitFor(() => business.getURL() === nextUrl && business.executeJavaScript("document.querySelector('#page-title')?.textContent === '导航验收页'"), "address_navigation_loads_product_page");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-address')?.value === " + JSON.stringify(nextUrl)), "address_matches_navigated_page");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('[data-navigation-action=back]')?.disabled === false"), "back_enabled_after_navigation");
++    await target.webContents.executeJavaScript("document.querySelector('[data-navigation-action=back]')?.click()");
++    await waitFor(() => business.getURL() === pageUrl, "back_returns_to_original_page");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-address')?.value === " + JSON.stringify(pageUrl)), "address_matches_back_navigation");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('[data-navigation-action=forward]')?.disabled === false"), "forward_enabled_after_back");
++    assert.equal(secondBusiness.getURL(), secondPageUrl, "navigating the first window must not navigate the second window");
++    assert.equal(await secondTarget.webContents.executeJavaScript("document.querySelector('#kww-web-window-address')?.value === " + JSON.stringify(secondPageUrl)), true, "each Shell address bar must follow its own business WebContents");
++    await target.webContents.executeJavaScript("document.querySelector('[data-navigation-action=forward]')?.click()");
++    await waitFor(() => business.getURL() === nextUrl, "forward_restores_next_page");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-address')?.value === " + JSON.stringify(nextUrl)), "address_matches_forward_navigation");
++    await target.webContents.executeJavaScript("document.querySelector('[data-navigation-action=back]')?.click()");
++    await waitFor(() => business.getURL() === pageUrl, "back_restores_home_for_following_checks");
++    await target.webContents.executeJavaScript("document.querySelector('[data-navigation-action=reload]')?.click()");
++    await waitFor(() => business.getURL() === pageUrl && business.executeJavaScript("document.querySelector('#page-title')?.textContent === '真实 WebWindow 验收页'"), "reload_keeps_product_window_page");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-address')?.value === " + JSON.stringify(pageUrl)), "address_matches_reload");
++    assert.equal(business.id, webContentsId, "navigation actions must reuse the same product WebContents");
++    assert.equal(secondBusiness.getURL(), secondPageUrl);
++    report.productNavigationAddressAndHistorySync = true;
++
++    await business.executeJavaScript("document.querySelector('#preserved').value = 'keep-me'; void 0;");
++    await secondBusiness.executeJavaScript("document.querySelector('#preserved').value = 'second-window'; void 0;");
++    assert.equal(await host.distribution.checkForUpdate(), true, "signed candidate should be accepted and promoted");
++    console.log("phase:candidate-promoted");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.1') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.1')"), "updated_plugin_projection");
++    await waitFor(() => secondTarget.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.1') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.1')"), "second_updated_plugin_projection");
++    const active = host.targets.get(target.webContents);
++    assert.equal(active?.pkg.manifest.version, "1.0.1");
++    assert.equal(host.targets.get(secondTarget.webContents)?.pkg.manifest.version, "1.0.1");
++    report.signedCandidateUpdatedOpenWebWindow = true;
++    report.allOpenWindowsUpdated = true;
++    assert.equal(business.id, webContentsId);
++    assert.equal(business.getURL(), pageUrl);
++    assert.equal(await business.executeJavaScript("document.querySelector('#preserved').value"), "keep-me");
++    assert.equal(target.contentView.children.filter((child) => child === view).length, 1);
++    assert.equal(view.getVisible(), true);
++    assert.ok(view.getBounds().width > 0 && view.getBounds().height > 0);
++    assert.equal(secondBusiness.id, secondWebContentsId);
++    assert.equal(secondBusiness.getURL(), secondPageUrl);
++    assert.equal(await secondBusiness.executeJavaScript("document.querySelector('#preserved').value"), "second-window");
++    assert.equal(secondTarget.contentView.children.filter((child) => child === secondView).length, 1);
++    assert.equal(secondView.getVisible(), true);
++    assert.ok(secondView.getBounds().width > 0 && secondView.getBounds().height > 0);
++    report.businessViewAndInputPreserved = true;
++
++    globalThis.__kwwWebWindowRuntimeReleaseVersion = "1.0.2";
++    assert.equal(await host.distribution.checkForUpdate(), false, "candidate with no ready acknowledgement must be rejected");
++    await waitFor(() => !host.targets.get(target.webContents)?.plugin.isDestroyed(), "stable_plugin_survives_candidate_failure");
++    const stable = host.targets.get(target.webContents);
++    assert.equal(stable?.pkg.manifest.version, "1.0.1");
++    assert.equal(await target.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.1') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.1')"), true);
++    assert.equal(await secondTarget.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.1') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.1')"), true);
++    assert.equal(business.getURL(), pageUrl);
++    assert.equal(await business.executeJavaScript("document.querySelector('#preserved').value"), "keep-me");
++    assert.equal(target.contentView.children.filter((child) => child === view).length, 1);
++    assert.equal(view.getVisible(), true);
++    assert.equal(secondBusiness.getURL(), secondPageUrl);
++    assert.equal(await secondBusiness.executeJavaScript("document.querySelector('#preserved').value"), "second-window");
++    assert.equal(secondTarget.contentView.children.filter((child) => child === secondView).length, 1);
++    assert.equal(secondView.getVisible(), true);
++    report.rejectedCandidateKeptStableUi = true;
++
++    globalThis.__kwwWebWindowRuntimeReleaseVersion = "1.0.3";
++    const stablePlugins = new Set([host.targets.get(target.webContents)?.plugin, host.targets.get(secondTarget.webContents)?.plugin]);
++    const crashCandidateUpdate = host.distribution.checkForUpdate();
++    await waitFor(() => BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && !stablePlugins.has(window) && window.webContents.getURL().startsWith("data:text/html")), "crash_candidate_plugin_created");
++    const crashCandidate = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && !stablePlugins.has(window) && window.webContents.getURL().startsWith("data:text/html"));
++    assert.ok(crashCandidate, "candidate plugin renderer must be available for crash injection");
++    crashCandidate.webContents.forcefullyCrashRenderer();
++    assert.equal(await crashCandidateUpdate, false, "a crashed candidate must not replace the stable plugin");
++    await waitFor(() => host.targets.get(target.webContents)?.pkg.manifest.version === "1.0.1" && host.targets.get(secondTarget.webContents)?.pkg.manifest.version === "1.0.1", "stable_plugins_survive_candidate_renderer_crash");
++    assert.equal(await target.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.1') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航')"), true);
++    assert.equal(await secondTarget.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.1') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航')"), true);
++    report.candidateRendererCrashKeptStableUi = true;
++
++    globalThis.__kwwWebWindowRuntimeReleaseVersion = "1.0.4";
++    const racingStablePlugins = new Set([host.targets.get(target.webContents)?.plugin, host.targets.get(secondTarget.webContents)?.plugin]);
++    const racingPromotion = host.distribution.checkForUpdate();
++    await waitFor(() => BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && !racingStablePlugins.has(window) && window.webContents.getURL().startsWith("data:text/html")), "racing_candidate_plugin_created");
++
++    const secondClosed = new Promise((resolve) => secondTarget.once("closed", resolve));
++    assert.equal(webWindowManager.close("runtime-test-window-two"), true, "manager must close the selected window during update");
++    await secondClosed;
++    assert.equal(secondTarget.isDestroyed(), true, "closing a window during candidate staging must dispose that instance");
++
++    racingTarget = createWebInjectionWindow({
++      url: ${JSON.stringify(fixtureUrl)},
++      title: "本地 WebWindow 更新竞态验收",
++      allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++      platform: "generic",
++      workspaceType: "platform",
++      workspaceId: "local-runtime-fixture",
++      themeChannel: "fixture-theme",
++      windows: new Set(),
++      showContextMenu: () => undefined,
++      instanceId: "runtime-test-window-racing",
++      uiSessionId: "runtime-test-session-racing",
++      scheduleMode: "page_first"
++    });
++    const racingBusiness = getBusinessWebContents(racingTarget);
++    const racingBusinessId = racingBusiness.id;
++    await waitFor(() => racingTarget.webContents.executeJavaScript("Boolean(document.querySelector('#kww-web-window-chrome'))"), "racing_shell_preload");
++    await waitFor(() => racingBusiness.executeJavaScript("document.querySelector('#page-title')?.textContent === '真实 WebWindow 验收页'"), "racing_business_view_loaded");
++    await racingBusiness.executeJavaScript("document.querySelector('#preserved').value = 'opened-during-update'; void 0;");
++
++    assert.equal(await racingPromotion, true, "candidate promotion must complete after a concurrent close and open");
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.4') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.4')"), "existing_window_received_racing_candidate");
++    await waitFor(() => racingTarget.webContents.executeJavaScript("document.querySelector('#kww-web-window-header-mount')?.textContent.includes('插件 UI 已更新 1.0.4') && !document.querySelector('#kww-web-window-navigation')?.textContent.includes('网页导航') && document.querySelector('#kww-web-window-status')?.textContent.includes('v1.0.4')"), "new_window_started_promoted_candidate");
++    assert.equal(host.targets.get(target.webContents)?.pkg.manifest.version, "1.0.4");
++    assert.equal(host.targets.has(secondBusiness), false, "closed instance must not remain registered as an active plugin target");
++    assert.equal(host.targets.get(racingTarget.webContents)?.pkg.manifest.version, "1.0.4", "new window opened during update must start with the promoted package");
++    assert.equal(target.isDestroyed(), false, "the surviving window must remain open during a concurrent close");
++    assert.equal(business.id, webContentsId);
++    assert.equal(business.getURL(), pageUrl);
++    assert.equal(await business.executeJavaScript("document.querySelector('#preserved').value"), "keep-me");
++    assert.equal(racingBusiness.id, racingBusinessId);
++    assert.equal(racingBusiness.getURL(), pageUrl);
++    assert.equal(await racingBusiness.executeJavaScript("document.querySelector('#preserved').value"), "opened-during-update");
++    report.candidateUpdateOpenCloseRace = true;
++    report.closingOneWindowKeepsOtherAlive = true;
++
++    const fallbackContext = host.targets.get(target.webContents)?.context;
++    assert.ok(fallbackContext, "active WebWindow should have context before fallback projection test");
++    const fallbackVersion = fallbackContext.plugin?.version ?? "1.0.0";
++    host.webWindowPluginHost.stop(target);
++    host.webWindowPluginHost.update(target, {
++      ...fallbackContext,
++      injectionState: "succeeded",
++      injection: {
++        script: { identifier: "SCRIPT_FIXTURE", version: "1.0.0", versionSource: "specified", status: "succeeded", error: null },
++        style: { identifier: "STYLE_FIXTURE", version: "1.0.0", versionSource: "specified", status: "succeeded", error: null }
++      }
++    });
++    await waitFor(() => target.webContents.executeJavaScript("document.querySelector('#kww-web-window-status')?.textContent.includes('已注入 2') && document.querySelector('#kww-web-window-status')?.textContent.includes('v" + fallbackVersion + "')"), "status_projection_fallback_without_plugin");
++    report.statusProjectionFallbackWithoutPlugin = true;
++
++    pageFirstLateTarget = createWebInjectionWindow({
++      url: ${JSON.stringify(`${fixtureUrl}/page-first-late`)},
++      title: "本地 WebWindow 页面优先验收",
++      allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++      platform: "generic",
++      workspaceType: "platform",
++      workspaceId: "page-first-late-fixture",
++      script: { identifier: "STRICT_DOCUMENT_START_FIXTURE", runAt: "document_start" },
++      sessionToken: "fixture-token",
++      themeChannel: "fixture-theme",
++      windows: new Set(),
++      showContextMenu: () => undefined,
++      instanceId: "page-first-late-runtime-test-window",
++      uiSessionId: "page-first-late-runtime-test-session",
++      scheduleMode: "page_first"
++    });
++    const pageFirstLateContents = getBusinessWebContents(pageFirstLateTarget);
++    await waitFor(() => pageFirstLateContents.executeJavaScript("document.querySelector('#page-title')?.textContent === '页面优先验收页'"), "page_first_opens_before_slow_manifest");
++    assert.equal(await pageFirstLateContents.executeJavaScript("window.__pageStartedBeforeManifest"), true, "page_first must display the business page without waiting for manifest preparation");
++    assert.equal(await pageFirstLateContents.executeJavaScript("window.__siteObservedDocumentStart"), false, "a late document_start marker must not be represented as executed on the current document");
++    await waitFor(() => host.targets.get(pageFirstLateTarget.webContents)?.context.injection?.script?.status === "missed_document_start", "page_first_missed_state_visible");
++    assert.equal(pageFirstLateTarget.isDestroyed(), false);
++    assert.equal(await pageFirstLateContents.executeJavaScript("document.querySelector('#page-title')?.textContent"), "页面优先验收页");
++    report.pageFirstOpensBeforeManifestAndReportsMissed = true;
++
++    strictTarget = createWebInjectionWindow({
++      url: ${JSON.stringify(`${fixtureUrl}/strict`)},
++      title: "本地 WebWindow document_start 验收",
++      allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++      platform: "generic",
++      workspaceType: "platform",
++      workspaceId: "local-runtime-fixture",
++      script: { identifier: "STRICT_DOCUMENT_START_FIXTURE", runAt: "document_start" },
++      sessionToken: "fixture-token",
++      themeChannel: "fixture-theme",
++      windows: new Set(),
++      showContextMenu: () => undefined,
++      instanceId: "strict-runtime-test-window",
++      uiSessionId: "strict-runtime-test-session",
++      scheduleMode: "strict_document_start"
++    });
++    const strictContents = getBusinessWebContents(strictTarget);
++    await waitFor(() => strictContents.executeJavaScript("document.querySelector('#strict-title')?.textContent === '严格时序验收页' || document.querySelector('h1')?.textContent === '页面未打开'"), "strict_document_start_page_or_failure_visible");
++    const strictTitle = await strictContents.executeJavaScript("document.querySelector('h1')?.textContent ?? ''");
++    assert.equal(strictTitle, "严格时序验收页", "strict scheduler must load the target after preparing it; actual=" + strictTitle + "; url=" + strictContents.getURL());
++    const strictObservation = await strictContents.executeJavaScript("JSON.stringify({ injected: window.__kwwStrictDocumentStart?.readyState, siteObserved: window.__siteObservedDocumentStart })");
++    assert.equal(JSON.parse(strictObservation).siteObserved, true, "host document_start script must run before the page's first inline script; observation=" + strictObservation);
++    report.strictDocumentStartPrecedesPageScript = true;
++
++    const verifyStrictPreparationFailure = async (workspaceId, instanceId, title, expectedReason) => {
++      const failureTarget = createWebInjectionWindow({
++        url: ${JSON.stringify(`${fixtureUrl}/strict`)},
++        title,
++        allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++        platform: "generic",
++        workspaceType: "platform",
++        workspaceId,
++        script: { identifier: "STRICT_DOCUMENT_START_FIXTURE", runAt: "document_start" },
++        sessionToken: "fixture-token",
++        themeChannel: "fixture-theme",
++        windows: new Set(),
++        showContextMenu: () => undefined,
++        instanceId,
++        uiSessionId: instanceId + "-session",
++        scheduleMode: "strict_document_start"
++      });
++      strictFailureTargets.push(failureTarget);
++      const contents = getBusinessWebContents(failureTarget);
++      await waitFor(() => contents.executeJavaScript("document.querySelector('h1')?.textContent === '页面未打开'"), instanceId + "_error_visible");
++      await waitFor(() => host.targets.get(failureTarget.webContents)?.context.injection?.script?.status === "failed", instanceId + "_failure_state_visible");
++      const injection = host.targets.get(failureTarget.webContents)?.context.injection;
++      assert.equal(injection?.script?.status, "failed");
++      if (expectedReason) assert.equal(injection?.script?.error, expectedReason);
++      else assert.ok(injection?.script?.error);
++      assert.equal(failureTarget.isDestroyed(), false);
++      return true;
++    };
++    report.strictResolverFailureShowsErrorPage = await verifyStrictPreparationFailure(
++      "strict-resolver-failure-fixture", "strict-resolver-failure-window", "严格调度资源请求失败验收", "resolver_http_403"
++    );
++    report.strictHashFailureShowsErrorPage = await verifyStrictPreparationFailure(
++      "strict-hash-failure-fixture", "strict-hash-failure-window", "严格调度完整性失败验收", "asset_hash_missing_or_mismatch"
++    );
++    report.strictPreparationTimeoutShowsErrorPage = await verifyStrictPreparationFailure(
++      "strict-timeout-fixture", "strict-timeout-window", "严格调度超时验收", null
++    );
++
++    strictRedirectTarget = createWebInjectionWindow({
++      url: ${JSON.stringify(`${fixtureUrl}/strict-redirect`)},
++      title: "本地 WebWindow 未预登记跳转验收",
++      allowedOrigin: new URL(${JSON.stringify(fixtureUrl)}).origin,
++      platform: "generic",
++      workspaceType: "platform",
++      workspaceId: "local-runtime-fixture",
++      script: { identifier: "STRICT_DOCUMENT_START_FIXTURE", runAt: "document_start" },
++      sessionToken: "fixture-token",
++      themeChannel: "fixture-theme",
++      windows: new Set(),
++      showContextMenu: () => undefined,
++      instanceId: "strict-redirect-test-window",
++      uiSessionId: "strict-redirect-test-session",
++      scheduleMode: "strict_document_start"
++    });
++    const strictRedirectContents = getBusinessWebContents(strictRedirectTarget);
++    await waitFor(() => strictRedirectContents.executeJavaScript("document.querySelector('h1')?.textContent === '页面未打开'"), "strict_unknown_redirect_rejected");
++    assert.notEqual(strictRedirectContents.getURL(), ${JSON.stringify(`${fixtureUrl}/strict-landing`)});
++    report.unknownStrictRedirectRejected = true;
++    await finish();
++  } catch (error) {
++    await finish(error);
++  }
++}).catch(finish);
++`;
++
++try {
++  await mkdir(output, { recursive: true });
++  await mkdir(join(root, "user-data/desktop-host-plugins"), { recursive: true, mode: 0o700 });
++  await writeFile(testEntry, entrySource);
++  await import("./build-preloads.mjs");
++  const require = createRequire(import.meta.url);
++  const { build } = require(resolve(appNodeModules, "esbuild"));
++  await build({
++    entryPoints: [testEntry],
++    bundle: true,
++    platform: "node",
++    format: "cjs",
++    outfile: join(output, "main.cjs"),
++    external: ["electron"],
++    define: { __dirname: JSON.stringify(output) },
++    logLevel: "silent",
++    plugins: [{
++      name: "web-window-plugin-host-runtime-test",
++      setup(builder) {
++        builder.onResolve({ filter: /\?raw$/ }, (args) => ({ path: resolve(args.resolveDir, args.path.slice(0, -4)), namespace: "raw" }));
++        builder.onLoad({ filter: /.*/, namespace: "raw" }, async (args) => ({ contents: await readFile(args.path, "utf8"), loader: "text" }));
++        builder.onLoad({ filter: /web-window-plugin-host\.ts$/ }, async (args) => {
++          let contents = await readFile(args.path, "utf8");
++          const distributionOptions = `publicKey: (webWindowPolicy as any).publicKey,\n      platform: process.platform,\n      enabled: isWebWindowPluginPlatformSupported(process.platform),\n      onCandidate: promoteCandidate`;
++          assert.ok(contents.includes(distributionOptions), "host distribution options must remain testable");
++          contents = contents
++            .replace("const targets = new Map<WebContents, Target>();", "export const targets = new Map<WebContents, Target>();")
++            .replace("let distribution: WebWindowPluginDistribution | null = null;", "export let distribution: WebWindowPluginDistribution | null = null;")
++            .replace(distributionOptions, `publicKey: (webWindowPolicy as any).publicKey,\n      platform: process.platform,\n      enabled: true,\n      autoCheck: false,\n      fetchRelease: (_source, name) => (globalThis as any).__kwwWebWindowRuntimeRelease(_source, name),\n      onCandidate: promoteCandidate`);
++          return { contents, loader: "ts", resolveDir: dirname(args.path) };
++        });
++        builder.onLoad({ filter: /desktop-plugin-web-window-dev-policy\.json$/ }, () => ({ contents: JSON.stringify({ publicKey }), loader: "json" }));
++      }
++    }]
++  });
++  const child = spawn(electronBin, [join(output, "main.cjs")], { cwd: repoRoot, stdio: ["ignore", "pipe", "inherit"], detached: true });
++  const stopElectronTestGroup = () => {
++    if (!child.pid) return;
++    try {
++      // Electron can re-parent helper/browser processes; signal only this isolated test group.
++      process.kill(-child.pid, "SIGKILL");
++    } catch {
++      child.kill("SIGKILL");
++    }
++  };
++  let stdoutBuffer = "";
++  let acceptanceReport = null;
++  let shutdownTimer;
++  const watchdog = setTimeout(stopElectronTestGroup, 95000);
++  child.stdout.setEncoding("utf8");
++  child.stdout.on("data", (chunk) => {
++    process.stdout.write(chunk);
++    stdoutBuffer += chunk;
++    const lines = stdoutBuffer.split(/\r?\n/);
++    stdoutBuffer = lines.pop() ?? "";
++    for (const line of lines) {
++      try {
++        const value = JSON.parse(line);
++        if (value?.["验收"] !== "Web 专用窗口插件热更新") continue;
++        acceptanceReport = value;
++        if (!shutdownTimer) shutdownTimer = setTimeout(stopElectronTestGroup, 750);
++      } catch { /* 普通日志不是最终验收报告。 */ }
++    }
++  });
++  const [status, signal] = await once(child, "close");
++  clearTimeout(watchdog);
++  clearTimeout(shutdownTimer);
++  assert.ok(acceptanceReport, "Electron plugin-host runtime must emit its final acceptance report");
++  assert.equal(acceptanceReport["全部通过"], true, "Electron plugin-host runtime acceptance must pass");
++  assert.ok(status === 0 || signal === "SIGKILL", `unexpected Electron exit: status=${status}, signal=${signal}`);
++} finally {
++  server.close();
++  await rm(output, { recursive: true, force: true });
++  await rm(root, { recursive: true, force: true });
++}
+diff --git a/scripts/desktop-plugins/web-window-version-panel.test.mjs b/scripts/desktop-plugins/web-window-version-panel.test.mjs
+new file mode 100644
+index 0000000000000000000000000000000000000000..4df9d84e819faa6013cedf8896ad28bdf96ff50f
+--- /dev/null
++++ b/scripts/desktop-plugins/web-window-version-panel.test.mjs
+@@ -0,0 +1,16 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { readFile } from "node:fs/promises";
++
++test("Web Window 版本入口和结构化状态面板已接入", async () => {
++  const plugin = await readFile(new URL("../../desktop-plugins/kww-web-window/v1/plugin.js", import.meta.url), "utf8");
++  const preload = await readFile(new URL("../../apps/aicrm-desktop/src/preload/web-window.ts", import.meta.url), "utf8");
++  const host = await readFile(new URL("../../apps/aicrm-desktop/src/main/web-window-plugin-host.ts", import.meta.url), "utf8");
++  assert.match(plugin, /versionPanel/);
++  assert.match(plugin, /instance\.injection\?\.script/);
++  assert.match(host, /process\.versions\.electron/);
++  assert.match(host, /actionId: "version-panel"/);
++  assert.match(preload, /kww-web-window-version-panel/);
++  assert.match(preload, /Escape/);
++  assert.match(preload, /document\.addEventListener\("click"/);
++});

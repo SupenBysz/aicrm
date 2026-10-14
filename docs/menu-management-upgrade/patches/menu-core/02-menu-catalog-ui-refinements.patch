@@ -1,0 +1,202 @@
+diff --git a/plugins/ky-access-management/src/management-menu-view.test.mjs b/plugins/ky-access-management/src/management-menu-view.test.mjs
+index 6622c7b..0553dae 100644
+--- a/plugins/ky-access-management/src/management-menu-view.test.mjs
++++ b/plugins/ky-access-management/src/management-menu-view.test.mjs
+@@ -227,7 +227,8 @@ test("both catalogs use shared drawer/name/action rendering and distinguish load
+   assert.match(page, /MenuNameCell/);
+   assert.match(management, /MenuNameCell/);
+   assert.match(components, /alignItems: "flex-start"/);
+-  assert.match(components, /gridTemplateColumns: `repeat\(\$\{MENU_ACTION_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
++  assert.match(components, /<Space className="table-action-grid menu-catalog-action-grid" size=\{4\} wrap>/);
++  assert.doesNotMatch(components, /gridTemplateColumns|gridTemplateRows/);
+   assert.match(page, /renderWorkbenchMenuExpandIcon/);
+   assert.match(management, /renderWorkbenchMenuExpandIcon/);
+ });
+diff --git a/plugins/ky-access-management/src/menu-action-grid.ts b/plugins/ky-access-management/src/menu-action-grid.ts
+index 0ffb1be..610cf72 100644
+--- a/plugins/ky-access-management/src/menu-action-grid.ts
++++ b/plugins/ky-access-management/src/menu-action-grid.ts
+@@ -1,11 +1,4 @@
+-// Ant Design small buttons need about 72px for four 14px Chinese glyphs,
+-// 7px horizontal padding on both sides, and 1px borders. The table cell has
+-// 8px inset on each side, so 336px yields 80px per grid cell after the inset.
+-export const MENU_ACTION_COLUMN_WIDTH = 336;
+-export const MENU_ACTION_GRID_COLUMNS = 4;
+-export const MENU_ACTION_CELL_INSET = 8;
+-export const MENU_ACTION_MIN_BUTTON_WIDTH = 72;
+-export const MENU_ACTION_GRID_CELL_WIDTH = (MENU_ACTION_COLUMN_WIDTH - MENU_ACTION_CELL_INSET * 2) / MENU_ACTION_GRID_COLUMNS;
++export const MENU_ACTION_COLUMN_WIDTH = 240;
+ 
+ export interface MenuCatalogAction {
+   key: string;
+@@ -27,7 +20,6 @@ export function layoutMenuActions(actions: MenuCatalogAction[]) {
+   const visible = overflow.length ? actions.slice(0, 7) : actions;
+   return {
+     visible,
+-    overflow,
+-    rows: visible.length + (overflow.length ? 1 : 0) > 4 ? 2 : 1
++    overflow
+   };
+ }
+diff --git a/plugins/ky-access-management/src/menu-catalog-components.tsx b/plugins/ky-access-management/src/menu-catalog-components.tsx
+index cd5372d..41a0982 100644
+--- a/plugins/ky-access-management/src/menu-catalog-components.tsx
++++ b/plugins/ky-access-management/src/menu-catalog-components.tsx
+@@ -1,9 +1,9 @@
+ import { useEffect, useRef } from "react";
+ import type { ComponentType } from "react";
+ import * as AntIcons from "@ant-design/icons";
+-import { App as AntdApp, Button, Dropdown, Typography } from "antd";
++import { App as AntdApp, Button, Dropdown, Space, Typography } from "antd";
+ import type { MenuProps } from "antd";
+-import { layoutMenuActions, MENU_ACTION_GRID_COLUMNS, type MenuCatalogAction } from "./menu-action-grid";
++import { layoutMenuActions, type MenuCatalogAction } from "./menu-action-grid";
+ 
+ type CatalogQueryState = {
+   isError: boolean;
+@@ -58,15 +58,8 @@ export function MenuActionGrid({ actions }: { actions: MenuCatalogAction[] }) {
+     disabled: action.disabled || action.loading,
+     onClick: action.onClick
+   }));
+-  return <div className="menu-catalog-action-grid" style={{
+-    display: "grid",
+-    gridTemplateColumns: `repeat(${MENU_ACTION_GRID_COLUMNS}, minmax(0, 1fr))`,
+-    gridTemplateRows: `repeat(${layout.rows}, minmax(32px, auto))`,
+-    alignItems: "center",
+-    justifyItems: "center",
+-    width: "100%"
+-  }}>
+-    {layout.visible.map((action) => <div key={action.key}><Button className="menu-catalog-action-button" type="text" size="small" style={{ whiteSpace: "nowrap" }} danger={action.danger} disabled={action.disabled} loading={action.loading} onClick={action.onClick}>{action.label}</Button></div>)}
+-    {layout.overflow.length ? <div key="more"><Dropdown trigger={["click"]} menu={{ items: moreItems }}><Button className="menu-catalog-action-button" type="text" size="small" style={{ whiteSpace: "nowrap" }}>更多</Button></Dropdown></div> : null}
+-  </div>;
++  return <Space className="table-action-grid menu-catalog-action-grid" size={4} wrap>
++    {layout.visible.map((action) => <Button key={action.key} className="menu-catalog-action-button" type="link" size="small" style={{ whiteSpace: "nowrap" }} danger={action.danger} disabled={action.disabled} loading={action.loading} onClick={action.onClick}>{action.label}</Button>)}
++    {layout.overflow.length ? <Dropdown key="more" trigger={["click"]} menu={{ items: moreItems }}><Button className="menu-catalog-action-button" type="link" size="small" style={{ whiteSpace: "nowrap" }}>更多</Button></Dropdown> : null}
++  </Space>;
+ }
+diff --git a/plugins/ky-access-management/src/pages/management-menus-tab.tsx b/plugins/ky-access-management/src/pages/management-menus-tab.tsx
+index e542055..f882697 100644
+--- a/plugins/ky-access-management/src/pages/management-menus-tab.tsx
++++ b/plugins/ky-access-management/src/pages/management-menus-tab.tsx
+@@ -85,7 +85,7 @@ export function ManagementMenusTab({ canCreate, canUpdate, canDisable, formReque
+         { title: "适用工作区", dataIndex: "workspaceTypes", render: (value: string[]) => workspaceTypesLabel(value) },
+         { title: "权限关联", dataIndex: "permissionKeys", width: 220, render: (value: string[]) => value.length ? <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>{value.map((code) => <Typography.Text key={code} style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{permissionDisplayName(code, permissionNames)}</Typography.Text>)}</div> : "—" },
+         { title: "状态", dataIndex: "status", render: (value: string) => <Tag color={value === "active" ? "green" : "default"}>{value === "active" ? "启用" : "停用"}</Tag> },
+-        { title: "操作", align: "center", width: MENU_ACTION_COLUMN_WIDTH, render: (_: unknown, item) => {
++        { title: "操作", key: "actions", className: "table-action-column", align: "left", width: MENU_ACTION_COLUMN_WIDTH, render: (_: unknown, item) => {
+           const isGroup = item.routePath === null;
+           const dto = catalog.data?.find((candidate) => candidate.menuKey === item.menuKey);
+           const actions: MenuCatalogAction[] = filterMenuActions([
+diff --git a/plugins/ky-access-management/src/pages/workbench-menus-page.tsx b/plugins/ky-access-management/src/pages/workbench-menus-page.tsx
+index dee869f..b7ace77 100644
+--- a/plugins/ky-access-management/src/pages/workbench-menus-page.tsx
++++ b/plugins/ky-access-management/src/pages/workbench-menus-page.tsx
+@@ -96,7 +96,7 @@ export function WorkbenchMenusPage() {
+         { title: "路由", dataIndex: "routeKey", render: (value: string | null) => value ?? "分组" },
+         { title: "适用工作区", dataIndex: "workspaceTypes", render: (values: string[]) => workspaceTypesLabel(values) },
+         { title: "状态", dataIndex: "status", render: (value: string) => <Tag color={value === "active" ? "green" : "default"}>{value === "active" ? "启用" : "停用"}</Tag> },
+-        { title: "操作", align: "center", width: MENU_ACTION_COLUMN_WIDTH, render: (_: unknown, item: WorkbenchMenu) => {
++        { title: "操作", key: "actions", className: "table-action-column", align: "left", width: MENU_ACTION_COLUMN_WIDTH, render: (_: unknown, item: WorkbenchMenu) => {
+           const actions: MenuCatalogAction[] = filterMenuActions([
+             { key: "child", label: "新增菜单", permission: "platform.workbench_menus.create", visible: isPlatform && item.routeKey === null, onClick: () => openWorkbenchForm("create-page", item.menuKey) },
+             { key: "edit", label: "编辑", permission: "platform.workbench_menus.update", visible: isPlatform, onClick: () => openWorkbenchForm("edit", undefined, item) },
+diff --git a/plugins/ky-access-management/src/workbench-menu-contract.test.mjs b/plugins/ky-access-management/src/workbench-menu-contract.test.mjs
+index 22becc7..99c5074 100644
+--- a/plugins/ky-access-management/src/workbench-menu-contract.test.mjs
++++ b/plugins/ky-access-management/src/workbench-menu-contract.test.mjs
+@@ -4,11 +4,7 @@ import test from "node:test";
+ import {
+   filterMenuActions,
+   layoutMenuActions,
+-  MENU_ACTION_CELL_INSET,
+-  MENU_ACTION_COLUMN_WIDTH,
+-  MENU_ACTION_GRID_CELL_WIDTH,
+-  MENU_ACTION_GRID_COLUMNS,
+-  MENU_ACTION_MIN_BUTTON_WIDTH
++  MENU_ACTION_COLUMN_WIDTH
+ } from "./menu-action-grid.ts";
+ import { permissionDisplayName } from "./permission-labels.ts";
+ 
+@@ -96,15 +92,25 @@ test("shared create/edit form keeps directory adapters, parent locking, and dirt
+ });
+ 
+ test("both catalogs add child actions only on groups and render common action grid", async () => {
+-  const [management, components] = await Promise.all([
++  const [management, components, styles] = await Promise.all([
+     readFile(new URL("./pages/management-menus-tab.tsx", import.meta.url), "utf8"),
+-    readFile(new URL("./menu-catalog-components.tsx", import.meta.url), "utf8")
++    readFile(new URL("./menu-catalog-components.tsx", import.meta.url), "utf8"),
++    readFile(new URL("../../../apps/ky-admin-host/src/styles.css", import.meta.url), "utf8")
+   ]);
+   assert.match(page, /permission: "platform\.workbench_menus\.create", visible: isPlatform && item\.routeKey === null/);
+   assert.match(management, /permission: "platform\.workbench_menus\.create", visible: isGroup/);
+   assert.match(page, /return <MenuActionGrid actions=\{actions\} \/>/);
+   assert.match(management, /return <MenuActionGrid actions=\{actions\} \/>/);
+-  assert.match(components, /gridTemplateColumns: `repeat\(\$\{MENU_ACTION_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
++  assert.match(components, /<Space className="table-action-grid menu-catalog-action-grid" size=\{4\} wrap>/);
++  assert.doesNotMatch(components, /gridTemplateColumns|gridTemplateRows/);
++  const tableActionGridStyles = styles.match(/\.table-action-grid,[\s\S]*?\n\}/)?.[0] ?? "";
++  assert.match(tableActionGridStyles, /grid-template-columns:\s*repeat\(4,/);
++  assert.match(styles, /\.table-action-grid:has\(> :nth-child\(5\)\)/);
++  assert.equal(MENU_ACTION_COLUMN_WIDTH, 240);
++  for (const source of [page, management]) {
++    assert.match(source, /title: "操作", key: "actions", className: "table-action-column", align: "left", width: MENU_ACTION_COLUMN_WIDTH/);
++  }
++  assert.match(roles, /className: "table-action-column",\s*width: 240/);
+ });
+ 
+ test("catalog request failures expose retry and differ from real empty state", async () => {
+@@ -198,38 +204,29 @@ test("action grid compacts permission-filtered actions and moves overflow behind
+   }));
+   const visible = filterMenuActions(actions, (permission) => permission === "menu.write");
+   assert.deepEqual(visible.map((action) => action.key), ["action-2", "action-4", "action-6", "action-8", "action-10"]);
+-  assert.equal(layoutMenuActions(visible.slice(0, 1)).rows, 1);
+-  assert.equal(layoutMenuActions(visible).rows, 2);
+-  assert.equal(layoutMenuActions(visible.slice(0, 4)).rows, 1);
+-  assert.equal(layoutMenuActions(actions.slice(0, 8)).rows, 2);
++  assert.equal(layoutMenuActions(visible.slice(0, 4)).visible.length, 4);
++  assert.equal(layoutMenuActions(actions.slice(0, 8)).visible.length, 8);
+   const overflowLayout = layoutMenuActions([...visible, ...actions.filter((action) => action.permission === "menu.read")]);
+   assert.equal(overflowLayout.visible.length, 7);
+   assert.equal(overflowLayout.overflow.length, 3);
+-  assert.equal(overflowLayout.rows, 2);
+-  assert.equal(MENU_ACTION_GRID_COLUMNS, 4);
+-  assert.equal(MENU_ACTION_COLUMN_WIDTH, 336);
+-  assert.equal(MENU_ACTION_CELL_INSET, 8);
+-  assert.equal(MENU_ACTION_MIN_BUTTON_WIDTH, 72);
+-  assert.equal(MENU_ACTION_GRID_CELL_WIDTH, 80);
+-  assert.ok(MENU_ACTION_GRID_CELL_WIDTH >= MENU_ACTION_MIN_BUTTON_WIDTH);
++  assert.equal(MENU_ACTION_COLUMN_WIDTH, 240);
+   for (const label of ["新增菜单", "纳入目录"]) assert.equal([...label].length, 4);
+   assert.match(page, /width: MENU_ACTION_COLUMN_WIDTH/);
+   assert.match(management, /width: MENU_ACTION_COLUMN_WIDTH/);
+   assert.match(page, /scroll=\{\{ x: "max-content" \}\}/);
+   assert.match(management, /scroll=\{\{ x: "max-content" \}\}/);
+-  assert.match(components, /gridTemplateColumns: `repeat\(\$\{MENU_ACTION_GRID_COLUMNS\}, minmax\(0, 1fr\)\)`/);
+-  assert.match(components, /className="menu-catalog-action-grid" style=\{\{/);
+-  assert.match(components, /className="menu-catalog-action-button" type="text" size="small"[^>]*danger=\{action\.danger\}/);
+-  assert.match(components, /className="menu-catalog-action-button" type="text" size="small"/);
+-  const textButtonStyles = styles.match(/\.menu-catalog-action-button\.ant-btn\s*\{([^}]*)\}/)?.[1] ?? "";
+-  assert.match(textButtonStyles, /background:\s*transparent/);
+-  assert.match(textButtonStyles, /border:\s*0/);
+-  assert.match(textButtonStyles, /height:\s*24px/);
+-  assert.match(textButtonStyles, /padding-inline:\s*4px/);
+-  assert.match(textButtonStyles, /color:\s*var\(--admin-accent\)/);
+-  assert.match(styles, /\.menu-catalog-action-button\.ant-btn-dangerous[\s\S]*?color:\s*var\(--ant-color-error, #ff4d4f\)/);
+-  assert.match(styles, /\.menu-catalog-action-grid > div\s*\{[^}]*min-width:\s*0/);
++  assert.match(components, /<Space className="table-action-grid menu-catalog-action-grid" size=\{4\} wrap>/);
++  assert.doesNotMatch(components, /gridTemplateColumns|gridTemplateRows/);
++  assert.match(components, /className="menu-catalog-action-button" type="link" size="small"[^>]*danger=\{action\.danger\}/);
++  assert.match(components, /className="menu-catalog-action-button" type="link" size="small"/);
++  const menuButtonRules = [...styles.matchAll(/([^{}]*menu-catalog-action-button[^{}]*)\{([^}]*)\}/g)];
++  assert.equal(menuButtonRules.length, 1, "menu-specific styles should not replace Ant Design interaction states");
++  assert.match(menuButtonRules[0][1], /\.menu-catalog-action-grid \.menu-catalog-action-button\.ant-btn-link/);
++  assert.match(menuButtonRules[0][2], /padding-inline:\s*0/);
++  assert.doesNotMatch(menuButtonRules[0][2], /color\s*:|background\s*:|font-size\s*:|border\s*:/);
++  assert.doesNotMatch(styles, /\.menu-catalog-action-button[^{}]*(?:hover|focus|dangerous)/);
++  assert.match(styles, /\.table-action-grid:has\(> :nth-child\(5\)\)/);
+   assert.match(components, /const layout = layoutMenuActions\(actions\)/);
+   assert.match(components, /layout\.visible\.map/);
+-  assert.match(components, /layout\.overflow\.length \? <div key="more"><Dropdown[\s\S]*>更多<\/Button>/);
++  assert.match(components, /layout\.overflow\.length \? <Dropdown key="more"[\s\S]*>更多<\/Button>/);
+ });

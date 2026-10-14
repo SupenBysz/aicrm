@@ -1,0 +1,10 @@
+services/ky-shop-management-service/internal/server/http.go
+services/ky-shop-management-service/internal/server/menu_webview_proxy.go
+services/ky-shop-management-service/internal/server/menu_webview_runtime.go
+services/ky-shop-management-service/internal/server/menu_webview_runtime_test.go
+services/ky-shop-management-service/internal/server/server.go
+services/ky-shop-management-service/internal/store/db.go
+services/ky-shop-management-service/internal/store/menu_webview_proxy.go
+services/ky-shop-management-service/internal/store/menu_webview_proxy_atomic_integration_test.go
+services/ky-shop-management-service/internal/store/menu_webview_runtime.go
+services/ky-shop-management-service/internal/store/menu_webview_runtime_test.go
