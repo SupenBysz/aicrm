@@ -86,6 +86,7 @@ build: adjust desktop build config
 | IPC、事件、订阅、桌面桥 | `template/skills/aicrm-solution/references/event-communication.md` |
 | 模板资产生成、模板能力抽取 | `template/skills/aicrm-solution/references/template-extraction.md` |
 | 后台列表页布局 | 全局 `admin-list-page-layout` skill |
+| 侧滑窗口 / Drawer / 抽屉布局 | `template/skills/aicrm-solution/references/drawer-layout.md`：固定 Header、左侧标题、右侧操作，仅正文滚动 |
 
 跨模块改动必须说明影响范围，例如：
 

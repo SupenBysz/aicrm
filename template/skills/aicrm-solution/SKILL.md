@@ -25,6 +25,7 @@ description: AiCRM 解决方案级工程规范。Use when Codex works on an AiCR
 - 改 Host/Core/Plugin/Desktop/Service/Shared 边界时，读 `references/module-boundaries.md`。
 - 改身份、角色、权限、菜单、数据范围、工作区缓存时，读 `references/permission-data-scope.md`。
 - 改 API、前后端契约、分页、错误码、请求上下文时，读 `references/api-contracts.md`。
+- 新增、修改或审查侧滑窗口（Drawer/抽屉）时，读 `references/drawer-layout.md`；固定 Header，标题左对齐，保存等操作置于 Header 右侧，仅正文滚动。
 - 改 IPC、事件、订阅、消费、桌面桥、事件总线时，读 `references/event-communication.md`。
 - 改服务所有权、私表、内部 API、outbox、NATS、数据库角色或单写者切换时，同时读 `references/module-boundaries.md`、`references/api-contracts.md` 和仓库治理文档。
 - 抽取或更新独立项目基础框架模板时，读 `references/template-extraction.md`。
