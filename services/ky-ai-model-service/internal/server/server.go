@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
 	"os"
 	"sync"
@@ -35,7 +36,11 @@ type wsContext struct {
 
 func (s *Server) Run(ctx context.Context) error {
 	if s.cfg.DatabaseURL != "" {
-		if opened, err := store.Open(ctx, s.cfg.DatabaseURL); err == nil {
+		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
+		if err != nil {
+			return err
+		}
+		{
 			s.store = opened
 			defer opened.Close()
 			// The legacy TUI/PTY/WebSocket executor worker is permanently retired.
