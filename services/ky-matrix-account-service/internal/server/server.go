@@ -43,7 +43,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithCancel(context.Background())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:

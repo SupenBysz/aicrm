@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: kycrm
+spec:
+  description: KyCRM quasi-production staging only
+  sourceRepos:
+  - https://gitea.jditco.ltd/kysion/kycrm.git
+  destinations:
+  - namespace: kycrm-staging
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+  - group: apps
+    kind: Deployment
+  - group: ''
+    kind: Service
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: ConfigMap
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: networking.k8s.io
+    kind: NetworkPolicy
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kycrm-staging
+spec:
+  project: kycrm
+  source:
+    repoURL: https://gitea.jditco.ltd/kysion/kycrm.git
+    targetRevision: deploy/staging
+    path: ops/k3s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kycrm-staging
+  syncPolicy:
+    syncOptions:
+    - PruneLast=true
