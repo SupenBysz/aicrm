@@ -233,6 +233,7 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+        fsGroup: 65532
       terminationGracePeriodSeconds: 30
       containers:
       - name: org
@@ -272,6 +273,8 @@ spec:
         volumeMounts:
         - name: tmp
           mountPath: /tmp
+        - name: storage
+          mountPath: /var/lib/kycrm
         env:
         - name: KY_ORG_SERVICE_HTTP_ADDR
           value: :18082
@@ -280,10 +283,14 @@ spec:
             name: kycrm-config
         - secretRef:
             name: kycrm-runtime
+        workingDir: /var/lib/kycrm
       volumes:
       - name: tmp
         emptyDir:
           sizeLimit: 128Mi
+      - name: storage
+        persistentVolumeClaim:
+          claimName: application-storage
 ---
 apiVersion: v1
 kind: Service

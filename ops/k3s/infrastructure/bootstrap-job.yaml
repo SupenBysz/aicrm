@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: kycrm-bootstrap
+  name: kycrm-bootstrap-v2
   namespace: kycrm-staging
 spec:
   backoffLimit: 0
@@ -19,16 +19,10 @@ spec:
       - name: bootstrap
         image: postgres:17-bookworm@sha256:839fbb5a4942a7758dd93e18b42ea5649807491a0545b5eeeb8f0b8bb11857a5
         command:
-        - psql
-        - -X
-        - -h
-        - postgres
-        - -U
-        - postgres
-        - -d
-        - postgres
-        - -f
-        - /sql/bootstrap.sql
+        - bash
+        - -c
+        - for i in $(seq 1 30); do pg_isready -h postgres -U postgres && break; sleep
+          2; done; exec psql -X -h postgres -U postgres -d postgres -f /sql/bootstrap.sql
         env:
         - name: PGPASSWORD
           valueFrom:
