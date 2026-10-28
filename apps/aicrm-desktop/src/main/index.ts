@@ -1,7 +1,7 @@
 import { registerPluginSchemes, startPluginHost, getPluginHost } from "./desktop-plugin-host/host";
 import { guardedIpc as ipcMain } from "./guarded-ipc";
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { app, BrowserWindow } from "electron";
 import {
   DESKTOP_APPLICATION_ID,
@@ -32,10 +32,16 @@ registerPluginSchemes();
 
 process.title = DESKTOP_APPLICATION_NAME;
 app.setName(DESKTOP_APPLICATION_NAME);
+const configuredUserDataPath = process.env.AICRM_USER_DATA_DIR;
+if (configuredUserDataPath !== undefined && !isAbsolute(configuredUserDataPath)) {
+  throw new Error("AICRM_USER_DATA_DIR must be an absolute path");
+}
 const legacyUserDataPath = join(app.getPath("appData"), LEGACY_DESKTOP_USER_DATA_DIRECTORY);
-const userDataPath = existsSync(legacyUserDataPath)
-  ? legacyUserDataPath
-  : join(app.getPath("appData"), DESKTOP_APPLICATION_NAME);
+const userDataPath = configuredUserDataPath !== undefined
+  ? resolve(configuredUserDataPath)
+  : existsSync(legacyUserDataPath)
+    ? legacyUserDataPath
+    : join(app.getPath("appData"), DESKTOP_APPLICATION_NAME);
 mkdirSync(userDataPath, { recursive: true });
 app.setPath("userData", userDataPath);
 app.setAppUserModelId(DESKTOP_APPLICATION_ID);
