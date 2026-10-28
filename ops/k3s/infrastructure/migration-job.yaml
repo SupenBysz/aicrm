@@ -2,6 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: kycrm-migrate-RELEASE
+  namespace: kycrm-staging
 spec:
   backoffLimit: 0
   activeDeadlineSeconds: 900

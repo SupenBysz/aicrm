@@ -2,6 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
   name: kycrm
+  namespace: argocd
 spec:
   description: KyCRM quasi-production staging only
   sourceRepos:
@@ -28,6 +29,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: kycrm-staging
+  namespace: argocd
 spec:
   project: kycrm
   source:
