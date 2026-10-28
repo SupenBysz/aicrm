@@ -35,7 +35,7 @@ Secret在带外配置，不提交YAML明文：
 
 新建独立 PostgreSQL 实例及空库，不连接其他项目数据库。迁移角色持DDL权限，运行角色只有业务表DML和序列权限，不拥有数据库、schema、表，也不能修改迁移账本。首期保持既有服务共享schema合同，不宣称已完成按服务私表拆权。
 
-迁移Job以发布SHA唯一命名，backoffLimit=0。沿用 `scripts/deploy_database.sh` 的完整迁移列表、SHA256账本及advisory lock；失败停止发布，不自动重试破坏性步骤。开发密码脚本不用于上线，初始管理员使用带外生成的独立随机密码。
+迁移Job以发布SHA唯一命名，backoffLimit=0。沿用 `scripts/deploy_database.sh` 的完整迁移列表、SHA256账本及advisory lock；失败停止发布，不自动重试破坏性步骤。开发密码脚本不用于上线，初始管理员账号为 `Super.Admin`，密码由操作者带外提供并写入专用凭据文件，不进入源码。
 
 数据库单副本和local-path不是HA。数据PV设Retain，数据库定时逻辑备份保留于独立PVC；该PVC仍为节点本地存储。验收必须包含一次新库恢复演练；异机/异地备份未完成时应作为明确限制记录，不能把本地双PVC称为灾备。
 
@@ -52,3 +52,7 @@ Secret在带外配置，不提交YAML明文：
 首次本地存储使用组织服务专用PVC，工作目录 `/var/lib/kycrm`，迁移默认 `./storage` 因此持久化到该PVC；后续切换对象存储应先验证读写及配置版本。内网有DNS和必要端口放行，org/ai仅允许向公网HTTPS提供商出站，未开放任意内网目标。
 
 Web代理配置的唯一源文件为 `ops/k3s/base/nginx.conf`，同时用于镜像默认配置和Kustomize ConfigMap。运行时只读挂载带内容哈希的ConfigMap，代理变更会触发Web滚动更新，不需要重建前端业务代码。
+
+## 自动发布阶段边界
+
+当前实现为固定SHA的GitHub手动集中构建、受控镜像摘要准备和Argo手动同步。首次环境业务验收后，再接入事件验签/去重与内网发布准入组件；当前未配置Gitea自动触发，也未启用Argo自动同步。不能将现有手动链路称为已完成自动发布。
