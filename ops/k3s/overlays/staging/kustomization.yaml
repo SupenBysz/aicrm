@@ -1,5 +1,40 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: kycrm-staging
-resources:
-- ../../base
+{
+  "apiVersion": "kustomize.config.k8s.io/v1beta1",
+  "kind": "Kustomization",
+  "namespace": "kycrm-staging",
+  "resources": [
+    "../../base"
+  ],
+  "images": [
+    {
+      "name": "ghcr.io/supenbysz/kycrm-web",
+      "newName": "ghcr.io/supenbysz/kycrm-web",
+      "digest": "sha256:34546e7270c14d28b4e1c2b861c315f117351a851bd831471c930d15cdf7d08c"
+    },
+    {
+      "name": "ghcr.io/supenbysz/kycrm-auth",
+      "newName": "ghcr.io/supenbysz/kycrm-auth",
+      "digest": "sha256:d24a1acb9264ad5e9e0d1a2386add2db274d4edb1cd806a5ca8b65ebfb8e6069"
+    },
+    {
+      "name": "ghcr.io/supenbysz/kycrm-org",
+      "newName": "ghcr.io/supenbysz/kycrm-org",
+      "digest": "sha256:26852e97080a3839f9158466a801e0c70e794b660c7f347b1460587695fb4116"
+    },
+    {
+      "name": "ghcr.io/supenbysz/kycrm-membership",
+      "newName": "ghcr.io/supenbysz/kycrm-membership",
+      "digest": "sha256:e72c1aa9649184907b9627eddb5411fbd070b33c0822b0cbc54d74e7001127a8"
+    },
+    {
+      "name": "ghcr.io/supenbysz/kycrm-matrix",
+      "newName": "ghcr.io/supenbysz/kycrm-matrix",
+      "digest": "sha256:c3fa7db19c33bb5aeadbd6387ee76f9b2db9bec0741485ac3c264bfaf0f3e639"
+    },
+    {
+      "name": "ghcr.io/supenbysz/kycrm-ai",
+      "newName": "ghcr.io/supenbysz/kycrm-ai",
+      "digest": "sha256:8a04009b893ea93ac7024cff8868b192297c737deea79cc1ddd748d638c51ca0"
+    }
+  ]
+}
