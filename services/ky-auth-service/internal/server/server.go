@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
 	"strings"
 	"time"
@@ -31,8 +32,11 @@ func New(cfg config.Config) *Server {
 
 func (s *Server) Run(ctx context.Context) error {
 	if s.cfg.DatabaseURL != "" {
-		opened, err := store.Open(ctx, s.cfg.DatabaseURL)
-		if err == nil {
+		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
+		if err != nil {
+			return err
+		}
+		{
 			s.store = opened
 			defer opened.Close()
 		}

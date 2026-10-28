@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
 	"strings"
 	"time"
@@ -31,7 +32,11 @@ type wsHandler func(w http.ResponseWriter, r *http.Request, wc wsContext)
 
 func (s *Server) Run(ctx context.Context) error {
 	if s.cfg.DatabaseURL != "" {
-		if opened, err := store.Open(ctx, s.cfg.DatabaseURL); err == nil {
+		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
+		if err != nil {
+			return err
+		}
+		{
 			s.store = opened
 			defer opened.Close()
 		}

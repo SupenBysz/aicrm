@@ -176,7 +176,7 @@ spec:
           periodSeconds: 15
         startupProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: http
           failureThreshold: 30
           periodSeconds: 5
@@ -270,7 +270,7 @@ spec:
           periodSeconds: 15
         startupProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: http
           failureThreshold: 30
           periodSeconds: 5
@@ -369,7 +369,7 @@ spec:
           periodSeconds: 15
         startupProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: http
           failureThreshold: 30
           periodSeconds: 5
@@ -462,7 +462,7 @@ spec:
           periodSeconds: 15
         startupProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: http
           failureThreshold: 30
           periodSeconds: 5
@@ -555,7 +555,7 @@ spec:
           periodSeconds: 15
         startupProbe:
           httpGet:
-            path: /healthz
+            path: /readyz
             port: http
           failureThreshold: 30
           periodSeconds: 5
