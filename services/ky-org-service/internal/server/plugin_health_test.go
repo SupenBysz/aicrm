@@ -158,3 +158,16 @@ func TestCollectHealthFiveTargetsAndConcurrency(t *testing.T) {
 		t.Fatalf("concurrency=%d", rt.max)
 	}
 }
+
+func TestMembershipClusterDNSRequiresExplicitTrust(t *testing.T) {
+	const target = "http://membership.kycrm-staging.svc.cluster.local:18083"
+	if validMembershipURL(target) == nil {
+		t.Fatal("cluster host trusted implicitly")
+	}
+	if err := validMembershipURL(target, "membership.kycrm-staging.svc.cluster.local"); err != nil {
+		t.Fatal(err)
+	}
+	if validMembershipURL("http://other.kycrm-staging.svc.cluster.local:18083", "membership.kycrm-staging.svc.cluster.local") == nil {
+		t.Fatal("foreign host trusted")
+	}
+}

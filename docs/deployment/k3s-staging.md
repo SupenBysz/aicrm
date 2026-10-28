@@ -44,3 +44,9 @@ Secret在带外配置，不提交YAML明文：
 检查迁移账本、探针、登录/bootstrap/logout、工作区/角色权限、菜单/系统设置、持久化重启、内部接口隔离及原站点回归。Executor及真实短信/邮件/第三方付费调用不属于本批验收。
 
 回滚记录上一版完整镜像摘要和配置Git提交，回退deploy分支后由Argo同步。DDL不随镜像回滚；不兼容迁移应阻断，恢复备份前处理新增数据并单独批准破坏性恢复。首次验收未完成时自动发布保持关闭。
+
+## 集群服务地址与健康检查
+
+组织服务支持通过 `KY_AUTH_SERVICE_URL`、`KY_ORG_SERVICE_URL`、`KY_MEMBERSHIP_SERVICE_URL`、`KY_MATRIX_ACCOUNT_SERVICE_URL`、`KY_AI_MODEL_SERVICE_URL` 指定健康检查地址；未指定仍使用原生部署loopback默认值。内部权限决策的HTTP非loopback地址必须另外由 `KY_MEMBERSHIP_SERVICE_DNS_NAME` 精确声明可信主机，不接受用户请求传入的探测URL。
+
+首次本地存储使用组织服务专用PVC，工作目录 `/var/lib/kycrm`，迁移默认 `./storage` 因此持久化到该PVC；后续切换对象存储应先验证读写及配置版本。内网有DNS和必要端口放行，org/ai仅允许向公网HTTPS提供商出站，未开放任意内网目标。

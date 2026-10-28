@@ -17,6 +17,8 @@ type Config struct {
 	SecretKey            string
 	MembershipURL        string
 	InternalServiceToken string
+	MembershipDNSName    string
+	ServiceHealthURLs    map[string]string
 }
 
 func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
@@ -43,6 +45,14 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 		SecretKey:            firstNonEmpty(os.Getenv("KY_SECRET_KEY"), os.Getenv("KY_AI_SECRET_KEY")),
 		MembershipURL:        firstNonEmpty(os.Getenv("KY_MEMBERSHIP_SERVICE_URL"), "http://127.0.0.1:18083"),
 		InternalServiceToken: os.Getenv("KY_INTERNAL_SERVICE_TOKEN"),
+		MembershipDNSName:    os.Getenv("KY_MEMBERSHIP_SERVICE_DNS_NAME"),
+		ServiceHealthURLs: map[string]string{
+			"auth":       os.Getenv("KY_AUTH_SERVICE_URL"),
+			"org":        os.Getenv("KY_ORG_SERVICE_URL"),
+			"membership": os.Getenv("KY_MEMBERSHIP_SERVICE_URL"),
+			"matrix":     os.Getenv("KY_MATRIX_ACCOUNT_SERVICE_URL"),
+			"ai-model":   os.Getenv("KY_AI_MODEL_SERVICE_URL"),
+		},
 	}
 }
 

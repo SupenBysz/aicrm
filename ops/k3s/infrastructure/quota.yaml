@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kycrm-budget
+  namespace: kycrm-staging
+spec:
+  hard:
+    requests.cpu: '3'
+    requests.memory: 4Gi
+    limits.cpu: '12'
+    limits.memory: 8Gi
+    pods: '20'
+    requests.storage: 25Gi
+    persistentvolumeclaims: '3'

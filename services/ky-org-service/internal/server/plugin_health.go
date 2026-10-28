@@ -135,7 +135,7 @@ func (s *Server) callPluginAccess(c context.Context, a, b, rid string) (accessDe
 	}
 	return s.requestPluginAccess(c, a, b, rid)
 }
-func validMembershipURL(raw string) error {
+func validMembershipURL(raw string, trustedHosts ...string) error {
 	u, e := url.Parse(raw)
 	if e != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("invalid membership url")
@@ -147,6 +147,11 @@ func validMembershipURL(raw string) error {
 		return errors.New("invalid membership scheme")
 	}
 	h := u.Hostname()
+	for _, trusted := range trustedHosts {
+		if trusted != "" && h == trusted && u.Path == "" {
+			return nil
+		}
+	}
 	if h == "localhost" {
 		return nil
 	}
@@ -157,7 +162,7 @@ func validMembershipURL(raw string) error {
 	return nil
 }
 func (s *Server) requestPluginAccess(ctx context.Context, actor, session, rid string) (accessDecisionResponse, error) {
-	if e := validMembershipURL(s.cfg.MembershipURL); e != nil {
+	if e := validMembershipURL(s.cfg.MembershipURL, s.cfg.MembershipDNSName); e != nil {
 		return accessDecisionResponse{}, e
 	}
 	ctx, c := context.WithTimeout(ctx, 2*time.Second)
@@ -246,7 +251,11 @@ func (s *Server) collectHealth(parent context.Context) []healthItem {
 			}
 			rc, cc := context.WithTimeout(ctx, 2*time.Second)
 			defer cc()
-			req, e := http.NewRequestWithContext(rc, http.MethodGet, "http://127.0.0.1:"+t.port+"/readyz", nil)
+			base := s.cfg.ServiceHealthURLs[t.key]
+			if base == "" {
+				base = "http://127.0.0.1:" + t.port
+			}
+			req, e := http.NewRequestWithContext(rc, http.MethodGet, strings.TrimRight(base, "/")+"/readyz", nil)
 			if e == nil {
 				res, x := cl.Do(req)
 				if x != nil {

@@ -9,8 +9,12 @@ kind: ConfigMap
 metadata:
   name: kycrm-config
 data:
-  KY_MEMBERSHIP_SERVICE_URL: http://membership:18083
+  KY_MEMBERSHIP_SERVICE_URL: http://membership.kycrm-staging.svc.cluster.local:18083
   KY_AI_MODEL_SERVICE_URL: http://ai:18086
+  KY_AUTH_SERVICE_URL: http://auth:18081
+  KY_ORG_SERVICE_URL: http://org:18082
+  KY_MEMBERSHIP_SERVICE_DNS_NAME: membership.kycrm-staging.svc.cluster.local
+  KY_MATRIX_ACCOUNT_SERVICE_URL: http://matrix:18085
 ---
 apiVersion: apps/v1
 kind: Deployment
