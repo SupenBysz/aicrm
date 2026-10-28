@@ -88,6 +88,10 @@ spec:
           mountPath: /var/cache/nginx
         - name: nginx-run
           mountPath: /var/run
+        - name: proxy-config
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: nginx.conf
+          readOnly: true
         command:
         - nginx
         - -g
@@ -102,6 +106,9 @@ spec:
       - name: nginx-run
         emptyDir:
           sizeLimit: 8Mi
+      - name: proxy-config
+        configMap:
+          name: kycrm-web-proxy
 ---
 apiVersion: v1
 kind: Service
