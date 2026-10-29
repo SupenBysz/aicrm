@@ -182,6 +182,12 @@ a {
   z-index: 0;
 }
 
+/* Keep the host divider outside the overlay's paint area, including older clients. */
+body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.is-integrated .aicrm-window-controls {
+  backdrop-filter: none;
+  height: calc(var(--aicrm-desktop-topbar-height, 60px) - 1px);
+}
+
 .app-header-leading {
   align-items: center;
   display: flex;
