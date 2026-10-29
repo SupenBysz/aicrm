@@ -839,7 +839,7 @@ export interface DesktopNetworkLogSnapshot {
 export interface VersionDialogAnchor { x:number; y:number; width:number; height:number }
 
 export interface VersionDialogInfo {
-  themeId?: "classic-gold" | "business-blue" | "jade-green";
+  themeId?: "classic-gold" | "business-blue" | "jade-green" | "graphite-cyan";
   clientVersion: string;
   pluginVersion: string;
   runtimePhase: string;

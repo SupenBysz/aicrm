@@ -14,7 +14,7 @@ export type HostOverlayAction = {
     password: string;
 } | {
     type: "choose";
-    themeId: "classic-gold" | "business-blue" | "jade-green";
+    themeId: "classic-gold" | "business-blue" | "jade-green" | "graphite-cyan";
     mode: "light" | "dark" | "system";
 };
 export interface HostOverlayProjection {
@@ -60,7 +60,7 @@ export interface HostOverlayProjection {
         mode: string;
         revision: number;
     };
-    themeId: "classic-gold" | "business-blue" | "jade-green";
+    themeId: "classic-gold" | "business-blue" | "jade-green" | "graphite-cyan";
     mode: "light" | "dark" | "system";
     dark: boolean;
     status: string;

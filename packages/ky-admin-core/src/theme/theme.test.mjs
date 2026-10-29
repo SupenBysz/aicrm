@@ -54,3 +54,20 @@ test('lost-response retry reconciles same values and never overwrites a newer di
  assert.equal(theme.appearanceRetryOutcome({...follow,revision:5},desired,4),'conflict');
  assert.equal(theme.appearanceRetryOutcome({...follow,revision:5},follow,4),'saved');
 });
+
+test('graphite preset pairs neutral chrome with readable action and secondary text',()=>{
+ const ratio=(a,b)=>{const x=[luminance(a),luminance(b)].sort((a,b)=>b-a);return (x[0]+.05)/(x[1]+.05)};
+ for(const dark of [false,true]){
+  const c=theme.themeColors('graphite-cyan',dark);const v=theme.themeVariables('graphite-cyan',dark);
+  assert.ok(ratio(c.muted,c.surface)>=4.5,'secondary text');
+  assert.ok(ratio(v['--admin-on-primary'],c.primary)>=4.5,'primary button');
+  assert.ok(ratio(c.primary,c.nav)>=4.5,'selected navigation text');
+  for(const key of ['--admin-stroke','--admin-divider','--admin-toolbar-bg'])assert.match(v[key],/^#[0-9a-f]{6}$/);
+  assert.equal(v['--admin-content-top-gradient-bg'],c.bg);
+ }
+ const props=new Map();const root={dataset:{},style:{setProperty:(k,v)=>props.set(k,v)}};
+ globalThis.document={documentElement:root};globalThis.matchMedia=()=>({matches:true});
+ theme.applyAppearance('graphite-cyan','system');assert.equal(root.dataset.adminPalette,'graphite-cyan');
+ theme.applyAppearance('business-blue','light');
+ assert.equal(props.get('--admin-stroke'),theme.themeVariables('business-blue',false)['--admin-stroke'],'switching away clears neutral overrides');
+});
