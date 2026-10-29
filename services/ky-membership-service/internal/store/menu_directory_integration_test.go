@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,8 +24,8 @@ func TestMenuDirectoryPostgresIntegration(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set KY_MENU_DIRECTORY_TEST_DATABASE_URL to the isolated contribution database")
 	}
-	if dsn != "postgres://kycrm_contribution@127.0.0.1:51554/kycrm_contribution?sslmode=disable" {
-		t.Fatal("integration test refuses any database other than the isolated contribution database")
+	if !validIsolatedMenuTestDatabaseURL(dsn) {
+		t.Fatal("integration test only accepts an explicit loopback PostgreSQL test database URL without a password")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -206,5 +209,49 @@ func TestMenuDirectoryPostgresIntegration(t *testing.T) {
 	withRole, err := store.EffectivePermissions(ctx, "membership_with_menu_role")
 	if err != nil || len(withRole.MenuKeys) != 1 || withRole.MenuKeys[0] != "platform.test.menu.view" {
 		t.Fatalf("menu permission not projected for authorized membership: %#v err=%v", withRole, err)
+	}
+}
+
+func validIsolatedMenuTestDatabaseURL(dsn string) bool {
+	parsed, err := url.Parse(dsn)
+	if err != nil || parsed.Scheme != "postgres" || parsed.Opaque != "" || parsed.Fragment != "" || parsed.User == nil || parsed.User.Username() == "" {
+		return false
+	}
+	if _, hasPassword := parsed.User.Password(); hasPassword {
+		return false
+	}
+	ip := net.ParseIP(parsed.Hostname())
+	port, portErr := strconv.Atoi(parsed.Port())
+	if ip == nil || !ip.IsLoopback() || portErr != nil || port < 1 || port > 65535 {
+		return false
+	}
+	database := strings.TrimPrefix(parsed.Path, "/")
+	if parsed.Path != "/"+database || database == "" || strings.ContainsAny(database, "./- ") {
+		return false
+	}
+	if !(strings.HasSuffix(database, "_test") || strings.HasSuffix(database, "_testing") || strings.HasSuffix(database, "_contribution") || strings.HasSuffix(database, "_isolated")) {
+		return false
+	}
+	query := parsed.Query()
+	sslModes := query["sslmode"]
+	return len(query) == 1 && len(sslModes) == 1 && sslModes[0] == "disable"
+}
+
+func TestValidIsolatedMenuTestDatabaseURL(t *testing.T) {
+	for index, value := range []struct {
+		dsn string
+		ok  bool
+	}{
+		{"postgres://tester@127.0.0.1:51554/kycrm_contribution?sslmode=disable", true},
+		{"postgres://tester@[::1]:5439/tenant_test?sslmode=disable", true},
+		{"postgres://tester@db.example.test:5432/tenant_test?sslmode=disable", false},
+		{"postgres://tester@127.0.0.1:5432/kwwcrm?sslmode=disable", false},
+		{"postgres://tester:secret@127.0.0.1:5432/tenant_test?sslmode=disable", false},
+		{"postgres://tester@127.0.0.1:5432/tenant_test?sslmode=disable&connect_timeout=1", false},
+		{"postgres://tester@127.0.0.1:5432/tenant_test?sslmode=disable&sslmode=disable", false},
+	} {
+		if validIsolatedMenuTestDatabaseURL(value.dsn) != value.ok {
+			t.Fatalf("unexpected isolated database URL validation case %d", index)
+		}
 	}
 }
