@@ -47,3 +47,14 @@
 - migrate: `ghcr.io/supenbysz/kycrm-migrate@sha256:d440e9b8b04f871873bc0d987f53fd08d6d600f8880ddf5ec838856e6bf272ba`
 - org: `ghcr.io/supenbysz/kycrm-org@sha256:841af94a87756609f5d258e8e89e90ae88a99b7329d71149e5151ddc86217c9d`
 - web: `ghcr.io/supenbysz/kycrm-web@sha256:9337d30aa0ce4bd0a88cdf3be1e20c130d531c705aec5ca6a892426aea67e744`
+
+## 可见字形高度修正发布
+
+- 用户再次授权立即部署，修正文字图片透明留白造成 AI 偏高的问题。运行镜像源码 `44e707f232575b28247df102ef7cd64569d20216`。
+- 文字图片按非透明像素行测量可见高度、垂直中心；分隔点和 AI 按相同可见高度适配；图像测量缓存避免重复扫描。跨源不可读图片回退图片边界。
+- 类型检查 23 项成功，前端构建通过。
+- [集中构建 40834606707](https://github.com/SupenBysz/kysion-build/actions/runs/40834606707) 成功；产物 ID `12879943779`，SHA256 `bf12e22e536c6936d85e27c45c799b4d6d3af24033a38f3627ababbab821f6ca`。
+- 运行清单 `9db65030a50c6784bafbf9300d5b504bf866b2e2`，六应用镜像逐一与产物 digest 比对一致；最终各只有一个新副本且可用，Argo `Synced / Healthy`。
+- 公网新包 `/assets/index-Cl0svBhm.js` 包含可见字形测量与垂直校正逻辑。浏览器在新标签页确认浅/深背景预览，AI 与文字可见高度适配，未保存或发布真实机构配置；原窗口未保存内容保留。
+- 更新前后认证 API 冒烟均通过，测试会话已退出并验证失效。
+- 本次仅前端代码，不增加数据库 DDL/业务写入；沿用本报告同日已完成并校验的发布前备份。回滚目标为上一运行清单 `ebedf750ee1aa09623808eaee40018b444d8b5fd`。
