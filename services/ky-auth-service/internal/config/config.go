@@ -14,6 +14,7 @@ type Config struct {
 	RedisURL        string
 	NATSURL         string
 	AuthTokenSecret string
+	InternalToken   string
 }
 
 func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
@@ -34,6 +35,7 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 		DatabaseURL:     os.Getenv("KY_TENANT_DATABASE_URL"),
 		RedisURL:        os.Getenv("KY_REDIS_URL"),
 		NATSURL:         os.Getenv("KY_NATS_URL"),
+		InternalToken:   os.Getenv("KY_INTERNAL_SERVICE_TOKEN"),
 		AuthTokenSecret: os.Getenv("KY_AUTH_TOKEN_SECRET"),
 	}
 }

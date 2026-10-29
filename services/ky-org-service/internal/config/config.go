@@ -15,6 +15,7 @@ type Config struct {
 	NATSURL              string
 	AuthTokenSecret      string
 	SecretKey            string
+	StatisticsAuthURL    string
 	MembershipURL        string
 	InternalServiceToken string
 	MembershipDNSName    string
@@ -43,6 +44,7 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 		// Platform-wide secret for encrypting settings credentials (storage/SMS/email).
 		// Falls back to KY_AI_SECRET_KEY so a single master key can serve both.
 		SecretKey:            firstNonEmpty(os.Getenv("KY_SECRET_KEY"), os.Getenv("KY_AI_SECRET_KEY")),
+		StatisticsAuthURL:    firstNonEmpty(os.Getenv("KY_AUTH_SERVICE_URL"), "http://127.0.0.1:18081"),
 		MembershipURL:        firstNonEmpty(os.Getenv("KY_MEMBERSHIP_SERVICE_URL"), "http://127.0.0.1:18083"),
 		InternalServiceToken: os.Getenv("KY_INTERNAL_SERVICE_TOKEN"),
 		MembershipDNSName:    os.Getenv("KY_MEMBERSHIP_SERVICE_DNS_NAME"),

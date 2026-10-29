@@ -1,3 +1,4 @@
+import {Presence} from "./presence";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ApartmentOutlined,
@@ -278,6 +279,7 @@ export function App() {
       }}
     >
       <QueryClientProvider client={queryClient}>
+ <Presence />
         <RequestClientProvider client={requestClient}>
           <AntdApp>
             <DesktopClientFrame>

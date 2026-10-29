@@ -1,3 +1,4 @@
+import { AgencyStatisticsCell, useAgencyStatistics } from "../components/agency-statistics";
 import { useEffect, useMemo, useState } from "react";
 import {
   Button,
@@ -173,6 +174,7 @@ export function AgenciesPage() {
     setDrawerOpen(true);
   }
 
+  const statistics = useAgencyStatistics((data?.items ?? []).map(item => item.id), "agencies");
   const columns: ColumnsType<Agency> = useMemo(
     () => [
       {
@@ -186,6 +188,9 @@ export function AgenciesPage() {
             </Typography.Text>
           </Space>
         )
+      },
+      {
+        title: "动态统计", key: "statistics", width: 220, render: (_,record) => <AgencyStatisticsCell id={record.id} summary={statistics.data?.[record.id]} loading={statistics.isFetching} scope="agencies" retry={()=>void statistics.refetch()} />
       },
       {
         title: "联系人",
@@ -283,7 +288,7 @@ export function AgenciesPage() {
         )
       }
     ],
-    [canUpdate, canDisable, statusMutation]
+    [canUpdate, canDisable, statusMutation, statistics.data, statistics.isFetching]
   );
 
   return (
