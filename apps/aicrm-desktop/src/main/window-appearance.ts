@@ -8,7 +8,7 @@ interface NativeAppearance {
 const backgrounds: Record<string, readonly [
     string,
     string
-]> = { "classic-gold": ["#f7efe4", "#050505"], "business-blue": ["#eff4fb", "#0a1220"], "jade-green": ["#eef6f1", "#091711"] };
+]> = { "classic-gold": ["#f7efe4", "#050505"], "business-blue": ["#eff4fb", "#0a1220"], "jade-green": ["#eef6f1", "#091711"], "graphite-cyan": ["#f3f5f6", "#181818"] };
 export function storedNativeBackground(): string | undefined { try {
     const v = JSON.parse(readFileSync(join(app.getPath("userData"), "appearance.json"), "utf8")) as NativeAppearance;
     if (typeof v.dark !== "boolean")
@@ -30,8 +30,8 @@ export function applyNativeAppearance(window: BrowserWindow, value: NativeAppear
 }
 catch { /* Window theme still applies when preferences are read-only. */ } }
 
-export function storedNativeThemeId(): "classic-gold" | "business-blue" | "jade-green" {
+export function storedNativeThemeId(): "classic-gold" | "business-blue" | "jade-green" | "graphite-cyan" {
  try { const value=JSON.parse(readFileSync(join(app.getPath("userData"),"appearance.json"),"utf8")) as NativeAppearance;
- if(value.themeId==="business-blue"||value.themeId==="jade-green")return value.themeId;
+ if(value.themeId==="business-blue"||value.themeId==="jade-green"||value.themeId==="graphite-cyan")return value.themeId;
  }catch{} return "classic-gold";
 }
