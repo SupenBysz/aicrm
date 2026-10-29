@@ -38,9 +38,9 @@ spec:
               umask 077
 
               for attempt in $(seq 1 45); do
-                pg_isready -q -t 1 -d "$KY_TENANT_DATABASE_URL" && break
-                sleep 1
-              done
+                pg_isready -q -t 1 -d "$KY_TENANT_DATABASE_URL" && break;
+                sleep 1;
+              done;
               pg_isready -q -t 1 -d "$KY_TENANT_DATABASE_URL"
 
               name="/backups/kycrm-$(date -u +%Y%m%dT%H%M%SZ).dump"
