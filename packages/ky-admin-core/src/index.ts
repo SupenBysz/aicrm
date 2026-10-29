@@ -132,3 +132,5 @@ export * from "./event-stream";
 export * from "./plugin-inventory";
 
 export * from "./plugin-inventory-context";
+
+export * from "./brand-presentation";

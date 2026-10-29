@@ -114,6 +114,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/public/platform-profile", s.getPublicPlatformProfile)
 	mux.HandleFunc("GET /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.view"), s.getPlatformProfile))
 	mux.HandleFunc("PATCH /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.update"), s.updatePlatformProfile))
+	mux.HandleFunc("PATCH /api/v1/platform/platform-profile/edit", s.ws("platform", perms("platform.basic_info.update"), s.editPlatformProfile))
 
 	// 通知模板 (notification templates)
 	mux.HandleFunc("GET /api/v1/platform/notification-templates", s.ws("platform", perms("platform.notification_templates.view"), s.listNotificationTemplates))
