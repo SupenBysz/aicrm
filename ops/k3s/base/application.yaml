@@ -9,6 +9,11 @@ kind: ConfigMap
 metadata:
   name: kycrm-config
 data:
+  # Admission remains closed until the isolated entry deployment contract is accepted.
+  KY_DOMAIN_ENTRY_ENABLED: "0"
+  KY_DOMAIN_MANAGED_ENABLED: "0"
+  KY_DOMAIN_AUTOMATION_READY: "0"
+  KY_DOMAIN_ORIGIN_ISOLATED: "0"
   KY_MEMBERSHIP_SERVICE_URL: http://membership.kycrm-staging.svc.cluster.local:18083
   KY_AI_MODEL_SERVICE_URL: http://ai:18086
   KY_AUTH_SERVICE_URL: http://auth:18081

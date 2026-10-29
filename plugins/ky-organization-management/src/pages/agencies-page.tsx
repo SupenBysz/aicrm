@@ -197,10 +197,20 @@ export function AgenciesPage() {
         )
       },
       {
+        title:"域名",key:"domain",width:220,render:(_,record)=>{const d=domainSummaries.data?.[record.id];return !permissions.can("platform.agency_domains.view")?"—":domainSummaries.error?"读取失败":domainSummaries.isFetching&&!domainSummaries.data?"加载中…":d?<Space direction="vertical" size={0}><Typography.Link href={`https://${d.hostname}/login`} target="_blank" rel="noopener noreferrer" title={d.hostname} ellipsis style={{maxWidth:200}}>{d.hostname}</Typography.Link><Typography.Text type="secondary">{domainStates[d.state]||d.state}</Typography.Text></Space>:"未绑定"}
+      },
+      {
         title: "动态统计", key: "statistics", width: 220, render: (_,record) => <AgencyStatisticsCell id={record.id} summary={statistics.data?.[record.id]} loading={statistics.isFetching} scope="agencies" retry={()=>void statistics.refetch()} />
       },
       {
-        title:"域名",key:"domain",width:220,render:(_,record)=>{const d=domainSummaries.data?.[record.id];return !permissions.can("platform.agency_domains.view")?"—":domainSummaries.error?"读取失败":domainSummaries.isFetching&&!domainSummaries.data?"加载中…":d?<Space direction="vertical" size={0}><Typography.Link href={`https://${d.hostname}/login`} target="_blank" rel="noopener noreferrer" title={d.hostname} ellipsis style={{maxWidth:200}}>{d.hostname}</Typography.Link><Typography.Text type="secondary">{domainStates[d.state]||d.state}</Typography.Text></Space>:"未绑定"}
+        title: "所属用户",
+        key: "members",
+        width: 100,
+        render: (_, record) => (
+          <Button size="small" type="link" onClick={() => setMembersOrg({ type: "agency", id: record.id, name: record.name })}>
+            {record.memberCount} 人
+          </Button>
+        )
       },
       {
         title: "联系人",
@@ -246,16 +256,6 @@ export function AgenciesPage() {
           ) : (
             <Typography.Text type="secondary">—</Typography.Text>
           )
-      },
-      {
-        title: "所属用户",
-        key: "members",
-        width: 100,
-        render: (_, record) => (
-          <Button size="small" type="link" onClick={() => setMembersOrg({ type: "agency", id: record.id, name: record.name })}>
-            {record.memberCount} 人
-          </Button>
-        )
       },
       {
         title: "操作",

@@ -1,3 +1,4 @@
+import "./organization-drawers.css";
 import zhCN from "antd/locale/zh_CN";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -302,6 +303,7 @@ function DomainEditor({
       ];
   return (
     <Drawer
+      rootClassName="organization-contribution-drawer"
       open
       title={`${agency.name} · 域名`}
       size="min(760px, 100vw)"

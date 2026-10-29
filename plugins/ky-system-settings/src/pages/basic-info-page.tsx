@@ -89,8 +89,8 @@ export function BasicInfoPage() {
           layout="vertical"
           preserve
           onValuesChange={() => { dirty.current = true; }}
-          disabled={isFetching}
-          onFinish={(v) => saveMutation.mutate(v)}
+          disabled={isFetching || saveMutation.isPending}
+          onFinish={(v) => { if (!saveMutation.isPending) saveMutation.mutate(v); }}
           onFinishFailed={({ errorFields }) => {
             const first = errorFields[0];
             if (!first) {
