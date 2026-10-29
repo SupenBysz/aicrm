@@ -71,7 +71,7 @@ func TestBrandDatabase(t *testing.T) {
 		t.Fatal("stale update accepted", err)
 	}
 	pub, err := s.PublishBrand(ctx, "a", "actor", "", 1, 0)
-	if err != nil || pub.PublishedVersion != 1 {
+	if err != nil || pub.PublishedVersion != 1 || pub.Published.ShowAIIcon {
 		t.Fatal(pub, err)
 	}
 	if _, err = s.PublicBrandAsset(ctx, asset.ID); err != nil {
@@ -81,14 +81,44 @@ func TestBrandDatabase(t *testing.T) {
 	if err != nil || pub.PublishedVersion != 2 {
 		t.Fatal(pub, err)
 	}
+	// The suffix is versioned separately from images and survives draft reload,
+	// publication, explicit disable, rollback, and effective-brand inheritance.
+	draft.ShowAIIcon = true
+	if err = s.SaveBrandDraft(ctx, "a", "actor", 3, draft); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.AgencyBranding(ctx, "a")
+	if err != nil || !saved.Draft.ShowAIIcon {
+		t.Fatal(saved, err)
+	}
+	pub, err = s.PublishBrand(ctx, "a", "actor", "", 4, 0)
+	if err != nil || !pub.Published.ShowAIIcon || !resolveBrand(pub.Published, PlatformProfile{}).ShowAIIcon {
+		t.Fatal(pub, err)
+	}
+	draft.ShowAIIcon = false
+	if err = s.SaveBrandDraft(ctx, "a", "actor", 5, draft); err != nil {
+		t.Fatal(err)
+	}
+	pub, err = s.PublishBrand(ctx, "a", "actor", "", 6, 0)
+	if err != nil || pub.Published.ShowAIIcon {
+		t.Fatal(pub, err)
+	}
+	pub, err = s.PublishBrand(ctx, "a", "actor", "", 7, 3)
+	if err != nil || !pub.Published.ShowAIIcon {
+		t.Fatal(pub, err)
+	}
+	pub, err = s.PublishBrand(ctx, "a", "actor", "", 8, 1)
+	if err != nil || pub.Published.ShowAIIcon {
+		t.Fatal(pub, err)
+	}
 	if _, err = s.db.Exec(`DROP TABLE ky_brand_change`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.PublishBrand(ctx, "a", "actor", "", 3, 1); err == nil {
+	if _, err = s.PublishBrand(ctx, "a", "actor", "", 9, 1); err == nil {
 		t.Fatal("audit failure accepted")
 	}
 	after, err := s.AgencyBranding(ctx, "a")
-	if err != nil || after.PublishedVersion != 2 || after.Revision != 3 {
+	if err != nil || after.PublishedVersion != 6 || after.Revision != 9 {
 		t.Fatal(after, err)
 	}
 }

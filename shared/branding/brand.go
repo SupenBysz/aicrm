@@ -18,6 +18,7 @@ type BrandAsset struct {
 	Format string `json:"format"`
 }
 type Brand struct {
+	ShowAIIcon           bool       `json:"showAiIcon"`
 	WordmarkGenerated    bool       `json:"wordmarkGenerated,omitempty"`
 	IconGenerated        bool       `json:"iconGenerated,omitempty"`
 	IconText             string     `json:"iconText,omitempty"`

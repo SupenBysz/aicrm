@@ -1,7 +1,9 @@
+import { BrandLogoLockup } from "@ky/admin-core";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { requestClient } from "./remote-api";
 import { usePlatformProfile } from "./platform-profile";
 interface Brand {
+  showAiIcon?: boolean;
   iconText?: string;
   name: string;
   applicationName: string;
@@ -86,17 +88,14 @@ export function WorkspaceBrandLogo({
     );
   const url = brand?.wordmark?.url;
   return (
-    <span
-      aria-label={name}
-      style={{ display: "inline-flex", maxWidth: "100%", alignItems: "center" }}
-    >
+    <BrandLogoLockup showAIIcon={!collapsed && brand?.showAiIcon === true} maxHeight={40}>
       {url && broken !== url && !collapsed ? (
         <img
           src={url}
           alt={name}
           style={{
             maxHeight: 40,
-            maxWidth: "100%",
+            maxWidth: brand?.showAiIcon ? "calc(100% - 37px)" : "100%",
             objectFit: "contain",
             ...(brand?.wordmarkGenerated
               ? { filter: "var(--brand-generated-filter,none)" }
@@ -113,6 +112,6 @@ export function WorkspaceBrandLogo({
       ) : (
         name
       )}
-    </span>
+    </BrandLogoLockup>
   );
 }

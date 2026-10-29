@@ -12,9 +12,11 @@ import {
   Typography,
   Upload,
   Select,
+  Switch,
   message,
 } from "antd";
 import {
+  BrandLogoLockup,
   copyrightStyleOptions,
   formatCopyright,
   type CopyrightStyle,
@@ -24,6 +26,7 @@ import {
 } from "@ky/admin-core";
 // Interaction structure and image generation ported from the source product.
 interface Draft {
+  showAiIcon?: boolean;
   iconGeneratorVersion?: number;
   wordmarkGeneratorVersion?: number;
   iconText?: string;
@@ -183,7 +186,7 @@ export function AgencyBrandingDrawer({
       .then((v) => {
         if (active) {
           setData(v);
-          form.setFieldsValue(v.draft);
+          form.setFieldsValue({ ...v.draft, showAiIcon: v.draft.showAiIcon === true });
         }
       })
       .catch((e: Error) => {
@@ -255,7 +258,7 @@ export function AgencyBrandingDrawer({
       const next = await client.request<Branding>(path);
       if (!current()) return;
       setData(next);
-      form.setFieldsValue(next.draft);
+      form.setFieldsValue({ ...next.draft, showAiIcon: next.draft.showAiIcon === true });
       setDirty(false);
       if (kind !== "save")
         window.dispatchEvent(new Event("ky:agency-branding-updated"));
@@ -308,6 +311,7 @@ export function AgencyBrandingDrawer({
       if (current()) setBusy(false);
     }
   }
+  const showAiIcon = Form.useWatch("showAiIcon", form);
   const iconText = Form.useWatch("iconText", form),
     copyrightHolder = Form.useWatch("copyrightHolder", form),
     copyrightStyle = Form.useWatch("copyrightStyle", form);
@@ -565,6 +569,9 @@ export function AgencyBrandingDrawer({
             </section>
           ))}
         </div>
+        <Form.Item name="showAiIcon" label="显示 AI 图标" valuePropName="checked" initialValue={false} extra="在品牌文字右侧显示 AI 图标；保存草稿并发布后生效。">
+          <Switch checkedChildren="显示" unCheckedChildren="隐藏" />
+        </Form.Item>
         <Typography.Title level={5}>版权信息</Typography.Title>
         <Form.Item
           name="copyrightHolder"
@@ -624,7 +631,7 @@ export function AgencyBrandingDrawer({
             </span>
             <div className="agency-brand-preview-scroll">
               <div className="agency-brand-preview-header">
-                <div className="agency-brand-lockup">
+                <BrandLogoLockup className="agency-brand-lockup" showAIIcon={showAiIcon === true}>
                   {wordmarkId &&
                   (!wordmarkGenerated || name === data?.draft.name) ? (
                     <BrandAssetPreview
@@ -640,7 +647,7 @@ export function AgencyBrandingDrawer({
                       alt="自动生成的品牌文字"
                     />
                   )}
-                </div>
+                </BrandLogoLockup>
                 <div
                   className="agency-brand-preview-modes"
                   aria-label="顶部导航位置参考"

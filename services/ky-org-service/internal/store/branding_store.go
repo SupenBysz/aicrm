@@ -11,6 +11,7 @@ import (
 )
 
 type BrandDraft struct {
+	ShowAIIcon               bool   `json:"showAiIcon"`
 	IconGeneratorVersion     int    `json:"iconGeneratorVersion,omitempty"`
 	WordmarkGeneratorVersion int    `json:"wordmarkGeneratorVersion,omitempty"`
 	IconText                 string `json:"iconText"`
@@ -205,7 +206,7 @@ func (s *Store) PublishBrand(ctx context.Context, agency, actor, base string, ex
 		if wordmark.ID != "" && wordmark.Format != "png" {
 			return AgencyBranding{}, ErrValidation
 		}
-		brand = d.Brand{WordmarkGenerated: draft.WordmarkGenerated, IconGenerated: draft.IconGenerated, IconText: draft.IconText, CopyrightHolder: draft.CopyrightHolder, CopyrightStyle: draft.CopyrightStyle, AgencyID: agency, Name: draft.Name, ApplicationName: draft.ApplicationName, Icon: assetDescriptor(icon, base), Wordmark: assetDescriptor(wordmark, base)}
+		brand = d.Brand{ShowAIIcon: draft.ShowAIIcon, WordmarkGenerated: draft.WordmarkGenerated, IconGenerated: draft.IconGenerated, IconText: draft.IconText, CopyrightHolder: draft.CopyrightHolder, CopyrightStyle: draft.CopyrightStyle, AgencyID: agency, Name: draft.Name, ApplicationName: draft.ApplicationName, Icon: assetDescriptor(icon, base), Wordmark: assetDescriptor(wordmark, base)}
 	}
 	brand.Version = latest + 1
 	brand.AgencyID = agency
