@@ -217,9 +217,9 @@ a {
 .app-header-leading {
   align-items: center;
   display: flex;
-  flex: 0 0 calc(var(--admin-sidebar-width) - 32px);
+  flex: 0 0 calc(var(--admin-sidebar-width) - 44px);
   gap: 12px;
-  max-width: calc(var(--admin-sidebar-width) - 32px);
+  max-width: calc(var(--admin-sidebar-width) - 44px);
   min-width: 0;
   position: relative;
   z-index: 1;
@@ -3735,3 +3735,9 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 @media(prefers-color-scheme:dark){:root{--brand-generated-filter:brightness(0) invert(1)}}
 :root[data-admin-theme="light"]{--brand-generated-filter:none}
 :root[data-admin-theme="dark"]{--brand-generated-filter:brightness(0) invert(1)}
+
+/* Expanded branding uses the same 22px inset on both sides as the previews. */
+.app-shell:not(.app-shell--sidebar-collapsed) .app-header-leading .brand-block,
+.app-shell:not(.app-shell--sidebar-collapsed) .app-header-leading .brand-title {
+  width: 100%;
+}
