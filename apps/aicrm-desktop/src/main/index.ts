@@ -8,7 +8,7 @@ import {
   DESKTOP_APPLICATION_NAME,
   LEGACY_DESKTOP_USER_DATA_DIRECTORY
 } from "../shared/constants";
-import { createMainWindow } from "./app-window";
+import { createMainWindow, retryMainWindowConnection } from "./app-window";
 import { installApplicationMenu } from "./app-menu";
 import { registerApiIpc } from "./ipc/api-ipc";
 import { registerAiExecutorWindowIpc } from "./ipc/ai-executor-window-ipc";
@@ -90,7 +90,7 @@ app.whenReady().then(async () => {
     applicationVersion: app.getVersion()
   });
   installNetworkLogCapture();
-  installApplicationMenu();
+  installApplicationMenu(retryMainWindowConnection);
   void desktopDeviceTrustRuntime.resumeAfterStartup();
   let mainWindow = createMainWindow();
 
