@@ -59,6 +59,10 @@ export function BrandLogoLockup({ children, showAIIcon, maxHeight = 32, classNam
       const height = Math.min(maxHeight, el.clientWidth / (ratio + suffixRatio));
       el.style.setProperty("--brand-lockup-height", `${height * ink.fraction}px`);
       el.style.setProperty("--brand-ink-offset", `${height * ink.offset}px`);
+      // Keep compact logos left aligned; width-limited lockups fill the brand
+      // area and center within its symmetric insets, including subpixel slack.
+      const totalWidth = height * (ratio + suffixRatio);
+      el.style.justifyContent = totalWidth >= el.clientWidth - 1 ? "center" : "flex-start";
       image.style.height = `${height}px`;
       image.style.width = `${height * ratio}px`;
       image.style.maxWidth = "none";
