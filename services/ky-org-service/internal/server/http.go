@@ -37,6 +37,8 @@ func writeError(w http.ResponseWriter, r *http.Request, status int, code, messag
 // writeStoreError maps store sentinel errors to HTTP responses.
 func writeStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch err {
+	case store.ErrValidation:
+		writeError(w, r, http.StatusBadRequest, "validation_error", "请检查配置字段及值")
 	case store.ErrNotFound:
 		writeError(w, r, http.StatusNotFound, "not_found", "资源不存在")
 	case store.ErrConflict:

@@ -1,0 +1,7 @@
+-- psql -v org_writer=your_org_runtime_role -f this-file
+-- Existing profile privileges stay unchanged. Do not grant to other service roles.
+GRANT SELECT, INSERT ON TABLE ky_platform_profile_change TO :"org_writer";
+-- Profile table privileges already belong to Org; new columns require UPDATE
+-- only when an installation uses column-level grants instead of table-level grants.
+GRANT SELECT (copyright_style, revision), UPDATE (copyright_style, revision)
+ON ky_platform_profile TO :"org_writer";
