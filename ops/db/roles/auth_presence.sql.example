@@ -1,0 +1,2 @@
+-- Only needed when Auth uses column-level grants. Replace with the actual role.
+GRANT SELECT(last_seen_at), UPDATE(last_seen_at) ON ky_user_session TO :"auth_writer";
