@@ -1,0 +1,22 @@
+/* Portalled drawers do not inherit the desktop frame's viewport variables. */
+.organization-contribution-drawer.ant-drawer {
+  top: var(--admin-header-height, 76px);
+  bottom: 0;
+  height: auto;
+}
+body:has(.desktop-client-frame) .organization-contribution-drawer.ant-drawer {
+  bottom: var(--desktop-statusbar-height, 28px);
+}
+.organization-contribution-drawer .ant-drawer-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.organization-contribution-drawer .ant-drawer-header {
+  flex: none;
+}
+.organization-contribution-drawer .ant-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}

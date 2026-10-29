@@ -1,34 +1,672 @@
+import "./organization-drawers.css";
 import "./agency-branding-drawer.css";
-import {useEffect,useState,useRef} from "react";
-import {Alert,Button,Modal,Drawer,Form,Input,Select,Space,Typography,Upload,message} from "antd";
-import {copyrightStyleOptions,formatCopyright,drawerWidths,usePermissions,useRequestClient} from "@ky/admin-core";
-interface Draft{name:string;applicationName:string;iconText:string;copyrightHolder:string;copyrightStyle:string;iconId:string;wordmarkId:string;iconGenerated?:boolean;wordmarkGenerated?:boolean}
-interface Branding{agencyId:string;revision:number;publishedVersion:number;draft:Draft}
-const empty:Draft={name:"",applicationName:"",iconText:"",copyrightHolder:"",copyrightStyle:"",iconId:"",wordmarkId:""};
-function generate(text:string,icon:boolean){const canvas=document.createElement("canvas");canvas.width=icon?256:640;canvas.height=icon?256:128;const ctx=canvas.getContext("2d");if(!ctx)throw Error("图片生成失败");if(icon){ctx.fillStyle="#fffaf3";ctx.fillRect(0,0,256,256)}let size=icon?96:80;do{ctx.font=`700 ${size--}px sans-serif`}while(ctx.measureText(text).width>canvas.width-24&&size>8);ctx.fillStyle="#34281a";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(text,canvas.width/2,canvas.height/2);return canvas.toDataURL("image/png").split(",")[1]}
-export function AgencyBrandingDrawer({agency,onClose}:{agency:{id:string;name:string}|null;onClose:()=>void}){
- const client=useRequestClient(),perms=usePermissions(),[form]=Form.useForm<Draft>();const [data,setData]=useState<Branding|null>(null),[history,setHistory]=useState<number[]>([]),[rollback,setRollback]=useState<number>(),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false),[error,setError]=useState(""),[retry,setRetry]=useState(0),[word,setWord]=useState("");
- const path=agency?`/api/v1/platform/agencies/${encodeURIComponent(agency.id)}/branding`:"";const scope=useRef(path);scope.current=path;
- async function load(){const [v,h]=await Promise.all([client.request<Branding>(path),client.request<number[]>(path+"/history")]);if(scope.current!==path)return;setData(v);setHistory(h);form.setFieldsValue({...empty,...v.draft});setDirty(false);setError("")}
- useEffect(()=>{setData(null);setWord("");setError("");setDirty(false);setBusy(false);if(!agency)return;void load().catch((e:Error)=>{if(scope.current===path)setError(e.message)});return()=>{}},[path,retry]);
- const draft=Form.useWatch([],form) as Draft|undefined;
- useEffect(()=>{let active=true;setWord("");const id=draft?.wordmarkId;if(id&&path)void client.request<{pngBase64:string}>(path+"/assets/"+encodeURIComponent(id)).then(v=>{if(active)setWord("data:image/png;base64,"+v.pngBase64)}).catch(()=>{});return()=>{active=false}},[path,draft?.wordmarkId,client]);
- async function uploadPNG(pngBase64:string,kind:"icon"|"wordmark"){return client.request<{id:string}>(path+"/assets",{method:"POST",body:{kind,pngBase64}})}
- async function action(kind:"save"|"publish"){if(!data||busy)return;setBusy(true);try{if(kind==="save"){const next={...empty,...form.getFieldsValue(true),...await form.validateFields()};for(const k of ["icon","wordmark"] as const){const field=k==="icon"?"iconId":"wordmarkId",generated=k==="icon"?"iconGenerated":"wordmarkGenerated";const text=k==="icon"?(next.iconText.trim()||next.name.trim()):next.name.trim();if(text&&(!next[field]||next[generated])){const a=await uploadPNG(generate(text,k==="icon"),k);next[field]=a.id;next[generated]=true}}await client.request(path+"/draft",{method:"POST",body:{expectedRevision:data.revision,draft:next}})}else{if(dirty)throw Error("请先保存草稿");await client.request(path+"/publish",{method:"POST",body:{expectedRevision:data.revision,rollbackVersion:rollback??0}})}if(scope.current===path){await load();message.success(kind==="save"?"草稿已保存":"品牌已发布")}}catch(e){if(scope.current===path)setError(e instanceof Error?e.message:"请检查表单；冲突时当前输入会保留")}finally{if(scope.current===path)setBusy(false)}}
- return <Drawer open={!!agency} onClose={()=>{if(dirty)Modal.confirm({title:"放弃未保存的修改？",onOk:onClose});else onClose()}} width={drawerWidths.standardForm} title={`${agency?.name??"机构"} · 品牌`} extra={<Space>{perms.can("platform.agency_branding.update")&&<Button loading={busy} disabled={!data} onClick={()=>void action("save")}>保存草稿</Button>}{perms.can("platform.agency_branding.publish")&&<Button type="primary" loading={busy} disabled={!data||dirty} onClick={()=>void action("publish")}>{rollback?"回滚并发布":"发布"}</Button>}</Space>}>
- <Alert type="info" showIcon title="仅平台可修改；旗下企业和成员自动继承。空字段使用平台配置；图片不上传时按文字生成。"/>
- {error&&<Alert type="error" title={error} action={!data?<Button onClick={()=>setRetry(x=>x+1)}>重试</Button>:undefined}/>}
- {data&&<Typography.Paragraph>已发布版本：{data.publishedVersion||"未发布"} · {dirty?"有未保存修改":"草稿已同步"}</Typography.Paragraph>}
- <Form form={form} layout="vertical" disabled={!data||busy||!perms.can("platform.agency_branding.update")} onValuesChange={()=>setDirty(true)}>
- <Form.Item label="品牌名称" name="name" rules={[{max:40}]} extra="留空使用平台品牌"><Input/></Form.Item>
- <Form.Item label="应用显示名称" name="applicationName" rules={[{max:80}]}><Input/></Form.Item>
- <Form.Item label="图标文字" name="iconText" rules={[{max:8}]} extra="例如 Ky；可独立于品牌名称，留空取品牌名称"><Input/></Form.Item>
- <Form.Item label="版权主体" name="copyrightHolder" rules={[{max:120}]}><Input placeholder="留空继承平台"/></Form.Item>
- <Form.Item label="版权风格" name="copyrightStyle"><Select options={[{value:"",label:"继承平台"},...copyrightStyleOptions]}/></Form.Item>
- {(["icon","wordmark"] as const).map(kind=><Form.Item key={kind} label={kind==="icon"?"应用图标":"文字LOGO"} extra="PNG，最大4MB。文字LOGO建议透明背景。"><Upload showUploadList={false} accept="image/png" beforeUpload={file=>{if(file.type!=="image/png"||file.size>4*1024*1024){message.error("请选择4MB以内PNG");return false}setBusy(true);void file.arrayBuffer().then(b=>{let raw="";for(const n of new Uint8Array(b))raw+=String.fromCharCode(n);return uploadPNG(btoa(raw),kind)}).then(a=>{if(scope.current===path){form.setFieldValue(kind==="icon"?"iconId":"wordmarkId",a.id);form.setFieldValue(kind==="icon"?"iconGenerated":"wordmarkGenerated",false);setDirty(true)}}).catch(e=>setError(String(e))).finally(()=>{if(scope.current===path)setBusy(false)});return false}}><Button>上传图片</Button></Upload><Button type="link" onClick={()=>{form.setFieldValue(kind==="icon"?"iconId":"wordmarkId","");setDirty(true)}}>恢复自动生成</Button></Form.Item>)}
- </Form>
- <Typography.Title level={5}>应用LOGO预览</Typography.Title><Typography.Text type="secondary">与后台使用相同高度、宽度及背景变量；超出左侧品牌区时请缩短文字或重新上传。</Typography.Text>
- {[false,true].map(dark=><div className="brand-preview-wrap" key={String(dark)}>{dark?"深色背景":"浅色背景"}<div className={`brand-preview${dark?" dark":""}`}><span className="brand-preview-logo">{word?<img src={word} data-generated={draft?.wordmarkGenerated||undefined} alt="品牌"/>:draft?.name||"平台品牌"}</span><span className="brand-preview-mode">工作台　 管理中心</span></div></div>)}
- <Space style={{marginTop:20}}><Select allowClear placeholder="选择历史版本" value={rollback} onChange={setRollback} options={history.map(v=>({value:v,label:`版本 ${v}`}))} style={{width:180}}/><Typography.Text type="secondary">回滚创建新版本，保留历史</Typography.Text></Space>
- </Drawer>;
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  Space,
+  Typography,
+  Upload,
+  Select,
+  message,
+} from "antd";
+import {
+  copyrightStyleOptions,
+  formatCopyright,
+  type CopyrightStyle,
+  drawerWidths,
+  usePermissions,
+  useRequestClient,
+} from "@ky/admin-core";
+// Interaction structure and image generation ported from the source product.
+interface Draft {
+  iconGeneratorVersion?: number;
+  wordmarkGeneratorVersion?: number;
+  iconText?: string;
+  copyrightHolder?: string;
+  copyrightStyle?: CopyrightStyle | "";
+  name: string;
+  applicationName: string;
+  iconId: string;
+  wordmarkId: string;
+  iconGenerated?: boolean;
+  wordmarkGenerated?: boolean;
+}
+interface Branding {
+  agencyId: string;
+  revision: number;
+  publishedVersion: number;
+  draft: Draft;
+  published?: { name: string; applicationName: string };
+}
+function generatedBrandImage(name: string, kind: "icon" | "wordmark") {
+  const text = name.trim() || "KyCRM",
+    canvas = document.createElement("canvas"),
+    ctx = canvas.getContext("2d");
+  if (!ctx) throw Error("无法生成品牌图标，请重试");
+  const font = '"Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", sans-serif';
+  let size = kind === "icon" ? 96 : 160;
+  ctx.font = `700 ${size}px ${font}`;
+  if (kind === "icon") {
+    while (ctx.measureText(text).width > 208 && size > 10) {
+      size -= 2;
+      ctx.font = `700 ${size}px ${font}`;
+    }
+  }
+  if (kind === "wordmark") {
+    while (ctx.measureText(text).width > 4064 && size > 10) {
+      size -= 2;
+      ctx.font = `700 ${size}px ${font}`;
+    }
+  }
+  canvas.width =
+    kind === "icon"
+      ? 256
+      : Math.min(4096, Math.ceil(ctx.measureText(text).width + 32));
+  canvas.height = kind === "icon" ? 256 : 184;
+  if (kind === "icon") {
+    ctx.fillStyle = "#fffaf3";
+    ctx.beginPath();
+    ctx.roundRect(0, 0, 256, 256, 40);
+    ctx.fill();
+  }
+  ctx.fillStyle = "#322718";
+  ctx.font = `700 ${size}px ${font}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.transform(1, 0, Math.tan((-5 * Math.PI) / 180), 1, 0, 0);
+  ctx.fillText(text, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+// Draft assets remain authenticated. The source UI uses the public asset URL,
+// which cannot be reused for unpublished material in the target contract.
+function BrandAssetPreview({
+  path,
+  assetId,
+  className,
+  alt,
+}: {
+  path: string;
+  assetId: string;
+  className: string;
+  alt: string;
+}) {
+  const client = useRequestClient(),
+    key = path + "/assets/" + encodeURIComponent(assetId);
+  const [result, setResult] = useState<{
+      key: string;
+      src?: string;
+      error?: boolean;
+    }>(),
+    [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void client
+      .request<{ pngBase64: string }>(key)
+      .then((v) => {
+        if (active)
+          setResult({ key, src: "data:image/png;base64," + v.pngBase64 });
+      })
+      .catch(() => {
+        if (active) setResult({ key, error: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, key, retry]);
+  if (result?.key !== key) return <span role="status">加载预览…</span>;
+  if (result.error)
+    return (
+      <Button
+        type="text"
+        size="small"
+        onClick={() => {
+          setResult(undefined);
+          setRetry((x) => x + 1);
+        }}
+      >
+        重试预览
+      </Button>
+    );
+  return (
+    <img
+      className={className}
+      src={result.src}
+      alt={alt}
+      onError={() => setResult({ key, error: true })}
+    />
+  );
+}
+
+export function AgencyBrandingDrawer({
+  agency,
+  onClose,
+}: {
+  agency: { id: string; name: string } | null;
+  onClose: () => void;
+}) {
+  const client = useRequestClient(),
+    permissions = usePermissions(),
+    [form] = Form.useForm<Draft>();
+  const [data, setData] = useState<Branding | null>(null),
+    [busy, setBusy] = useState(false),
+    [dirty, setDirty] = useState(false),
+    [rollback, setRollback] = useState<number | null>(null),
+    [loadError, setLoadError] = useState(""),
+    [retry, setRetry] = useState(0);
+  const canEdit = permissions.can("platform.agency_branding.update"),
+    canPublish = permissions.can("platform.agency_branding.publish");
+  const path = agency
+    ? `/api/v1/platform/agencies/${encodeURIComponent(agency.id)}/branding`
+    : "";
+  const scope = useRef(path),
+    generation = useRef(0);
+  scope.current = path;
+  useLayoutEffect(() => {
+    let active = true;
+    ++generation.current;
+    setData(null);
+    setLoadError("");
+    setBusy(false);
+    setDirty(false);
+    setRollback(null);
+    form.resetFields();
+    if (!agency) return;
+    void client
+      .request<Branding>(path)
+      .then((v) => {
+        if (active) {
+          setData(v);
+          form.setFieldsValue(v.draft);
+        }
+      })
+      .catch((e: Error) => {
+        if (active) setLoadError(e.message);
+      });
+    return () => {
+      active = false;
+      ++generation.current;
+    };
+  }, [agency?.id, client, form, path, retry]);
+  async function action(kind: "save" | "publish" | "rollback") {
+    if (!data || busy) return;
+    const epoch = generation.current;
+    const current = () =>
+      scope.current === path && generation.current === epoch;
+    setBusy(true);
+    try {
+      if (kind === "save") {
+        const draft = await form.validateFields();
+        for (const kind of ["icon", "wordmark"] as const) {
+          const field = kind === "icon" ? "iconId" : "wordmarkId",
+            generated = kind === "icon" ? "iconGenerated" : "wordmarkGenerated";
+          if (
+            !draft[field] ||
+            (draft[generated] &&
+              ((kind === "icon"
+                ? draft.iconGeneratorVersion
+                : draft.wordmarkGeneratorVersion) !== 1 ||
+                (kind === "icon"
+                  ? (draft.iconText?.trim() || draft.name) !==
+                    (data.draft.iconText?.trim() || data.draft.name)
+                  : draft.name !== data.draft.name)))
+          ) {
+            const image = generatedBrandImage(
+              kind === "icon"
+                ? draft.iconText?.trim() || draft.name
+                : draft.name,
+              kind,
+            );
+            const asset = await client.request<{ id: string }>(
+              path + "/assets",
+              {
+                method: "POST",
+                body: { kind, pngBase64: image.split(",")[1] },
+              },
+            );
+            draft[field] = asset.id;
+            draft[generated] = true;
+            if (kind === "icon") draft.iconGeneratorVersion = 1;
+            else draft.wordmarkGeneratorVersion = 1;
+          }
+        }
+        if (!current()) return;
+        await client.request(path + "/draft", {
+          method: "POST",
+          body: { draft, expectedRevision: data.revision },
+        });
+      } else {
+        if (dirty) throw Error("请先保存草稿，再发布或回滚");
+        if (kind === "rollback" && !rollback) throw Error("请输入历史品牌版本");
+        await client.request(path + "/publish", {
+          method: "POST",
+          body: {
+            expectedRevision: data.revision,
+            rollbackVersion: kind === "rollback" ? rollback : 0,
+          },
+        });
+      }
+      const next = await client.request<Branding>(path);
+      if (!current()) return;
+      setData(next);
+      form.setFieldsValue(next.draft);
+      setDirty(false);
+      if (kind !== "save")
+        window.dispatchEvent(new Event("ky:agency-branding-updated"));
+      void message.success(
+        kind === "save" ? "草稿已保存" : "品牌已发布，客户端将在刷新后同步",
+      );
+    } catch (e) {
+      if (!current()) return;
+      const fields = (e as { errorFields?: { errors: string[] }[] })
+        ?.errorFields;
+      if (fields?.length) {
+        void message.error(fields[0].errors[0] || "请完善品牌信息");
+      } else {
+        void message.error(e instanceof Error ? e.message : "品牌操作失败");
+      }
+    } finally {
+      if (current()) setBusy(false);
+    }
+  }
+  async function upload(file: File | undefined, kind: "icon" | "wordmark") {
+    if (!file || !data || busy) return;
+    if (file.type !== "image/png" || file.size > 4 * 1024 * 1024) {
+      void message.error("请选择4MB以内的PNG图片");
+      return;
+    }
+    const epoch = generation.current;
+    const current = () =>
+      scope.current === path && generation.current === epoch;
+    setBusy(true);
+    try {
+      const bytes = await file.arrayBuffer();
+      let binary = "";
+      for (const b of new Uint8Array(bytes)) binary += String.fromCharCode(b);
+      const asset = await client.request<{ id: string }>(path + "/assets", {
+        method: "POST",
+        body: { kind, pngBase64: btoa(binary) },
+      });
+      if (!current()) return;
+      form.setFieldValue(kind === "icon" ? "iconId" : "wordmarkId", asset.id);
+      form.setFieldValue(
+        kind === "icon" ? "iconGenerated" : "wordmarkGenerated",
+        false,
+      );
+      setDirty(true);
+      void message.success("图片已上传，请保存草稿");
+    } catch (e) {
+      if (current())
+        void message.error(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      if (current()) setBusy(false);
+    }
+  }
+  const iconText = Form.useWatch("iconText", form),
+    copyrightHolder = Form.useWatch("copyrightHolder", form),
+    copyrightStyle = Form.useWatch("copyrightStyle", form);
+  const [official, setOfficial] = useState({
+    name: "KyCRM",
+    copyrightHolder: "",
+    copyrightStyle: "standard" as CopyrightStyle,
+  });
+  useEffect(() => {
+    let active = true;
+    void client
+      .request<{
+        companyName: string;
+        brandLogoTextLong: string;
+        copyrightStyle: CopyrightStyle;
+      }>("/api/v1/public/platform-profile")
+      .then((p) => {
+        if (active)
+          setOfficial({
+            name: p.brandLogoTextLong || p.companyName || "KyCRM",
+            copyrightHolder: p.companyName || p.brandLogoTextLong || "KyCRM",
+            copyrightStyle: p.copyrightStyle || "standard",
+          });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  const name = Form.useWatch("name", form),
+    iconId = Form.useWatch("iconId", form),
+    wordmarkId = Form.useWatch("wordmarkId", form),
+    iconGenerated = Form.useWatch("iconGenerated", form),
+    wordmarkGenerated = Form.useWatch("wordmarkGenerated", form);
+  const generated = useMemo(
+    () => ({
+      icon: generatedBrandImage(
+        iconText?.trim() || name || official.name,
+        "icon",
+      ),
+      wordmark: generatedBrandImage(name || official.name, "wordmark"),
+    }),
+    [name, iconText, official.name],
+  );
+  return (
+    <Drawer
+      rootClassName="organization-contribution-drawer"
+      open={Boolean(agency)}
+      title={`机构品牌 · ${agency?.name ?? ""}`}
+      width={drawerWidths.standardForm}
+      onClose={onClose}
+      extra={
+        <Space>
+          {canEdit && (
+            <Button
+              disabled={!data || busy}
+              onClick={() => void action("save")}
+            >
+              保存草稿
+            </Button>
+          )}
+          {canPublish && (
+            <Button
+              disabled={!data || !rollback || busy || dirty}
+              onClick={() => void action("rollback")}
+            >
+              回滚并发布
+            </Button>
+          )}
+          {canPublish && (
+            <Button
+              type="primary"
+              disabled={!data || busy || dirty}
+              onClick={() => void action("publish")}
+            >
+              发布
+            </Button>
+          )}
+        </Space>
+      }
+    >
+      {loadError && (
+        <Alert
+          type="error"
+          title={loadError}
+          action={<Button onClick={() => setRetry((x) => x + 1)}>重试</Button>}
+        />
+      )}
+      <Alert type="info" message="品牌仅平台可修改，旗下企业及成员自动继承。" />
+      <Typography.Paragraph style={{ marginTop: 16 }}>
+        已发布版本：{data?.publishedVersion || "未发布（使用平台品牌）"}
+        {dirty ? " · 有未保存修改" : ""}
+      </Typography.Paragraph>
+      <Form
+        form={form}
+        layout="vertical"
+        disabled={!data || !canEdit || busy}
+        onValuesChange={() => setDirty(true)}
+      >
+        <Form.Item
+          name="name"
+          label="品牌名称"
+          rules={[
+            { required: true, whitespace: true, message: "请输入品牌名称" },
+            { max: 40, message: "品牌名称不能超过40个字" },
+          ]}
+        >
+          <Input placeholder="例如：品牌名称" />
+        </Form.Item>
+        <Form.Item
+          name="applicationName"
+          label="应用显示名称"
+          rules={[
+            { required: true, whitespace: true, message: "请输入应用显示名称" },
+            { max: 80, message: "应用显示名称不能超过80个字" },
+          ]}
+        >
+          <Input placeholder="例如：品牌应用" />
+        </Form.Item>
+        <Form.Item name="iconId" hidden>
+          <Input />
+        </Form.Item>
+        <Form.Item name="wordmarkId" hidden>
+          <Input />
+        </Form.Item>
+        <Form.Item name="iconGeneratorVersion" hidden>
+          <InputNumber />
+        </Form.Item>
+        <Form.Item name="wordmarkGeneratorVersion" hidden>
+          <InputNumber />
+        </Form.Item>
+        <Form.Item name="iconGenerated" hidden>
+          <Input />
+        </Form.Item>
+        <Form.Item name="wordmarkGenerated" hidden>
+          <Input />
+        </Form.Item>
+        <Form.Item
+          name="iconText"
+          label="图标文字（可选）"
+          extra="仅用于自动生成应用图标，建议1–4个字符；留空使用品牌名称。上传图片优先，删除图片后恢复自动生成。"
+          rules={[
+            {
+              validator: (_, v) =>
+                Array.from(v || "").length <= 8
+                  ? Promise.resolve()
+                  : Promise.reject(new Error("图标文字最多8个字符")),
+            },
+          ]}
+        >
+          <Input placeholder="例如：Ky" />
+        </Form.Item>
+        <Typography.Paragraph type="secondary">
+          图片为可选项；应用图标按图标文字生成，文字LOGO按品牌名称生成。
+        </Typography.Paragraph>
+        <div className="agency-brand-uploads">
+          {(
+            [
+              {
+                kind: "icon",
+                title: "应用图标",
+                hint: "应用品牌图标素材，建议使用带背景的正方形 PNG",
+                id:
+                  iconGenerated &&
+                  (iconText?.trim() || name) !==
+                    (data?.draft.iconText?.trim() || data?.draft.name)
+                    ? ""
+                    : iconId,
+              },
+              {
+                kind: "wordmark",
+                title: "文字 LOGO",
+                hint: "用于软件左上角，上传透明 PNG，仅含品牌文字",
+                id:
+                  wordmarkGenerated && name !== data?.draft.name
+                    ? ""
+                    : wordmarkId,
+              },
+            ] as const
+          ).map((asset) => (
+            <section className="agency-brand-upload" key={asset.kind}>
+              <div className={`agency-brand-upload-image ${asset.kind}`}>
+                {asset.id ? (
+                  <BrandAssetPreview
+                    path={path}
+                    assetId={asset.id}
+                    className=""
+                    alt={`${asset.title}预览`}
+                  />
+                ) : (
+                  <img
+                    className="agency-brand-generated-thumbnail"
+                    src={generated[asset.kind]}
+                    alt={`${asset.title}自动预览`}
+                  />
+                )}
+              </div>
+              <div className="agency-brand-upload-info">
+                <Typography.Text strong>{asset.title}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {asset.hint} · 不超过 4MB
+                </Typography.Text>
+                <Space wrap>
+                  <Upload
+                    accept="image/png"
+                    showUploadList={false}
+                    disabled={!data || !canEdit || busy}
+                    beforeUpload={(file) => {
+                      void upload(file, asset.kind);
+                      return false;
+                    }}
+                  >
+                    <Button
+                      className="agency-brand-upload-button"
+                      type="text"
+                      loading={busy}
+                      disabled={!data || !canEdit || busy}
+                    >
+                      {asset.id ? "更换图片" : "上传图片"}
+                    </Button>
+                  </Upload>
+                  {asset.id && (
+                    <Button
+                      type="text"
+                      danger
+                      className="agency-brand-upload-button"
+                      disabled={!data || !canEdit || busy}
+                      onClick={() => {
+                        form.setFieldValue(
+                          asset.kind === "icon" ? "iconId" : "wordmarkId",
+                          "",
+                        );
+                        form.setFieldValue(
+                          asset.kind === "icon"
+                            ? "iconGenerated"
+                            : "wordmarkGenerated",
+                          true,
+                        );
+                        setDirty(true);
+                      }}
+                    >
+                      删除
+                    </Button>
+                  )}
+                </Space>
+                {asset.kind === "wordmark" && (
+                  <Typography.Text
+                    type="secondary"
+                    className="agency-brand-preview-note"
+                  >
+                    左侧底色和圆角边框仅用于预览，不会加入文字 LOGO 图片。
+                  </Typography.Text>
+                )}
+              </div>
+            </section>
+          ))}
+        </div>
+        <Typography.Title level={5}>版权信息</Typography.Title>
+        <Form.Item
+          name="copyrightHolder"
+          label="版权署名（可选）"
+          extra={`留空使用平台版权署名：${official.copyrightHolder}`}
+          rules={[
+            {
+              validator: (_, v) =>
+                v?.includes("©")
+                  ? Promise.reject(
+                      new Error("只需填写版权主体名称，不含©或年份"),
+                    )
+                  : Promise.resolve(),
+            },
+            {
+              validator: (_, v) =>
+                Array.from(v || "").length <= 120
+                  ? Promise.resolve()
+                  : Promise.reject(new Error("版权署名最多120个字符")),
+            },
+          ]}
+        >
+          <Input placeholder="填写主体名称，不含©或年份" />
+        </Form.Item>
+        <Form.Item name="copyrightStyle" label="版权显示风格" initialValue="">
+          <Select
+            options={[
+              {
+                value: "",
+                label: `跟随平台（${copyrightStyleOptions.find((o) => o.value === official.copyrightStyle)?.label}）`,
+              },
+              ...copyrightStyleOptions,
+            ]}
+          />
+        </Form.Item>
+        <Typography.Paragraph type="secondary">
+          预览，发布后生效：
+          {formatCopyright(
+            copyrightHolder?.trim() || official.copyrightHolder,
+            copyrightStyle || official.copyrightStyle,
+          )}
+        </Typography.Paragraph>
+      </Form>
+      <section className="agency-brand-previews">
+        <Typography.Text strong>应用 LOGO 预览</Typography.Text>
+        <Typography.Paragraph type="secondary">
+          按后台顶部实际尺寸展示，LOGO
+          应位于左侧品牌区；窄屏可横向查看完整效果。
+        </Typography.Paragraph>
+        {[false, true].map((dark) => (
+          <div
+            key={String(dark)}
+            className={`agency-brand-preview ${dark ? "dark" : "light"}`}
+          >
+            <span className="agency-brand-preview-label">
+              {dark ? "深色背景" : "浅色背景"}
+            </span>
+            <div className="agency-brand-preview-scroll">
+              <div className="agency-brand-preview-header">
+                <div className="agency-brand-lockup">
+                  {wordmarkId &&
+                  (!wordmarkGenerated || name === data?.draft.name) ? (
+                    <BrandAssetPreview
+                      path={path}
+                      assetId={wordmarkId}
+                      className={`agency-brand-wordmark${wordmarkGenerated ? " generated" : ""}`}
+                      alt="品牌文字"
+                    />
+                  ) : (
+                    <img
+                      className="agency-brand-wordmark generated"
+                      src={generated.wordmark}
+                      alt="自动生成的品牌文字"
+                    />
+                  )}
+                </div>
+                <div
+                  className="agency-brand-preview-modes"
+                  aria-label="顶部导航位置参考"
+                >
+                  <span>工作台</span>
+                  <span>管理中心</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </section>
+      {canPublish && (
+        <Space style={{ marginTop: 24 }}>
+          <InputNumber
+            min={1}
+            max={data?.publishedVersion}
+            value={rollback}
+            onChange={setRollback}
+            placeholder="历史版本"
+          />
+          <Typography.Text type="secondary">
+            选择历史版本后，使用顶部“回滚并发布”
+          </Typography.Text>
+        </Space>
+      )}
+    </Drawer>
+  );
 }
