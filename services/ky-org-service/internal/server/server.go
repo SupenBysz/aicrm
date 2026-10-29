@@ -61,6 +61,15 @@ func (s *Server) Run(ctx context.Context) error {
 	perms := func(codes ...string) []string { return codes }
 	const orgWs = "agency,enterprise"
 
+	mux.HandleFunc("GET /api/v1/public/brand-assets/{assetId}", s.publicBrandAsset)
+	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding", s.ws("platform", perms("platform.agency_branding.view"), s.getAgencyBrand))
+	mux.HandleFunc("POST /api/v1/platform/agencies/{id}/branding/draft", s.ws("platform", perms("platform.agency_branding.update"), s.saveAgencyBrand))
+	mux.HandleFunc("POST /api/v1/platform/agencies/{id}/branding/assets", s.ws("platform", perms("platform.agency_branding.update"), s.uploadBrandAsset))
+	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding/assets/{assetId}", s.ws("platform", perms("platform.agency_branding.view"), s.draftBrandAsset))
+	mux.HandleFunc("POST /api/v1/platform/agencies/{id}/branding/publish", s.ws("platform", perms("platform.agency_branding.publish"), s.publishAgencyBrand))
+	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding/history", s.ws("platform", perms("platform.agency_branding.view"), s.brandHistory))
+	mux.HandleFunc("GET /api/v1/organizations/current/branding", s.ws(orgWs, nil, s.currentWorkspaceBrand))
+
 	// Platform agencies
 	mux.HandleFunc("GET /api/v1/platform/plugin-management/service-health", s.pluginServiceHealth)
 

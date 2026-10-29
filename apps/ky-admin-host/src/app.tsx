@@ -1,3 +1,4 @@
+import {WorkspaceBrandLogo} from "./workspace-brand-logo";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ApartmentOutlined,
@@ -981,7 +982,7 @@ function WorkspaceLayout() {
                     className="brand-title"
                     style={effectiveSidebarCollapsed ? platformProfile.logoTextShortStyle : platformProfile.logoTextLongStyle}
                   >
-                    {workspaceBackendTitle(currentWorkspace, platformProfile, effectiveSidebarCollapsed ? "short" : "full")}
+                    {<WorkspaceBrandLogo workspace={currentWorkspace} collapsed={effectiveSidebarCollapsed}/>}
                   </Typography.Text>
                 </div>
               </div>

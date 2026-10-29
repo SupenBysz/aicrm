@@ -1,0 +1,24 @@
+/* Shared palette for the real admin shell and its light/dark brand previews. */
+:root {
+ --admin-header-height:76px;
+ --admin-sidebar-width:177px;
+ --admin-header-curve:40px;
+  --admin-shell-light-base: #f7efe4;
+  --admin-shell-light-nav: rgba(255, 252, 247, 0.98);
+  --admin-shell-light-right: rgba(247, 239, 228, 0.92);
+  --admin-shell-light-divider: rgba(210, 168, 95, 0.18);
+  --admin-shell-light-toolbar: rgba(212, 154, 61, 0.16);
+  --admin-shell-light-toolbar-text: rgba(82, 61, 34, 0.8);
+  --admin-shell-light-toolbar-border: rgba(221, 182, 113, 0.24);
+  --admin-shell-light-selected: rgba(255, 252, 247, 0.98);
+  --admin-shell-light-selected-text: #7a541b;
+  --admin-shell-dark-base: #050505;
+  --admin-shell-dark-nav: #050505;
+  --admin-shell-dark-right: rgba(39, 38, 37, 0.6);
+  --admin-shell-dark-divider: rgba(255, 212, 125, 0.12);
+  --admin-shell-dark-toolbar: rgba(255, 255, 255, 0.06);
+  --admin-shell-dark-toolbar-text: rgba(255, 255, 255, 0.72);
+  --admin-shell-dark-toolbar-border: rgba(255, 212, 125, 0.16);
+  --admin-shell-dark-selected: rgba(255, 255, 255, 0.14);
+  --admin-shell-dark-selected-text: #ffd47d;
+}

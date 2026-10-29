@@ -1,3 +1,4 @@
+import {AgencyBrandingDrawer} from "../components/agency-branding-drawer";
 import { useEffect, useMemo, useState } from "react";
 import {
   Button,
@@ -64,6 +65,7 @@ export function AgenciesPage() {
     keyword: queryState.keyword ?? "",
     status: queryState.status
   });
+  const [branding,setBranding]=useState<Agency|null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Agency | null>(null);
   const [detail, setDetail] = useState<Agency | null>(null);
@@ -252,6 +254,7 @@ export function AgenciesPage() {
             <Button size="small" type="link" onClick={() => setDetail(record)}>
               详情
             </Button>
+            {permissions.can("platform.agency_branding.view")&&<Button size="small" type="link" onClick={()=>setBranding(record)}>品牌</Button>}
             {canUpdate ? (
               <Button size="small" type="link" onClick={() => openEdit(record)}>
                 编辑
@@ -283,11 +286,12 @@ export function AgenciesPage() {
         )
       }
     ],
-    [canUpdate, canDisable, statusMutation]
+    [canUpdate, canDisable, statusMutation, permissions]
   );
 
   return (
     <>
+ <AgencyBrandingDrawer agency={branding} onClose={()=>setBranding(null)}/>
       <ListPageCard
         title="机构管理"
         subtitle={

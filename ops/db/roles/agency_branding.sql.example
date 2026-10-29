@@ -1,0 +1,6 @@
+-- psql -v org_writer=actual_org_role
+GRANT SELECT,INSERT,UPDATE ON ky_agency_branding TO :"org_writer";
+GRANT SELECT,INSERT ON ky_agency_branding_release,ky_brand_asset,ky_brand_change TO :"org_writer";
+GRANT UPDATE(published_at) ON ky_brand_asset TO :"org_writer";
+GRANT USAGE ON SEQUENCE ky_brand_change_id_seq TO :"org_writer";
+-- Other services consume controlled Org API; no table grants for them.
