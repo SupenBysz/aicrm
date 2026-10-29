@@ -43,3 +43,9 @@
 .agency-brand-upload .ant-typography.ant-typography-secondary{color:#796d5d}
 .agency-brand-upload .agency-brand-upload-button.ant-btn{color:#81571f}
 .agency-brand-upload .agency-brand-upload-button.ant-btn-dangerous{color:#c43c3c}
+
+/* Reserve room for the optional suffix inside the real sidebar brand area. */
+.agency-brand-preview-header .agency-brand-lockup{max-width:calc(var(--admin-sidebar-width,177px) - 44px)}
+.agency-brand-preview-header .agency-brand-wordmark{min-width:0;max-width:100%;flex-shrink:1}
+
+.agency-brand-preview-header .agency-brand-lockup{width:calc(var(--admin-sidebar-width,177px) - 44px);gap:0}
