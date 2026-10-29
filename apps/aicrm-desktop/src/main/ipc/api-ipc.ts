@@ -1,3 +1,4 @@
+import {isAnyHostScreenLocked} from "../host-screen-lock";
 import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { IPC_CHANNELS } from "../../shared/constants";
 import type { ApiEnvelope, DesktopApiRequest, DesktopApiResponse } from "../../shared/types";
@@ -19,6 +20,7 @@ function parseEnvelope(text: string): ApiEnvelope<unknown> {
 
 export function registerApiIpc() {
   ipcMain.handle(IPC_CHANNELS.apiRequest, async (_event, request: DesktopApiRequest): Promise<DesktopApiResponse> => {
+    if(isAnyHostScreenLocked()&&request.path!=="/api/v1/auth/logout")return {ok:false,status:423,envelope:{error:{code:"screen_locked",message:"屏幕已锁定"}}};
     const response = await fetch(apiUrl(request.path), {
       method: request.method ?? "GET",
       headers: {

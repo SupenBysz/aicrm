@@ -1,5 +1,6 @@
+import {localCredentialStorage as safeStorage,localCredentialRoot} from "./local-credential-storage";
 import path from "node:path";
-import { app, safeStorage } from "electron";
+import { app } from "electron";
 import { DESKTOP_APPLICATION_NAME } from "../shared/constants";
 import { loadDesktopConfig } from "./config";
 import { DesktopDeviceHeartbeatClient } from "./desktop-device-heartbeat-client";
@@ -62,14 +63,14 @@ class StartupFencedHeartbeatClient {
 /** Owns the one signer, request lane and encrypted journal used by Main. */
 export function getDesktopDeviceTrustMainServices(): DesktopDeviceTrustMainServices {
   if (trustServices) return trustServices;
-  const userDataRoot = app.getPath("userData");
+  const userDataRoot = localCredentialRoot();
   const root = path.join(userDataRoot, "desktop-device-identity");
   const requestJournal = new DesktopDeviceRequestJournalStore({
     root: path.join(userDataRoot, "desktop-device-request-journal"),
     safeStorage
   });
   const requestLane = new DesktopDeviceRequestLane();
-  // Electron safeStorage is not a supported bootstrap dependency before the
+  // File-backed credential initialization waits until the
   // app ready boundary. Start journal recovery only after that boundary, but
   // keep every heartbeat/binding call waiting on the same one-shot promise.
   const requestFenceReady = app.whenReady().then(() =>

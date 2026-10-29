@@ -87,6 +87,18 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Access API — permissions catalog
 	mux.HandleFunc("GET /api/v1/permissions", s.ws(allWs, perms("platform.permissions.view", "agency.permissions.view", "enterprise.permissions.view"), s.listPermissions))
+	// Generic menu directory: management mutations are platform-authorized; the
+	// runtime projection is workspace-scoped and checks the menu permission key.
+	mux.HandleFunc("GET /api/v1/menu-directory/{directoryType}", s.ws(allWs, perms("platform.menu_catalog.view", "platform.menu_catalog.manage"), s.listMenuDirectory))
+	mux.HandleFunc("GET /api/v1/menu-directory/{directoryType}/visible", s.ws(allWs, nil, s.listVisibleMenuDirectory))
+	mux.HandleFunc("GET /api/v1/menu-directory/{directoryType}/assignable", s.ws(allWs, perms("platform.roles.view", "agency.roles.view", "enterprise.roles.view", "platform.permissions.view", "agency.permissions.view", "enterprise.permissions.view"), s.listAssignableMenuDirectory))
+	mux.HandleFunc("PUT /api/v1/menu-directory/{directoryType}/{menuKey}", s.ws("platform", perms("platform.menu_catalog.manage"), s.saveMenuDirectoryEntry))
+	mux.HandleFunc("PATCH /api/v1/menu-directory/{directoryType}/{menuKey}/status", s.ws("platform", perms("platform.menu_catalog.manage"), s.setMenuDirectoryStatus))
+	mux.HandleFunc("GET /api/v1/menu-webviews/{directoryType}/{menuKey}/resolve", s.ws(allWs, nil, s.resolveMenuWebView))
+	mux.HandleFunc("GET /api/v1/menu-webviews/{directoryType}/{menuKey}/config", s.ws(allWs, perms("platform.menu_catalog.view", "platform.menu_catalog.manage"), s.getMenuWebViewConfig))
+	mux.HandleFunc("GET /api/v1/menu-webviews/{directoryType}/{menuKey}/editor", s.ws(allWs, perms("platform.menu_catalog.view", "platform.menu_catalog.manage"), s.getMenuConfigEditor))
+	mux.HandleFunc("DELETE /api/v1/menu-webviews/{directoryType}/{menuKey}/override", s.ws(allWs, perms("platform.menu_catalog.manage"), s.resetMenuWorkspaceConfig))
+	mux.HandleFunc("PUT /api/v1/menu-webviews/{directoryType}/{menuKey}/config", s.ws(allWs, perms("platform.menu_catalog.manage"), s.saveMenuWebViewConfig))
 
 	// Access API — memberships authorization
 	mux.HandleFunc("POST /api/v1/memberships/{id}/roles", s.ws(allWs, perms("platform.roles.assign", "agency.roles.assign", "enterprise.roles.assign"), s.assignMembershipRoles))

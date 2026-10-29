@@ -68,4 +68,11 @@ if KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.s
   fail "modified legacy 052 with transaction control was accepted"
 fi
 
+rm "$fixture_root/ops/db/052_plugin_management_permissions.sql"
+cp "$ROOT_DIR/ops/db/107_menu_directory_and_webview_config.sql" "$fixture_root/ops/db/107_menu_directory_and_webview_config.sql"
+KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null || fail "original contributor 107 was rejected"
+printf '\n-- changed contributor migration\n' >>"$fixture_root/ops/db/107_menu_directory_and_webview_config.sql"
+if KY_DATABASE_DEPLOY_RENDER_SQL=1 bash "$fixture_root/scripts/deploy_database.sh" >/dev/null 2>&1; then
+ fail "modified wrapped 107 was accepted"
+fi
 echo "deploy database tests passed"

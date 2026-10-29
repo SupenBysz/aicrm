@@ -11,5 +11,5 @@ void bridge.registerUi({uiApiVersion:'1.0.0',slots:['statusBar.right']}).then(s=
 return()=>{live=false;off();void bridge.unregisterUi().catch(()=>{});};},[]);
 useEffect(()=>{if(snapshot?.confirmation)void getDesktopBridge()?.desktopPlugins?.ackRendered(snapshot.confirmation).catch(()=>{});},[snapshot]);
 if(!snapshot?.items.length)return <ClientVersion/>;
-return <>{snapshot.items.map(item=>item.type==='button'?<button className="desktop-plugin-item" key={item.id} title={item.title} onClick={()=>void getDesktopBridge()?.desktopPlugins?.action({actionId:item.actionId!,activeRevision:snapshot.activeRevision}).catch(()=>{})}>{item.text}</button>:<span className="desktop-plugin-item" key={item.id} title={item.title}>{item.text}</span>)}</>;
+return <><ClientVersion/>{snapshot.items.map(item=>item.type==='button'?<button className="desktop-plugin-item" key={item.id} title={item.title} onClick={()=>void getDesktopBridge()?.desktopPlugins?.action({actionId:item.actionId!,activeRevision:snapshot.activeRevision}).catch(()=>{})}>{item.text}</button>:<span className="desktop-plugin-item" key={item.id} title={item.title}>{item.text}</span>)}</>;
 }

@@ -20,6 +20,7 @@
     "@ky/plugin-matrix-account": "workspace:*",
     "@ky/plugin-notification": "workspace:*",
     "@ky/plugin-organization-management": "workspace:*",
+    "@ky/plugin-script-management": "workspace:*",
     "@ky/plugin-system-settings": "workspace:*",
     "@tabler/icons-react": "^3.44.0",
     "@tanstack/react-query": "^5.101.2",
@@ -28,13 +29,13 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
-    "zustand": "^5.0.14",
-    "@ky/plugin-script-management": "workspace:*"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "react-test-renderer": "19.2.7",
     "typescript": "^6.0.3",
     "vite": "^8.1.3"
   }

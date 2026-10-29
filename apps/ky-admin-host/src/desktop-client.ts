@@ -17,9 +17,12 @@ const DESKTOP_CLIENT_NAME = "aicrm-desktop";
 
 export interface DesktopBridgeLike {
   desktopPlugins?: import("../../aicrm-desktop/src/shared/types").DesktopPluginsBridge;
+  session?:{load:()=>Promise<{token:string;expiresAt:string}|null>;save?:(session:{token:string;expiresAt:string})=>Promise<boolean>;clear?:()=>Promise<boolean>};
+  hostOverlay?: import("../../aicrm-desktop/src/shared/host-overlay").HostOverlayBridge;
   app?: {
     getVersion?: () => Promise<string>;
     getConfig?: () => Promise<{ debugMode?: boolean }>;
+    openVersionDialog?: (anchor?:{x:number;y:number;width:number;height:number}) => Promise<boolean>;
   };
   window?: {
     setAppearance?: (value: {themeId: string; dark: boolean}) => Promise<boolean>;
@@ -34,6 +37,7 @@ export interface DesktopBridgeLike {
     clear?: () => Promise<DesktopNetworkLogSnapshot>;
   };
   matrixAccount?: MatrixAccountDesktopBridgeContract;
+  menuWebView?: import("../../aicrm-desktop/src/shared/types").MenuWebViewDesktopBridge;
   desktopDevice?: {
     ensureRegistration?: () => Promise<
       DesktopCommandResult<AiExecutorDesktopRegistrationProjection>

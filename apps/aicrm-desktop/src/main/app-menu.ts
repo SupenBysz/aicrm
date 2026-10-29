@@ -1,11 +1,10 @@
 import { DESKTOP_APPLICATION_VERSION } from "../shared/constants";
 import { getPluginHost } from "./desktop-plugin-host/host";
-import { loadDesktopConfig } from "./config";
-import { BrowserWindow, dialog } from "electron";
+import { dialog } from "electron";
 import { Menu, app } from "electron";
 import { isDesktopDebugMode } from "./runtime-mode";
 
-export function installApplicationMenu() {
+export function installApplicationMenu(retryConnection: () => boolean = () => false) {
   const viewSubmenu: Electron.MenuItemConstructorOptions[] = [
     { role: "reload", label: "重新加载" },
     ...(isDesktopDebugMode() ? [{ role: "toggleDevTools" as const, label: "开发者工具" }] : []),
@@ -13,6 +12,8 @@ export function installApplicationMenu() {
     { role: "resetZoom", label: "实际大小" },
     { role: "zoomIn", label: "放大" },
     { role: "zoomOut", label: "缩小" },
+    { type: "separator" },
+    { label: "重试后台连接", click: () => { retryConnection(); } },
     { type: "separator" },
     { role: "togglefullscreen", label: "全屏" }
   ];
@@ -46,8 +47,7 @@ export function installApplicationMenu() {
     { label: "回滚插件", click: () => { void getPluginHost()?.rollback().catch(() => console.info("插件回滚失败")); } },
     { label: "故障验收暂停点", submenu: ["verified","activating","probation","stable"].map(phase => ({label:phase,click:()=>{const h=getPluginHost();if(h)h.pauseAt=phase;}})) },
     { label: "继续验收暂停点", click:()=>getPluginHost()?.resumeCheckpoint?.() },
-    { label: "验收：终止候选渲染进程", click:()=>{const h=getPluginHost();if(h?.candidate&&!h.candidate.win.isDestroyed())h.candidate.win.webContents.forcefullyCrashRenderer();} },
-    { label: "重试后台连接", click: () => { const w=BrowserWindow.getFocusedWindow(); if(w&&!getPluginHost()?.instances.has(w.webContents))void w.loadURL(loadDesktopConfig().webUrl); } }
+    { label: "验收：终止候选渲染进程", click:()=>{const h=getPluginHost();if(h?.candidate&&!h.candidate.win.isDestroyed())h.candidate.win.webContents.forcefullyCrashRenderer();} }
   ] });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

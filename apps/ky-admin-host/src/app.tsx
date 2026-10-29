@@ -1,9 +1,11 @@
+import {syncDesktopSession} from "./desktop-session-sync";
+import builtinMenuCatalog from "../../../shared/menucatalog/builtin.json";
 import { AppearanceProvider } from "./appearance-provider";
 import { PersonalPreferencesDrawer } from "./personal-preferences-drawer";
 import { useAppearance, appearanceAntdTheme } from "@ky/admin-core";
 import {WorkspaceBrandLogo} from "./workspace-brand-logo";
 import {Presence} from "./presence";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ApartmentOutlined,
   ApiOutlined,
@@ -31,6 +33,7 @@ import {
   StarOutlined,
   SwapOutlined,
   TeamOutlined,
+  TikTokOutlined,
   UserOutlined,
   UsergroupAddOutlined
 } from "@ant-design/icons";
@@ -48,6 +51,7 @@ import {
 } from "@tabler/icons-react";
 import {
   App as AntdApp,
+  Alert,
   Badge,
   Breadcrumb,
   Button,
@@ -68,7 +72,7 @@ import {
   Tooltip,
   Typography
 } from "antd";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   Navigate,
   Outlet,
@@ -77,6 +81,8 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useNavigationType,
+  useOutlet,
   useParams
 } from "react-router-dom";
 import {
@@ -117,6 +123,24 @@ import {
 } from "./desktop-client";
 import { useTableHorizontalScrollbars } from "./table-horizontal-scrollbar";
 import { createPluginInventoryPort } from "./plugin-inventory";
+import { MenuWebViewPage } from "./pages/menu-webview-page";
+import { WorkspaceAreaRoutePane } from "./workspace-area-route-pane";
+import {
+  activateWorkspaceAreaScroll,
+  createWorkspaceAreaScrollMemory,
+  createWorkspaceAreaRouteCache,
+  rememberWorkspaceAreaScroll,
+  rememberWorkspaceAreaRoute,
+  selectWorkspaceAreaRoute,
+  workspaceAreaLocationKey,
+  type WorkspaceArea,
+  type WorkspaceAreaRouteSnapshot
+} from "./workspace-area-route-cache";
+import {
+  buildMenuNavigation,
+  normalizeMenuIconName,
+  type MenuNavigationDirectoryRow
+} from "./menu-navigation-model";
 
 const HEADER_HEIGHT = 76;
 const SIDEBAR_WIDTH = 177;
@@ -184,8 +208,53 @@ interface NavGroupMeta {
   items: NavMeta[];
 }
 
+type VisibleMenuItem = MenuNavigationDirectoryRow;
+
+function visibleWebViewGroups(
+  directoryType: "management" | "workbench",
+  items: VisibleMenuItem[],
+  ancestors: VisibleMenuItem[],
+  workspaceType: string,
+  workspacePath: (path: string) => string
+) {
+  const navigation = buildMenuNavigation({
+    candidates: items.filter(row=>row.pageType === "internal").flatMap(row=>{
+      const registered = builtinMenuCatalog.entries.find(entry=>entry.directoryType===directoryType && entry.routeKey===row.routeKey && entry.nodeType==="leaf");
+      return registered?.routePath ? [{key:row.menuKey, menuKey:row.menuKey,label:row.name,iconName:row.icon,target:workspacePath(registered.routePath),sortOrder:row.sortOrder,groupSortOrder:0}] : [];
+    }),
+    directory: [...items, ...ancestors],
+    workspaceType,
+    fallbackGroupLabel: directoryType === "workbench" ? WORKBENCH_LABEL : MANAGEMENT_CENTER_LABEL,
+    fallbackGroupIconName: (_label, fallback) => normalizeMenuIconName(fallback),
+    targetForWebView: (menuKey) => workspacePath(`/menu-pages/${directoryType}/${encodeURIComponent(menuKey)}`),
+    authoritative: true,
+    allowDynamicWebView: (row) => (row.usageScope!=="client_only" || Boolean(getDesktopBridge()?.menuWebView)) && (row.status === undefined || row.status === "active")
+      && (!row.workspaceTypes || row.workspaceTypes.includes(workspaceType))
+  });
+  const toNavMeta = (item: (typeof navigation.standalone)[number]): NavMeta => ({
+    key: `server:${directoryType}:${item.menuKey}`,
+    icon: menuIcon(item.iconName),
+    label: item.label,
+    target: item.target,
+    groupLabel: item.groupLabel
+  });
+  interface NavTree {key:string;label:string;icon:ReactNode;children?:NavTree[]}
+  const toTree = (node: (typeof navigation.tree)[number]): NavTree => ({key:node.item ? `server:${directoryType}:${node.item.menuKey}` : `server:${directoryType}:${node.key}`,label:node.label,icon:menuIcon(node.iconName),...(node.children ? {children:node.children.map(toTree)} : {})});
+  return {
+    tree: navigation.tree.map(toTree),
+    standalone: navigation.standalone.map(toNavMeta),
+    groups: navigation.groups.map((group) => ({
+      key: `server:${directoryType}:${group.key}`,
+      label: group.label,
+      icon: menuIcon(group.iconName),
+      items: group.items.map(toNavMeta)
+    }))
+  };
+}
+
 function menuIcon(name?: string): ReactNode {
-  return (name && MENU_ICONS[name]) || <AppstoreOutlined />;
+  const normalized = normalizeMenuIconName(name);
+  return MENU_ICONS[normalized] || (normalized === "TikTokOutlined" ? <TikTokOutlined /> : null) || <AppstoreOutlined />;
 }
 
 function menuGroupIcon(label: string, fallback?: ReactNode): ReactNode {
@@ -206,7 +275,8 @@ function setAdminLocked(locked: boolean): void {
   }
 }
 
-export function App() { return <AppearanceProvider><ThemedApp /></AppearanceProvider>; }
+function DesktopSessionSync(){useEffect(()=>{const sync=()=>{void syncDesktopSession().catch(()=>{});};sync();window.addEventListener("ky:session-changed",sync);return()=>window.removeEventListener("ky:session-changed",sync);},[]);return null;}
+export function App() { return <AppearanceProvider><DesktopSessionSync/><ThemedApp /></AppearanceProvider>; }
 
 function ThemedApp() {
  const appearance=useAppearance();
@@ -254,6 +324,7 @@ function ThemedApp() {
                   <Route index element={<Navigate to="workbench" replace />} />
                   <Route path="workbench" element={<WorkbenchPage />} />
                   <Route path="workbench/:section" element={<WorkbenchPage />} />
+                  <Route path="menu-pages/:directoryType/:menuKey" element={<MenuWebViewPage />} />
                   {pluginRoutes.map((route) => (
                     <Route
                       key={route.path}
@@ -345,9 +416,32 @@ interface ChangePasswordFormValues {
   confirmPassword: string;
 }
 
+function workspaceAreaScopeKey(userId: string, workspace: WorkspaceIdentity): string {
+  return JSON.stringify({
+    userId,
+    workspaceType: workspace.type,
+    workspaceId: workspace.id,
+    membershipId: workspace.membershipId,
+    roles: [...workspace.roles].sort(),
+    permissions: [...workspace.permissions].sort(),
+    actionPermissions: [...workspace.actionPermissions].sort(),
+    menuKeys: [...workspace.menuKeys].sort(),
+    dataScopes: [...workspace.dataScopes]
+      .map((scope) => ({
+        ...scope,
+        teamIds: [...(scope.teamIds ?? [])].sort(),
+        agencyIds: [...(scope.agencyIds ?? [])].sort(),
+        enterpriseIds: [...(scope.enterpriseIds ?? [])].sort()
+      }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  });
+}
+
 function WorkspaceLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
+  const nestedOutlet = useOutlet();
   const params = useParams();
   const platformProfile = usePlatformProfile();
   const { message } = AntdApp.useApp();
@@ -371,6 +465,9 @@ function WorkspaceLayout() {
   const [networkLogOpen, setNetworkLogOpen] = useState(false);
   const [networkLogSnapshot, setNetworkLogSnapshot] = useState<DesktopNetworkLogSnapshot | null>(null);
   const [networkLogLoading, setNetworkLogLoading] = useState(false);
+  const [areaRouteCache, setAreaRouteCache] = useState(() => createWorkspaceAreaRouteCache<ReactNode>(""));
+  const appContentRef = useRef<HTMLDivElement | null>(null);
+  const areaScrollMemoryRef = useRef(createWorkspaceAreaScrollMemory("", "manage"));
   const [locked, setLocked] = useState(() => isAdminLocked());
   const [webFullscreen, setWebFullscreen] = useState(() => {
     if (typeof document === "undefined") return false;
@@ -381,6 +478,7 @@ function WorkspaceLayout() {
   const [unlocking, setUnlocking] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [passwordDrawerOpen, setPasswordDrawerOpen] = useState(false);
+  const [passwordError,setPasswordError]=useState("");
   const [passwordChanging, setPasswordChanging] = useState(false);
   const [passwordForm] = Form.useForm<ChangePasswordFormValues>();
   const navScrollRef = useRef<HTMLDivElement | null>(null);
@@ -434,6 +532,45 @@ function WorkspaceLayout() {
   const workspaces = bootstrapState?.workspaces ?? [];
   const user = bootstrapState?.user ?? null;
   useEffect(()=>{setPreferencesOpen(false);setUserMenuOpen(false);},[params.workspaceType,params.workspaceId,user?.id,locked]);
+  const nativeOverlay=desktopBridge?.hostOverlay;
+  const appearanceProjection=JSON.stringify({origin:appearance.origin,syncState:appearance.syncState,canReload:appearance.canReload,enabled:appearance.enabled,preference:appearance.preference,platform:appearance.platform,themeId:appearance.themeId,mode:appearance.mode,dark:appearance.dark,status:appearance.status,dirty:appearance.dirty,loading:appearance.loading,
+    username:user?.username||user?.displayName||"当前用户",displayName:user?.displayName||"",passwordChanging,passwordError,unlockError,unlocking,
+    workspaces:workspaces.map(item=>({id:item.id,type:item.type,name:item.name,roles:item.roles.map(role=>role.name),current:item.id===params.workspaceId&&item.type===params.workspaceType})),
+    network:{loading:networkLogLoading,entries:(networkLogSnapshot?.entries??[]).slice(0,50).map(item=>({id:item.id,method:item.method,url:(()=>{try{const url=new URL(item.url);return `${url.origin}${url.pathname}`;}catch{return "无效地址";}})(),statusCode:item.statusCode,status:item.status,durationMs:item.durationMs}))}
+  });
+  const nativeOverlayKind=locked?"lock":passwordDrawerOpen?"password":switcherOpen?"workspaces":networkLogOpen?"network":preferencesOpen?"preferences":userMenuOpen?"user":null;
+  useEffect(()=>{
+    if(!nativeOverlay)return;
+    if(!nativeOverlayKind){void nativeOverlay.close();return;}
+    let disposed=false;
+    const project=()=>{
+      const top=document.querySelector(".app-header")?.getBoundingClientRect().bottom??0;
+      const footer=document.querySelector(".desktop-status-bar")?.getBoundingClientRect();
+      void syncDesktopSession().then(()=>{if(disposed)return true;return nativeOverlay.show({kind:nativeOverlayKind,projection:JSON.parse(appearanceProjection),top:nativeOverlayKind==="lock"?0:top,bottom:nativeOverlayKind==="lock"?0:footer?Math.max(0,window.innerHeight-footer.top):0});}).then(ok=>{if(!ok&&!disposed){setPreferencesOpen(false);setPasswordDrawerOpen(false);setSwitcherOpen(false);setNetworkLogOpen(false);setUserMenuOpen(false);void message.error("原生浮层初始化失败，请重试。");}}).catch(()=>{if(!disposed)void message.error("桌面会话同步失败，请重新登录后重试。");});
+    };
+    project();window.addEventListener("resize",project);
+    return()=>{disposed=true;window.removeEventListener("resize",project);};
+  },[nativeOverlay,nativeOverlayKind,appearanceProjection]);
+  useEffect(()=>{
+    if(!nativeOverlay)return;
+    return nativeOverlay.onAction(action=>{
+      if(action.type==="unlocked"){void desktopBridge?.session?.load().then(session=>{if(session){saveSession(session);setAdminLocked(false);setLocked(false);setUnlockError("");window.dispatchEvent(new Event("ky-native-unlocked"));}});return;}
+      if(action.type==="close"){setPreferencesOpen(false);setPasswordDrawerOpen(false);setSwitcherOpen(false);setNetworkLogOpen(false);setUserMenuOpen(false);return;}
+      if(action.type==="openPreferences"){setUserMenuOpen(false);setPreferencesOpen(true);return;}
+      if(action.type==="openPassword"){setUserMenuOpen(false);setPasswordError("");setPasswordDrawerOpen(true);return;}
+      if(action.type==="openWorkspaces"){setUserMenuOpen(false);setSwitcherOpen(true);return;}
+      if(action.type==="logout"){void handleLogout();return;}
+      if(action.type==="workspace"){const target=workspaces.find(item=>item.id===action.id&&item.type===action.workspaceType);if(target)enterWorkspace(target);return;}
+      if(action.type==="password"){void handleChangePassword(action);return;}
+      if(action.type==="refreshNetwork"){void refreshNetworkLogs();return;}
+      if(action.type==="clearNetwork"){void handleClearNetworkLogs();return;}
+      if(action.type==="choose")appearance.choose(action.themeId,action.mode);
+      else if(action.type==="followPlatform")appearance.followPlatform();
+      else if(action.type==="retry")appearance.retry();
+      else if(action.type==="refresh")void appearance.refresh();
+    });
+  },[nativeOverlay,appearance,workspaces]);
+  useEffect(()=>()=>{void nativeOverlay?.close();},[nativeOverlay]);
   const currentUserName = user?.username || user?.displayName || "当前用户";
   const currentUserDisplayName = user?.displayName || currentUserName;
   const canSwitchWorkspace = workspaces.length > 1;
@@ -443,6 +580,27 @@ function WorkspaceLayout() {
   const currentWorkspace = workspaces.find(
     (workspace) => workspace.id === params.workspaceId && workspace.type === params.workspaceType
   );
+  const currentArea: WorkspaceArea = pathActive(location.pathname, `/w/${params.workspaceType}/${params.workspaceId}/workbench`)
+    || location.pathname.includes("/menu-pages/workbench/") ? "workbench" : "manage";
+  const areaScopeKey = currentWorkspace ? workspaceAreaScopeKey(user?.id ?? "", currentWorkspace) : "";
+  const terminalWindowMode = new URLSearchParams(location.search).get("terminalWindow") === "1";
+  useLayoutEffect(() => {
+    const element = appContentRef.current;
+    if (!element) return;
+    const activated = activateWorkspaceAreaScroll(areaScrollMemoryRef.current, areaScopeKey, currentArea);
+    areaScrollMemoryRef.current = activated.memory;
+    element.scrollTop = activated.scrollTop;
+  }, [currentArea, areaScopeKey]);
+  const managementDirectoryQuery = useQuery({
+    queryKey: ["menu-directory", "management", "visible", currentWorkspace?.type, currentWorkspace?.id],
+    enabled: Boolean(currentWorkspace),
+    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[]; catalogReady: boolean }>("/api/v1/menu-directory/management/visible")
+  });
+  const workbenchDirectoryQuery = useQuery({
+    queryKey: ["menu-directory", "workbench", "visible", currentWorkspace?.type, currentWorkspace?.id],
+    enabled: Boolean(currentWorkspace),
+    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[]; catalogReady: boolean }>("/api/v1/menu-directory/workbench/visible")
+  });
   const inventoryPort = useMemo(() => createPluginInventoryPort(requestClient), [currentWorkspace?.type, currentWorkspace?.id, currentWorkspace?.membershipId, currentWorkspace?.permissions.join("|"), user?.id]);
   useEffect(() => () => inventoryPort.clear(), [inventoryPort]);
   const canViewNotifications = Boolean(
@@ -525,12 +683,11 @@ function WorkspaceLayout() {
   }
   selectWorkspace(currentWorkspace);
 
-  const terminalWindowMode = new URLSearchParams(location.search).get("terminalWindow") === "1";
   const workbenchPath = `/w/${currentWorkspace.type}/${currentWorkspace.id}/workbench`;
   const workbenchPathFor = (section?: string) => `${workbenchPath}${section ? `/${section}` : ""}`;
   const workspacePath = (path: string) =>
     `/w/${currentWorkspace.type}/${currentWorkspace.id}${path === "/" ? "/workbench" : path}`;
-  const currentNavMode: HeaderNavMode = pathActive(location.pathname, workbenchPath) ? "workbench" : "manage";
+  const currentNavMode: HeaderNavMode = currentArea;
   const builtinWorkbenchNavMetas: NavMeta[] = [
     { key: WORKBENCH_KEY, icon: <AppstoreOutlined />, label: "概览", target: workbenchPathFor() },
     { key: "workbench.todos", icon: <BookOutlined />, label: "待办事项", target: workbenchPathFor("todos") },
@@ -564,6 +721,8 @@ function WorkspaceLayout() {
       };
     })
     .filter((group): group is NonNullable<typeof group> => group !== null);
+  const managementWebViewNav = visibleWebViewGroups("management", managementDirectoryQuery.isError || managementDirectoryQuery.data?.catalogReady!==true ? [] : managementDirectoryQuery.data?.items ?? [], managementDirectoryQuery.isError || managementDirectoryQuery.data?.catalogReady!==true ? [] : managementDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
+  navGroups.push(...managementWebViewNav.groups);
   const pluginWorkbenchStandalone: NavMeta[] = [];
   const pluginWorkbenchGroups: NavGroupMeta[] = [];
   for (const plugin of orderedPlugins) {
@@ -597,12 +756,60 @@ function WorkspaceLayout() {
       }
     }
   }
-  const workbenchNavMetas = [
+  const workbenchWebViewNav = visibleWebViewGroups("workbench", workbenchDirectoryQuery.isError || workbenchDirectoryQuery.data?.catalogReady!==true ? [] : workbenchDirectoryQuery.data?.items ?? [], workbenchDirectoryQuery.isError || workbenchDirectoryQuery.data?.catalogReady!==true ? [] : workbenchDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
+  const legacyWorkbenchNavMetas = [
     ...builtinWorkbenchNavMetas,
     ...pluginWorkbenchStandalone,
-    ...pluginWorkbenchGroups.flatMap((group) => group.items)
+    ...pluginWorkbenchGroups.flatMap((group) => group.items),
+    ...workbenchWebViewNav.standalone,
+    ...workbenchWebViewNav.groups.flatMap((group) => group.items)
   ];
-  const navMetas = navGroups.flatMap((group) => group.items);
+  const managementCatalogReady = managementDirectoryQuery.data?.catalogReady === true || managementDirectoryQuery.isPending || (managementDirectoryQuery.isError && (managementDirectoryQuery.error as {status?:number})?.status!==404);
+  const workbenchCatalogReady = workbenchDirectoryQuery.data?.catalogReady === true || workbenchDirectoryQuery.isPending || (workbenchDirectoryQuery.isError && (workbenchDirectoryQuery.error as {status?:number})?.status!==404);
+  const workbenchNavMetas = workbenchCatalogReady ? [...workbenchWebViewNav.standalone,...workbenchWebViewNav.groups.flatMap(group=>group.items)] : legacyWorkbenchNavMetas;
+  const navMetas = managementCatalogReady ? [...managementWebViewNav.standalone,...managementWebViewNav.groups.flatMap(group=>group.items)] : [...managementWebViewNav.standalone, ...navGroups.flatMap((group) => group.items)];
+  const cachedRouteIsAllowed = (area: WorkspaceArea, snapshot: WorkspaceAreaRouteSnapshot<ReactNode>) => {
+    const routeList = area === "workbench" ? workbenchNavMetas : navMetas;
+    return routeList.some((item) => pathActive(snapshot.location.pathname, item.target));
+  };
+  const currentPathKey = workspaceAreaLocationKey(location);
+  const liveRouteSnapshot: WorkspaceAreaRouteSnapshot<ReactNode> | null = nestedOutlet ? {
+    pathKey: currentPathKey,
+    location,
+    navigationType,
+    node: nestedOutlet
+  } : null;
+  let effectiveAreaRouteCache = areaRouteCache.scopeKey === areaScopeKey
+    ? areaRouteCache
+    : createWorkspaceAreaRouteCache<ReactNode>(areaScopeKey);
+  const workspaceRootPath = `/w/${currentWorkspace.type}/${currentWorkspace.id}`;
+  if (!terminalWindowMode && liveRouteSnapshot && location.pathname !== workspaceRootPath) {
+    effectiveAreaRouteCache = rememberWorkspaceAreaRoute(
+      effectiveAreaRouteCache,
+      areaScopeKey,
+      currentArea,
+      liveRouteSnapshot
+    );
+  }
+  if (effectiveAreaRouteCache !== areaRouteCache) setAreaRouteCache(effectiveAreaRouteCache);
+  const workbenchRouteSnapshot = terminalWindowMode ? liveRouteSnapshot : selectWorkspaceAreaRoute({
+    cache: effectiveAreaRouteCache,
+    scopeKey: areaScopeKey,
+    area: "workbench",
+    activeArea: currentArea,
+    activePathKey: currentPathKey,
+    liveSnapshot: liveRouteSnapshot,
+    isAllowed: (snapshot) => cachedRouteIsAllowed("workbench", snapshot)
+  });
+  const managementRouteSnapshot = terminalWindowMode ? null : selectWorkspaceAreaRoute({
+    cache: effectiveAreaRouteCache,
+    scopeKey: areaScopeKey,
+    area: "manage",
+    activeArea: currentArea,
+    activePathKey: currentPathKey,
+    liveSnapshot: liveRouteSnapshot,
+    isAllowed: (snapshot) => cachedRouteIsAllowed("manage", snapshot)
+  });
   const menuTargets = new Map<string, string>(
     (currentNavMode === "workbench" ? workbenchNavMetas : navMetas).map((item) => [item.key, item.target])
   );
@@ -612,7 +819,7 @@ function WorkspaceLayout() {
   const activeMenu = [...navMetas]
     .sort((a, b) => b.target.length - a.target.length)
     .find((item) => pathActive(location.pathname, item.target));
-  const menuItems =
+  const legacyMenuItems =
     currentNavMode === "workbench"
       ? [
           ...builtinWorkbenchNavMetas.map((item) => ({ key: item.key, icon: item.icon, label: item.label })),
@@ -622,14 +829,20 @@ function WorkspaceLayout() {
             icon: group.icon,
             label: group.label,
             children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
-          }))
+          })),
+          ...workbenchWebViewNav.standalone.map((item) => ({ key: item.key, icon: item.icon, label: item.label })),
+          ...workbenchWebViewNav.groups.map((group) => ({ key: group.key, icon: group.icon, label: group.label, children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label })) }))
         ]
-      : navGroups.map((group) => ({
-          key: group.key,
-          icon: group.icon,
-          label: group.label,
-          children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
-        }));
+      : [
+          ...navGroups.map((group) => ({
+            key: group.key,
+            icon: group.icon,
+            label: group.label,
+            children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
+          })),
+          ...managementWebViewNav.standalone.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
+        ];
+  const menuItems = currentNavMode === "workbench" ? (workbenchCatalogReady ? workbenchWebViewNav.tree : legacyMenuItems) : (managementCatalogReady ? managementWebViewNav.tree : legacyMenuItems);
   const activeKey = currentNavMode === "workbench" ? activeWorkbenchMenu?.key ?? WORKBENCH_KEY : activeMenu?.key;
   const breadcrumbItems =
     currentNavMode === "workbench"
@@ -655,6 +868,21 @@ function WorkspaceLayout() {
   const handleHeaderNavModeChange = (nextMode: HeaderNavMode) => {
     setMobileMenuOpen(false);
     if (nextMode === currentNavMode) return;
+    const savedRoute = effectiveAreaRouteCache.scopeKey === areaScopeKey
+      ? effectiveAreaRouteCache[nextMode]
+      : null;
+    const workspacePrefix = `/w/${currentWorkspace.type}/${currentWorkspace.id}/`;
+    const savedPathIsWorkbench = Boolean(savedRoute && (
+      pathActive(savedRoute.location.pathname, workbenchPath) || savedRoute.location.pathname.includes("/menu-pages/workbench/")
+    ));
+    const savedPathIsInArea = Boolean(savedRoute
+      && savedRoute.location.pathname.startsWith(workspacePrefix)
+      && cachedRouteIsAllowed(nextMode, savedRoute)
+      && (nextMode === "workbench" ? savedPathIsWorkbench : !savedPathIsWorkbench));
+    if (savedRoute && savedPathIsInArea) {
+      navigate({ pathname: savedRoute.location.pathname, search: savedRoute.location.search, hash: savedRoute.location.hash }, { state: savedRoute.location.state });
+      return;
+    }
     if (nextMode === "workbench") {
       navigate(workbenchPath);
       return;
@@ -708,6 +936,7 @@ function WorkspaceLayout() {
   }
 
   async function handleChangePassword(values: ChangePasswordFormValues) {
+    setPasswordError("");
     setPasswordChanging(true);
     try {
       await changeLoginPassword({
@@ -718,6 +947,7 @@ function WorkspaceLayout() {
       setPasswordDrawerOpen(false);
       void message.success("登录密码已修改。");
     } catch {
+      setPasswordError("修改登录密码失败，请确认当前密码是否正确。");
       void message.error("修改登录密码失败，请确认当前密码是否正确。");
     } finally {
       setPasswordChanging(false);
@@ -818,6 +1048,7 @@ function WorkspaceLayout() {
   }
 
   function handleLockScreen() {
+    setPreferencesOpen(false);setUserMenuOpen(false);setPasswordDrawerOpen(false);setNetworkLogOpen(false);setSwitcherOpen(false);
     setUnlockPassword("");
     setUnlockError("");
     setAdminLocked(true);
@@ -867,6 +1098,7 @@ function WorkspaceLayout() {
 
   const navMenu = (
     <div className="app-nav-menu-wrap">
+      {(currentNavMode==="workbench"?workbenchDirectoryQuery:managementDirectoryQuery).isError && (currentNavMode==="workbench"?workbenchCatalogReady:managementCatalogReady) ? <Alert type="error" showIcon title="菜单读取失败" action={<Button size="small" onClick={()=>void (currentNavMode==="workbench"?workbenchDirectoryQuery:managementDirectoryQuery).refetch()}>重试</Button>}/> : null}
       <Menu
         className={`app-menu${effectiveSidebarCollapsed ? " app-menu--collapsed" : ""}`}
         defaultOpenKeys={[]}
@@ -1049,7 +1281,7 @@ function WorkspaceLayout() {
                 </Tooltip>
                 {user ? (
                   <Dropdown
-                    open={userMenuOpen} onOpenChange={setUserMenuOpen}
+                    open={userMenuOpen&&!nativeOverlay} onOpenChange={open=>setUserMenuOpen(nativeOverlay?!userMenuOpen:open)}
                     menu={{
                       onClick:()=>setUserMenuOpen(false),
                       items: [
@@ -1154,7 +1386,19 @@ function WorkspaceLayout() {
                 </Drawer>
               )}
 
-              <Layout.Content className="app-content" style={{ marginLeft: isDesktop ? sidebarWidth : 0 }}>
+              <Layout.Content
+                className="app-content"
+                onScroll={(event) => {
+                  areaScrollMemoryRef.current = rememberWorkspaceAreaScroll(
+                    areaScrollMemoryRef.current,
+                    areaScopeKey,
+                    currentArea,
+                    event.currentTarget.scrollTop
+                  );
+                }}
+                ref={appContentRef}
+                style={{ marginLeft: isDesktop ? sidebarWidth : 0 }}
+              >
                 <div className="workspace-breadcrumb">
                   {isDesktop ? (
                     <Tooltip title={effectiveSidebarCollapsed ? "展开导航" : "收起导航"} placement="bottom">
@@ -1170,7 +1414,20 @@ function WorkspaceLayout() {
                   ) : null}
                   <Breadcrumb className="workspace-breadcrumb-trail" items={breadcrumbItems} />
                 </div>
-                <Outlet />
+                {terminalWindowMode ? nestedOutlet : <>
+                  <WorkspaceAreaRoutePane
+                    key={`${areaScopeKey}:workbench`}
+                    area="workbench"
+                    active={currentArea === "workbench"}
+                    snapshot={workbenchRouteSnapshot}
+                  />
+                  <WorkspaceAreaRoutePane
+                    key={`${areaScopeKey}:manage`}
+                    area="manage"
+                    active={currentArea === "manage"}
+                    snapshot={managementRouteSnapshot}
+                  />
+                </>}
               </Layout.Content>
             </Layout>
 
@@ -1180,7 +1437,7 @@ function WorkspaceLayout() {
                   setSwitcherOpen(false);
                   setSwitcherSearch("");
                 }}
-                open={switcherOpen}
+                open={switcherOpen&&!nativeOverlay}
                 title="切换工作区"
                 width={isDesktop ? 420 : "94vw"}
               >
@@ -1245,7 +1502,7 @@ function WorkspaceLayout() {
               </Drawer>
             ) : null}
 
-            <PersonalPreferencesDrawer open={preferencesOpen&&!locked} onClose={()=>setPreferencesOpen(false)} />
+            <PersonalPreferencesDrawer open={preferencesOpen&&!locked&&!nativeOverlay} onClose={()=>setPreferencesOpen(false)} />
 
             <Drawer
               destroyOnClose
@@ -1253,7 +1510,7 @@ function WorkspaceLayout() {
                 setPasswordDrawerOpen(false);
                 passwordForm.resetFields();
               }}
-              open={passwordDrawerOpen}
+              open={passwordDrawerOpen&&!nativeOverlay}
               title="修改登录密码"
               width={isDesktop ? 420 : "94vw"}
               extra={
@@ -1326,7 +1583,7 @@ function WorkspaceLayout() {
             <Drawer
               className="desktop-network-log-drawer"
               onClose={() => setNetworkLogOpen(false)}
-              open={networkLogOpen}
+              open={networkLogOpen&&!nativeOverlay}
               title="网络日志"
               width={isDesktop ? 620 : "94vw"}
               extra={
@@ -1377,7 +1634,7 @@ function WorkspaceLayout() {
               </Space>
             </Drawer>
 
-            {locked ? (
+            {locked&&!nativeOverlay ? (
               <div className="desktop-lock-overlay" role="dialog" aria-modal="true" aria-label="后台已锁屏">
                 <Card className="desktop-lock-card">
                   <Space direction="vertical" size={16} style={{ width: "100%" }}>

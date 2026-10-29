@@ -5,6 +5,18 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "@ky/aicrm-desktop#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/ky-admin-host/src/native-overlay/**",
+        "$TURBO_ROOT$/apps/ky-admin-host/src/personal-preferences-drawer.tsx",
+        "$TURBO_ROOT$/apps/ky-admin-host/package.json",
+        "$TURBO_ROOT$/packages/ky-admin-core/src/**",
+        "$TURBO_ROOT$/scripts/desktop-plugins/build-preloads.mjs"
+      ],
+      "outputs": ["out/**"]
+    },
     "lint": {
       "dependsOn": ["^lint"]
     },
