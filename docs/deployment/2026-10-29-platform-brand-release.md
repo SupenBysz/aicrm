@@ -52,3 +52,14 @@
 - 公网新CSS `/assets/index-E-tTHru1.css` 与JS `/assets/index-BaTjcBRB.js` 已核验对称边距和居中逻辑。
 - 浏览器新标签打开线上平台品牌页，截图确认实际顶部Kysion+AI和表单预览均完整展示，品牌区留白已调整。未保存任何客户品牌配置，原标签页保留。
 - 更新前后认证API冒烟通过，测试会话已退出并验证失效。本次无数据库迁移，回滚运行清单为 `cc01c881bbe12c2cd02b63516f5b653815f7c625`。
+
+## 居中最小间距16px发布
+
+- 用户授权立即部署，运行源码 `09c1ed1936537884cfbb5bee0b702ea0ead47595`。居中组合的左右最小间距改为16px；较短LOGO保留22px左侧间距，平台与机构预览、实际导航共用适配规则。
+- 全工作区类型检查23项及前端构建通过；[集中构建 40850982640](https://github.com/SupenBysz/kysion-build/actions/runs/40850982640) 成功。
+- 产物 ID `12886928806`，SHA256 `6036eb69daa96b539ee1d0e80e590aa44ffc3891bafd510fba8ad75f4b32c0fd`；构建来源、源码标识和镜像digest均校验通过。
+- 运行清单 `0259fe2828c30647fba6ce0a490ac95fc4815d21`，六个应用新副本均1/1可用、镜像与产物逐一一致，Argo Synced/Healthy。
+- 公网CSS `/assets/index-g88NNpWg.css` 与JS `/assets/index-Q1YO-jOt.js` 已确认16px位置、32px双侧宽度预算及compactInset逻辑。更新前后认证API冒烟通过；测试会话已退出并验证失效。
+- 本次无数据库迁移或客户品牌数据修改。回滚目标为上一运行清单 `faa2b37b299e04d2db2205d534267147e4705ddc`。
+
+- 浏览器直接打开线上系统配置，截图确认顶部Kysion+AI及浅/深色预览正常呈现新间距；本次验收未修改或保存品牌配置。
