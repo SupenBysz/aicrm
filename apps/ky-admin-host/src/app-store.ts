@@ -30,12 +30,14 @@ export function loadSession(): AdminSession | null {
 
 export function saveSession(session: AdminSession) {
   localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
+ window.dispatchEvent(new Event("ky:session-changed"));
 }
 
 export function clearSession() {
   localStorage.removeItem(ADMIN_SESSION_KEY);
   localStorage.removeItem(ADMIN_BOOTSTRAP_KEY);
   localStorage.removeItem(ADMIN_WORKSPACE_KEY);
+ window.dispatchEvent(new Event("ky:session-changed"));
 }
 
 export function loadBootstrap(): BootstrapState | null {
@@ -44,6 +46,7 @@ export function loadBootstrap(): BootstrapState | null {
 
 export function setBootstrap(bootstrap: BootstrapState) {
   localStorage.setItem(ADMIN_BOOTSTRAP_KEY, JSON.stringify(bootstrap));
+ window.dispatchEvent(new Event("ky:session-changed"));
 }
 
 export function loadCurrentWorkspace(): WorkspaceIdentity | null {

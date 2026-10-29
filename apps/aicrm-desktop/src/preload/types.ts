@@ -75,6 +75,7 @@ export interface AiCrmDesktopBridge {
     clear: () => Promise<boolean>;
   };
   window: {
+    setAppearance: (value: {themeId: string; dark: boolean}) => Promise<boolean>;
     getState: () => Promise<DesktopWindowState>;
     minimize: () => Promise<DesktopWindowState>;
     toggleMaximize: () => Promise<DesktopWindowState>;

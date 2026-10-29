@@ -34,39 +34,7 @@
   --admin-segmented-hover-bg: rgba(212, 154, 61, 0.14);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #ffffff;
-    background: #050505;
-    --admin-accent: #ffd47d;
-    --admin-accent-soft: rgba(255, 212, 125, 0.12);
-    --admin-divider: rgba(255, 212, 125, 0.12);
-    --admin-stroke: rgba(255, 212, 125, 0.16);
-    --admin-header-bg: linear-gradient(180deg, #050505 0%, #050505 100%);
-    --admin-nav-bg: #050505;
-    --admin-right-shell-bg: rgba(39, 38, 37, 0.6);
-    --admin-surface: rgba(17, 17, 17, 0.92);
-    --admin-surface-solid: rgba(5, 5, 5, 0.94);
-    --admin-surface-soft: rgba(22, 22, 22, 0.92);
-    --admin-content-bg: #050505;
-    --admin-text: #ffffff;
-    --admin-text-muted: rgba(255, 255, 255, 0.66);
-    --admin-text-subtle: rgba(255, 255, 255, 0.46);
-    --admin-shadow-soft: none;
-    --admin-scrollbar-thumb-bg: color-mix(in srgb, var(--admin-accent) 28%, transparent);
-    --admin-content-top-gradient-bg: #050505;
-    --admin-toolbar-bg: rgba(255, 255, 255, 0.06);
-    --admin-toolbar-fg: rgba(255, 255, 255, 0.72);
-    --admin-toolbar-hover: rgba(255, 255, 255, 0.12);
-    --admin-toolbar-border: rgba(255, 255, 255, 0.1);
-    --admin-segmented-bg: var(--admin-toolbar-bg);
-    --admin-segmented-border: var(--admin-toolbar-border);
-    --admin-segmented-text: var(--admin-toolbar-fg);
-    --admin-segmented-selected-bg: rgba(255, 255, 255, 0.14);
-    --admin-segmented-selected-text: #ffd47d;
-    --admin-segmented-hover-bg: rgba(255, 255, 255, 0.1);
-  }
-}
+
 
 :root[data-admin-theme="light"] {
   color-scheme: light;
@@ -212,6 +180,12 @@ a {
   right: 0;
   top: 0;
   z-index: 0;
+}
+
+/* Keep the host divider outside the overlay's paint area, including older clients. */
+body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.is-integrated .aicrm-window-controls {
+  backdrop-filter: none;
+  height: calc(var(--aicrm-desktop-topbar-height, 60px) - 1px);
 }
 
 .app-header-leading {
@@ -994,7 +968,7 @@ a {
 }
 
 :root[data-admin-theme="dark"] .app-shell .ant-table-thead > tr > th {
-  background: color-mix(in srgb, var(--admin-surface-solid) 74%, #1d1d1d);
+  background: color-mix(in srgb, var(--admin-surface-solid) 74%, var(--admin-surface-soft));
   border-bottom-color: var(--admin-stroke);
   color: var(--admin-text);
 }
@@ -1011,7 +985,7 @@ a {
 
 :root[data-admin-theme="dark"] .app-shell .ant-table-tbody > tr:hover > td,
 :root[data-admin-theme="dark"] .app-shell .ant-table-tbody > tr > td.ant-table-cell-row-hover {
-  background: color-mix(in srgb, var(--admin-accent) 8%, #151515);
+  background: color-mix(in srgb, var(--admin-accent) 8%, var(--admin-surface-soft));
 }
 
 .ant-table-wrapper .table-action-column {
@@ -1028,7 +1002,7 @@ a {
 }
 
 :root[data-admin-theme="dark"] .app-shell .ant-table-wrapper .table-action-column {
-  background: #070707;
+  background: var(--admin-nav-bg);
   box-shadow: -8px 0 14px rgb(0 0 0 / 52%);
 }
 
@@ -1404,34 +1378,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   background: rgba(255, 212, 125, 0.08);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-admin-theme="light"]) .login-shell {
-    --login-accent-rgb: 255, 212, 125;
-    background:
-      radial-gradient(ellipse 58% 76% at 4% 2%, rgba(255, 212, 125, 0.14) 0%, rgba(255, 212, 125, 0) 72%),
-      radial-gradient(ellipse 52% 70% at 98% 96%, rgba(255, 212, 125, 0.12) 0%, rgba(255, 212, 125, 0) 76%),
-      linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
-  }
 
-  :root:not([data-admin-theme="light"]) .login-hero {
-    background: linear-gradient(145deg, rgba(28, 27, 23, 0.98), rgba(15, 14, 12, 0.96));
-  }
-
-  :root:not([data-admin-theme="light"]) .login-shell::after {
-    background: rgba(255, 212, 125, 0.1);
-  }
-
-  :root:not([data-admin-theme="light"]) .workspace-selection-shell {
-    background:
-      radial-gradient(circle at 12% 14%, rgba(255, 212, 125, 0.12), transparent 30%),
-      radial-gradient(circle at 88% 10%, rgba(255, 255, 255, 0.05), transparent 26%),
-      linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
-  }
-
-  :root:not([data-admin-theme="light"]) .workspace-selection-shell::after {
-    background: rgba(255, 212, 125, 0.08);
-  }
-}
 
 @keyframes aicrm-login-drift-primary {
   0% {
@@ -1818,7 +1765,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-tree-list--selection {
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--admin-stroke);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -2084,8 +2031,8 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-tree-branch {
-  border-bottom: 1px solid #d6e0ec;
-  border-left: 1px solid #d6e0ec;
+  border-bottom: 1px solid var(--admin-stroke);
+  border-left: 1px solid var(--admin-stroke);
   height: 20px;
   justify-self: center;
   width: 16px;
@@ -2120,7 +2067,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-switcher-drawer .workspace-tree-list {
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--admin-stroke);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -2191,8 +2138,8 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .invite-summary {
-  background: #fbfdff;
-  border: 1px solid #edf1f7;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-stroke);
   border-radius: 14px;
   display: grid;
   gap: 12px;
@@ -2231,8 +2178,8 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .onboarding-summary {
-  background: #fbfdff;
-  border: 1px solid #edf1f7;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-stroke);
   border-radius: 14px;
   display: grid;
   gap: 12px;
@@ -2292,7 +2239,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .workspace-card--selection.ant-card {
-  border: 1px solid #e8eef6;
+  border: 1px solid var(--admin-stroke);
   border-radius: 16px;
   min-width: 0;
   overflow: hidden;
@@ -2335,12 +2282,12 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .application-event-row {
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--admin-divider);
   padding: 10px 0;
 }
 
 .application-event-list {
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--admin-divider);
   margin-top: 12px;
 }
 
@@ -2790,8 +2737,8 @@ button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outl
   height: 38px;
   padding: 0;
   overflow: hidden;
-  background: #f5ede3;
-  border: 1px solid #eadfd2;
+  background: var(--admin-surface-soft);
+  border: 1px solid var(--admin-stroke);
   border-radius: 999px;
   isolation: isolate;
 }
@@ -2853,12 +2800,12 @@ button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outl
 }
 
 :root[data-admin-theme="dark"] .script-asset-editor-header-tabs {
-  background: #252526;
+  background: var(--admin-surface-soft);
   border-color: rgba(255, 255, 255, 0.12);
 }
 
 :root[data-admin-theme="dark"] .script-asset-editor-header-tabs-slider {
-  background: #37332d;
+  background: var(--admin-surface-soft);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
@@ -2937,7 +2884,7 @@ button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outl
 :root:not([data-admin-theme="dark"]) .public-scripts-panel,
 :root:not([data-admin-theme="dark"]) .public-scripts-panel > section,
 :root:not([data-admin-theme="dark"]) .public-scripts-panel > section > div:first-child {
-  background: #f7efe4 !important;
+  background: var(--admin-content-bg) !important;
 }
 
 :root:not([data-admin-theme="dark"]) .public-scripts-panel > .public-scripts-tabs,
@@ -3176,10 +3123,10 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 .script-asset-editor-direct-layer .script-editor-completion-popup {
   max-height: min(260px, calc(100% - 52px));
   overflow: hidden;
-  border: 1px solid #faf1e8 !important;
+  border: 1px solid var(--admin-stroke) !important;
   border-radius: 0 !important;
   box-sizing: border-box;
-  background-color: #fffcf6 !important;
+  background-color: var(--admin-surface) !important;
   background-image: none !important;
   opacity: 1 !important;
   isolation: isolate;
@@ -3190,7 +3137,7 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 }
 
 .script-editor-context-menu {
-  --script-editor-context-bg: #fffdf9;
+  --script-editor-context-bg: var(--admin-surface);
   --script-editor-context-border: rgba(120, 90, 55, 0.12);
   --script-editor-context-shadow: rgba(0, 0, 0, 0.09);
   background: var(--script-editor-context-bg);
@@ -3208,7 +3155,7 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 }
 
 .script-editor-context-menu > button { display:flex; width:100%; min-height:32px; align-items:center; justify-content:space-between; padding:5px 10px; border:0; border-radius:2px; background:transparent; color:var(--admin-text,#34281a); font:inherit; text-align:left; cursor:pointer; }
-.script-editor-context-menu > button:hover:not(:disabled) { background:#f9eedc; }
+.script-editor-context-menu > button:hover:not(:disabled) { background:var(--admin-accent-soft); }
 .script-editor-context-menu > button:disabled { color:var(--admin-text-tertiary,#b6aa9b); cursor:default; }
 .script-editor-context-separator { height:1px; margin:4px 6px; background:var(--admin-border-color,#ead9c5); }
 
@@ -3385,7 +3332,7 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 }
 
 :root[data-admin-theme="dark"] .script-editor-root {
-  --script-editor-caret-color: #f4c27a;
+  --script-editor-caret-color: var(--admin-accent);
 }
 
 .script-editor-highlight-layer {
@@ -3400,16 +3347,16 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 .script-editor-completion-popup,
 .script-editor-completion-popup .ant-btn,
 .script-editor-completion-popup .ant-typography {
-  color: #34281a !important;
+  color: var(--admin-text) !important;
 }
 
 .script-editor-completion-popup {
   box-shadow: none !important;
   padding: 0 !important;
-  border: 1px solid #faf1e8 !important;
+  border: 1px solid var(--admin-stroke) !important;
   border-radius: 0 !important;
   box-sizing: border-box;
-  background-color: #fffcf6 !important;
+  background-color: var(--admin-surface) !important;
   background-image: none !important;
   opacity: 1 !important;
   z-index: 1000 !important;
@@ -3417,14 +3364,14 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 
 .script-editor-completion-popup .script-editor-completion-inner,
 .script-editor-completion-popup .ant-btn {
-  background-color: #fffcf6 !important;
+  background-color: var(--admin-surface) !important;
   background-image: none !important;
 }
 
 .script-editor-completion-popup .script-editor-completion-backdrop {
   position: absolute;
   inset: 0;
-  background-color: #fffcf6 !important;
+  background-color: var(--admin-surface) !important;
   background-image: none !important;
   opacity: 1 !important;
   pointer-events: none;
@@ -3432,45 +3379,45 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 }
 
 .script-editor-completion-popup .ant-btn[aria-selected="true"] {
-  background-color: #f9eedc !important;
+  background-color: var(--admin-accent-soft) !important;
 }
 
 .script-editor-completion-popup .ant-btn:hover,
 .script-editor-completion-popup .ant-btn:focus-visible {
-  background-color: #fffcf6 !important;
+  background-color: var(--admin-surface) !important;
 }
 
 .script-editor-completion-popup .ant-btn[aria-selected="true"],
 .script-editor-completion-popup .ant-btn[aria-selected="true"]:hover,
 .script-editor-completion-popup .ant-btn[aria-selected="true"]:focus-visible {
-  background-color: #f9eedc !important;
+  background-color: var(--admin-accent-soft) !important;
 }
 
 :root[data-admin-theme="dark"] .script-editor-completion-popup,
 :root[data-admin-theme="dark"] .script-editor-completion-popup .script-editor-completion-inner,
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn,
 :root[data-admin-theme="dark"] .script-editor-completion-popup .script-editor-completion-backdrop {
-  background-color: #111111 !important;
+  background-color: var(--admin-surface) !important;
   background-image: none !important;
-  color: #f5f5f5 !important;
+  color: var(--admin-text) !important;
 }
 
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"] {
-  background-color: #f9eedc !important;
-  color: #34281a !important;
+  background-color: var(--admin-accent-soft) !important;
+  color: var(--admin-text) !important;
 }
 
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn:hover,
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn:focus-visible {
-  background-color: #111111 !important;
-  color: #f5f5f5 !important;
+  background-color: var(--admin-surface) !important;
+  color: var(--admin-text) !important;
 }
 
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"],
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"]:hover,
 :root[data-admin-theme="dark"] .script-editor-completion-popup .ant-btn[aria-selected="true"]:focus-visible {
-  background-color: #f9eedc !important;
-  color: #34281a !important;
+  background-color: var(--admin-accent-soft) !important;
+  color: var(--admin-text) !important;
 }
 
 .script-editor-completion-inner {
@@ -3481,7 +3428,7 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 
 :root[data-admin-theme="dark"] .script-editor-completion-popup,
 :root[data-admin-theme="dark"] .script-asset-editor-direct-layer .script-editor-completion-popup {
-  border-color: #555555 !important;
+  border-color: var(--admin-stroke) !important;
 }
 
 .script-editor-completion-popup mark {
@@ -3744,3 +3691,26 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 
 /* Reclaim 6px from the header padding for the centered 16px minimum inset. */
 .app-shell:not(.app-shell--sidebar-collapsed) .app-header-leading{margin-left:-6px}
+
+/* Theme-aware surfaces for login/selection and editor chrome; no page remount. */
+:root[data-admin-palette]:not([data-admin-palette="classic-gold"]) .login-shell,
+:root[data-admin-palette]:not([data-admin-palette="classic-gold"]) .workspace-selection-shell {
+ --login-accent-rgb: var(--admin-accent-rgb);
+ background: radial-gradient(ellipse at 5% 5%, var(--admin-accent-soft), transparent 65%), var(--admin-content-bg);
+}
+:root[data-admin-palette]:not([data-admin-palette="classic-gold"]) .login-hero,
+:root[data-admin-palette] .workspace-selection-card { background: var(--admin-surface); }
+:root[data-admin-palette]:not([data-admin-palette="classic-gold"]) .login-shell::after,
+:root[data-admin-palette]:not([data-admin-palette="classic-gold"]) .workspace-selection-shell::after { background: var(--admin-accent-soft); }
+:root[data-admin-palette] .login-submit.ant-btn,
+:root[data-admin-palette] .login-submit.ant-btn:hover { color: var(--admin-on-primary); }
+:root[data-admin-palette] .script-editor-context-menu,
+:root[data-admin-palette] .script-editor-context-submenu {
+ --script-editor-context-bg: var(--admin-surface);
+ --script-editor-context-border: var(--admin-stroke);
+}
+:root[data-admin-palette] .script-editor-context-menu > button:hover:not(:disabled) { background: var(--admin-accent-soft); }
+:root[data-admin-palette] .script-asset-editor-direct-layer .script-editor-completion-popup {
+ background-color: var(--admin-surface) !important;
+ border-color: var(--admin-stroke) !important;
+}

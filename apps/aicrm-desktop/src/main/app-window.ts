@@ -1,3 +1,4 @@
+import { storedNativeBackground } from "./window-appearance";
 import { registerSender, changeSenderRole } from "./guarded-ipc";
 import { join } from "node:path";
 import { BrowserWindow, Menu, nativeTheme, shell } from "electron";
@@ -55,7 +56,7 @@ function showContextMenu(window: BrowserWindow, params: Electron.ContextMenuPara
 }
 
 function getWindowBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors ? "#0b0b0b" : "#f6ebd0";
+  return storedNativeBackground() ?? (nativeTheme.shouldUseDarkColors ? "#050505" : "#f7efe4");
 }
 
 function bindWindowStateEvents(window: BrowserWindow): void {

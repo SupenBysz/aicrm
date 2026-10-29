@@ -4018,7 +4018,7 @@ body.aicrm-desktop-window-chrome-enabled .matrix-account-executor-terminal-page_
   padding: 0;
 }
 :root[data-admin-theme="dark"] .matrix-account-executor-terminal-page {
-  background: #050505;
+  background: var(--admin-content-bg);
 }
 .matrix-account-executor-terminal-page .matrix-account-terminal {
   border-radius: 0;
@@ -4357,31 +4357,8 @@ function buildExecutorTerminalTheme() {
   };
 }
 
-function buildExecutorTerminalChromeTheme(scheme: DocumentAdminColorScheme) {
-  if (scheme === "dark") {
-    return {
-      contentShadow: "inset 0 -1px rgba(215, 247, 223, 0.08)",
-      footerAccent: "rgba(224, 175, 104, 0.95)",
-      footerBackground: "#080d0a",
-      footerButtonBackground: "rgba(215, 247, 223, 0.08)",
-      footerButtonBorder: "rgba(215, 247, 223, 0.14)",
-      footerButtonHoverBackground: "rgba(215, 247, 223, 0.14)",
-      footerDivider: "rgba(215, 247, 223, 0.1)",
-      footerForeground: "#d7f7df",
-      footerMuted: "rgba(215, 247, 223, 0.52)"
-    };
-  }
-  return {
-    contentShadow: "inset 0 -1px rgba(116, 83, 45, 0.12)",
-    footerAccent: "#9a6a22",
-    footerBackground: "#f4ece2",
-    footerButtonBackground: "rgba(212, 154, 61, 0.12)",
-    footerButtonBorder: "rgba(154, 106, 34, 0.22)",
-    footerButtonHoverBackground: "rgba(212, 154, 61, 0.18)",
-    footerDivider: "rgba(116, 83, 45, 0.18)",
-    footerForeground: "#34281a",
-    footerMuted: "rgba(79, 59, 36, 0.68)"
-  };
+function buildExecutorTerminalChromeTheme(_scheme: DocumentAdminColorScheme) {
+ return {contentShadow:"inset 0 -1px var(--admin-divider)",footerAccent:"var(--admin-accent)",footerBackground:"var(--admin-surface-soft)",footerButtonBackground:"var(--admin-accent-soft)",footerButtonBorder:"var(--admin-stroke)",footerButtonHoverBackground:"var(--admin-toolbar-hover)",footerDivider:"var(--admin-divider)",footerForeground:"var(--admin-text)",footerMuted:"var(--admin-text-muted)"};
 }
 
 function MatrixAccountLiveIndicator({

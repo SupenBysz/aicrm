@@ -1,3 +1,4 @@
+import { storedNativeBackground } from "../window-appearance";
 import { registerSender } from "../guarded-ipc";
 import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { createHash, randomUUID } from "node:crypto";
@@ -571,6 +572,7 @@ function openControlledBrowser(
 
   const parent = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const browser = new BrowserWindow({
+    backgroundColor: storedNativeBackground(),
     width: 1180,
     height: 820,
     minWidth: 960,
@@ -652,6 +654,7 @@ async function openControlledWebSpace(
   const lockedFingerprint = lockedSessionFingerprintByPartition.get(browserPartition);
   const lockedViewport = lockedFingerprint?.viewport;
   const browser = new BrowserWindow({
+    backgroundColor: storedNativeBackground(),
     width: Math.max(960, lockedViewport?.width || 1180),
     height: Math.max(640, lockedViewport?.height || 820),
     minWidth: 960,

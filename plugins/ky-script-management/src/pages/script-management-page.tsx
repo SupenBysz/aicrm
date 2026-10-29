@@ -67,7 +67,7 @@ const isCompletionPrintableKey=(event:ReactKeyboardEvent)=>event.key.length===1&
 
 type SourceToken={text:string;kind?:"comment"|"string"|"number"|"keyword"|"property"|"selector"|"atRule"};
 const jsKeywords=new Set(["const","let","var","function","return","if","else","for","while","new","class","import","export","async","await","true","false","null","undefined"]);
-const tokenColor:Record<NonNullable<SourceToken["kind"]>,string>={comment:"#6a737d",string:"#b35c00",number:"#8250df",keyword:"#0969da",property:"#0550ae",selector:"#953800",atRule:"#8250df"};
+const tokenColor:Record<NonNullable<SourceToken["kind"]>,string>={comment:"var(--admin-syntax-comment)",string:"var(--admin-syntax-string)",number:"var(--admin-syntax-number)",keyword:"var(--admin-syntax-keyword)",property:"var(--admin-syntax-property)",selector:"var(--admin-syntax-selector)",atRule:"var(--admin-syntax-number)"};
 function tokenizeSource(source:string,language:string):SourceToken[]{
  const pattern=language==="JavaScript"
   ? /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b)/g

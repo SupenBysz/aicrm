@@ -373,11 +373,12 @@ body.aicrm-desktop-window-chrome-enabled .app-header .app-header-actions {
 }
 
 #${FLOATING_CHROME_ID}.is-integrated .aicrm-window-controls {
+  backdrop-filter: none;
   background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  height: var(--aicrm-desktop-topbar-height);
+  height: calc(var(--aicrm-desktop-topbar-height) - 1px);
 }
 `;
 

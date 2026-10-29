@@ -1,3 +1,4 @@
+import { themeColors } from "@ky/admin-core";
 import { useEffect, useRef, useState } from "react";
 import * as monaco from "../../node_modules/monaco-editor/esm/vs/editor/editor.api.js";
 import { dispatchMonacoCommand } from "./monaco-command-dispatch.mjs";
@@ -209,6 +210,15 @@ function registerNativeSubmenu(snippets: Array<{ id: string; label: string; desc
   });
 }
 
+function updateEditorTheme() {
+ const dark=document.documentElement.dataset.adminTheme==="dark";
+ const c=themeColors(document.documentElement.dataset.adminPalette??"classic-gold",dark);
+ monaco.editor.defineTheme(KWW_EDITOR_THEME,{base:dark?"vs-dark":"vs",inherit:true,
+ rules:[{token:"comment",foreground:dark?"9cafb7":"64748b",fontStyle:"italic"}],
+ colors:{"editor.background":c.surface,"editor.foreground":c.text,"editorLineNumber.foreground":dark?"#9cafb7":"#687789","editorLineNumber.activeForeground":c.primary,"editorCursor.foreground":c.primary,"editor.selectionBackground":c.primary+"44"}});
+ monaco.editor.setTheme(KWW_EDITOR_THEME);
+}
+
 function ensureLanguageSupport() {
   if (languageSupportReady) return;
   const registeredLanguages = new Set(monaco.languages.getLanguages().map(language => language.id));
@@ -229,28 +239,8 @@ function ensureLanguageSupport() {
     moduleResolution: ModuleResolutionKind.NodeJs,
     checkJs: false
   });
-  monaco.editor.defineTheme(KWW_EDITOR_THEME, {
-    base: "vs",
-    inherit: true,
-    rules: [
-      { token: "keyword", foreground: "7c3aed" },
-      { token: "string", foreground: "a16207" },
-      { token: "number", foreground: "0369a1" },
-      { token: "comment", foreground: "64748b", fontStyle: "italic" },
-      { token: "type", foreground: "0f766e" },
-      { token: "function", foreground: "2563eb" },
-      { token: "identifier", foreground: "34281a" },
-      { token: "delimiter", foreground: "475569" }
-    ],
-    colors: {
-      "editor.background": "#fffdf9",
-      "editor.foreground": "#34281a",
-      "editorLineNumber.foreground": "#b5a58e",
-      "editorLineNumber.activeForeground": "#806c52",
-      "editorCursor.foreground": "#a16207",
-      "editor.selectionBackground": "#bfdbfe99"
-    }
-  });
+  updateEditorTheme();
+
   // 语言服务加载前先提供轻量词法兜底，保证首屏就有稳定的语法着色。
   monaco.languages.setMonarchTokensProvider("javascript", {
     tokenizer: {
@@ -342,6 +332,8 @@ export function MonacoSourceEditor({ value, onChange, language, version, scriptN
   completionItemsRef.current = completionItems;
   editableRef.current = editable;
   businessScriptIdRef.current = businessScriptId ?? null;
+
+ useEffect(()=>{const observer=new MutationObserver(updateEditorTheme);observer.observe(document.documentElement,{attributes:true,attributeFilter:["data-admin-theme","data-admin-palette"]});updateEditorTheme();return()=>observer.disconnect()},[]);
 
   useEffect(() => {
     let cancelled = false;
@@ -646,7 +638,7 @@ export function MonacoSourceEditor({ value, onChange, language, version, scriptN
 
   return <div className="monaco-source-editor-root">
     <div className="monaco-source-editor" ref={hostRef} data-script-name={scriptName ?? ""} data-version={version ?? ""} aria-label={`${language}源码编辑器`} />
-    {inlineSuggestions && <div className="script-editor-completion-popup" style={{ position: "absolute", zIndex: 20, top: inlineSuggestions.top, left: inlineSuggestions.left, width: "min(560px, calc(100% - 16px))", maxHeight: 280, overflowY: "auto", background: "#fffcf6", border: "1px solid #ead9c5", boxShadow: "0 4px 14px rgba(52,40,26,.18)" }}>{inlineSuggestions.items.map((item, index) => <button key={item.label} type="button" onMouseEnter={() => setInlineSuggestions(current => current ? { ...current, index } : current)} onMouseDown={event => { event.preventDefault(); acceptInlineSuggestion(item); }} style={{ display: "flex", width: "100%", gap: 12, padding: "7px 10px", border: 0, background: index === inlineSuggestions.index ? "#f9eedc" : "transparent", color: "#34281a", textAlign: "left", cursor: "pointer", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}><span>{item.label}</span><small style={{ marginLeft: "auto", color: "#8c7a63" }}>{item.description}</small></button>)}</div>}
+    {inlineSuggestions && <div className="script-editor-completion-popup" style={{ position: "absolute", zIndex: 20, top: inlineSuggestions.top, left: inlineSuggestions.left, width: "min(560px, calc(100% - 16px))", maxHeight: 280, overflowY: "auto", background: "var(--admin-surface)", border: "1px solid var(--admin-stroke)", boxShadow: "0 4px 14px rgba(52,40,26,.18)" }}>{inlineSuggestions.items.map((item, index) => <button key={item.label} type="button" onMouseEnter={() => setInlineSuggestions(current => current ? { ...current, index } : current)} onMouseDown={event => { event.preventDefault(); acceptInlineSuggestion(item); }} style={{ display: "flex", width: "100%", gap: 12, padding: "7px 10px", border: 0, background: index === inlineSuggestions.index ? "var(--admin-accent-soft)" : "transparent", color: "var(--admin-text)", textAlign: "left", cursor: "pointer", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}><span>{item.label}</span><small style={{ marginLeft: "auto", color: "var(--admin-text-muted)" }}>{item.description}</small></button>)}</div>}
     <div className="script-editor-status-bar">
       <div className="script-editor-status-left"><span>脚本名称：{scriptName?.trim() || "未命名"} · 版本：{version?.trim() || "未生成"}</span></div>
       <div className="script-editor-status-center"><span>行 {stats.line}，列 {stats.column}</span></div>

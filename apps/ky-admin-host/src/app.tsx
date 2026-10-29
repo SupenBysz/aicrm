@@ -1,3 +1,6 @@
+import { AppearanceProvider } from "./appearance-provider";
+import { PersonalPreferencesDrawer } from "./personal-preferences-drawer";
+import { useAppearance, appearanceAntdTheme } from "@ky/admin-core";
 import {WorkspaceBrandLogo} from "./workspace-brand-logo";
 import {Presence} from "./presence";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -38,10 +41,8 @@ import {
   IconBell,
   IconBug,
   IconLock,
-  IconMoon,
   IconPinned,
   IconPinnedOff,
-  IconSunHigh
 } from "@tabler/icons-react";
 import {
   App as AntdApp,
@@ -62,7 +63,6 @@ import {
   Segmented,
   Space,
   Tag,
-  theme as antdTheme,
   Tooltip,
   Typography
 } from "antd";
@@ -190,31 +190,7 @@ function menuGroupIcon(label: string, fallback?: ReactNode): ReactNode {
   return MENU_GROUP_ICONS[label] ?? fallback ?? <AppstoreOutlined />;
 }
 
-type AdminColorScheme = "light" | "dark";
-
-const ADMIN_COLOR_SCHEME_KEY = "ky.admin.colorScheme.v1";
-const ADMIN_COLOR_SCHEME_CHANGED_EVENT = "ky:admin-color-scheme-changed";
 const ADMIN_LOCKED_KEY = "ky.admin.locked.v1";
-
-function systemColorScheme(): AdminColorScheme {
-  if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-function storedColorScheme(): AdminColorScheme | null {
-  if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem(ADMIN_COLOR_SCHEME_KEY);
-  return value === "dark" || value === "light" ? value : null;
-}
-
-function resolveColorScheme(): AdminColorScheme {
-  return storedColorScheme() ?? systemColorScheme();
-}
-
-function setAdminColorScheme(scheme: AdminColorScheme): void {
-  window.localStorage.setItem(ADMIN_COLOR_SCHEME_KEY, scheme);
-  window.dispatchEvent(new Event(ADMIN_COLOR_SCHEME_CHANGED_EVENT));
-}
 
 function isAdminLocked(): boolean {
   return typeof window !== "undefined" && window.localStorage.getItem(ADMIN_LOCKED_KEY) === "1";
@@ -228,56 +204,15 @@ function setAdminLocked(locked: boolean): void {
   }
 }
 
-function usePreferredColorScheme() {
-  const [scheme, setScheme] = useState<"light" | "dark">(() => {
-    return resolveColorScheme();
-  });
+export function App() { return <AppearanceProvider><ThemedApp /></AppearanceProvider>; }
 
-  useEffect(() => {
-    document.documentElement.dataset.adminTheme = scheme;
-    document.documentElement.style.colorScheme = scheme;
-  }, [scheme]);
+function ThemedApp() {
+ const appearance=useAppearance();
 
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = () => setScheme(resolveColorScheme());
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === ADMIN_COLOR_SCHEME_KEY) handleChange();
-    };
-    handleChange();
-    media.addEventListener("change", handleChange);
-    window.addEventListener(ADMIN_COLOR_SCHEME_CHANGED_EVENT, handleChange);
-    window.addEventListener("storage", handleStorage);
-    return () => {
-      media.removeEventListener("change", handleChange);
-      window.removeEventListener(ADMIN_COLOR_SCHEME_CHANGED_EVENT, handleChange);
-      window.removeEventListener("storage", handleStorage);
-    };
-  }, []);
-
-  return scheme;
-}
-
-export function App() {
-  const colorScheme = usePreferredColorScheme();
-  const isDark = colorScheme === "dark";
 
   return (
     <ConfigProvider
-      theme={{
-        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        token: {
-          colorPrimary: isDark ? "#ffd47d" : "#d49a3d",
-          colorLink: isDark ? "#ffd47d" : "#d49a3d",
-          colorBgLayout: isDark ? "#050505" : "#f7efe4",
-          colorBgContainer: isDark ? "#111111" : "#fffaf3",
-          colorBorder: isDark ? "rgba(255, 212, 125, 0.16)" : "rgba(221, 182, 113, 0.24)",
-          colorSplit: isDark ? "rgba(255, 212, 125, 0.12)" : "rgba(210, 168, 95, 0.18)",
-          colorText: isDark ? "#ffffff" : "#34281a",
-          colorTextSecondary: isDark ? "rgba(255, 255, 255, 0.66)" : "rgba(79, 59, 36, 0.72)",
-          borderRadius: 10
-        }
-      }}
+      theme={appearanceAntdTheme(appearance.themeId, appearance.dark)}
     >
       <QueryClientProvider client={queryClient}>
  <Presence />
@@ -416,13 +351,15 @@ function WorkspaceLayout() {
   const { message } = AntdApp.useApp();
   const screens = Grid.useBreakpoint();
   const isDesktop = Boolean(screens.md);
-  const colorScheme = usePreferredColorScheme();
+  const colorScheme = useAppearance().dark ? "dark" : "light";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [preferencesOpen,setPreferencesOpen]=useState(false);
+  const [userMenuOpen,setUserMenuOpen]=useState(false);
   const [switcherSearch, setSwitcherSearch] = useState("");
   const isDesktopClient = isDesktopClientMode();
   const desktopBridge = getDesktopBridge();
@@ -492,6 +429,7 @@ function WorkspaceLayout() {
   }, []);
   const workspaces = bootstrapState?.workspaces ?? [];
   const user = bootstrapState?.user ?? null;
+  useEffect(()=>{setPreferencesOpen(false);setUserMenuOpen(false);},[params.workspaceType,params.workspaceId,user?.id,locked]);
   const currentUserName = user?.username || user?.displayName || "当前用户";
   const currentUserDisplayName = user?.displayName || currentUserName;
   const canSwitchWorkspace = workspaces.length > 1;
@@ -738,6 +676,7 @@ function WorkspaceLayout() {
   const switcherMatchCount = switcherGroups.reduce((total, group) => total + group.workspaces.length, 0);
 
   async function handleLogout() {
+    setPreferencesOpen(false);setUserMenuOpen(false);
     try {
       await logout();
     } catch {
@@ -751,6 +690,7 @@ function WorkspaceLayout() {
   }
 
   function handleOpenChangePassword() {
+    setPreferencesOpen(false);setSwitcherOpen(false);setUserMenuOpen(false);
     passwordForm.resetFields();
     setPasswordDrawerOpen(true);
   }
@@ -796,6 +736,7 @@ function WorkspaceLayout() {
   }
 
   async function handleOpenNetworkLogs() {
+    setPreferencesOpen(false);setUserMenuOpen(false);
     setNetworkLogOpen(true);
     await refreshNetworkLogs();
   }
@@ -910,6 +851,7 @@ function WorkspaceLayout() {
   }
 
   function enterWorkspace(workspace: WorkspaceIdentity) {
+    setPreferencesOpen(false);setUserMenuOpen(false);
     selectWorkspace(workspace);
     setSwitcherOpen(false);
     setSwitcherSearch("");
@@ -1063,21 +1005,6 @@ function WorkspaceLayout() {
                     />
                   </Badge>
                 </Tooltip>
-                <Tooltip title={colorScheme === "dark" ? "切换亮色" : "切换暗色"}>
-                  <Button
-                    aria-label={colorScheme === "dark" ? "切换亮色" : "切换暗色"}
-                    className="desktop-quick-action desktop-quick-action--theme"
-                    icon={
-                      colorScheme === "dark" ? (
-                        <IconSunHigh size={26} stroke={1.35} />
-                      ) : (
-                        <IconMoon size={26} stroke={1.35} />
-                      )
-                    }
-                    onClick={() => setAdminColorScheme(colorScheme === "dark" ? "light" : "dark")}
-                    type="text"
-                  />
-                </Tooltip>
                 {showFullscreenAction ? (
                   <Tooltip title={fullscreenActive ? "退出全屏" : isDesktopClient ? "全屏显示" : "浏览器全屏"}>
                     <Button
@@ -1108,7 +1035,9 @@ function WorkspaceLayout() {
                 </Tooltip>
                 {user ? (
                   <Dropdown
+                    open={userMenuOpen} onOpenChange={setUserMenuOpen}
                     menu={{
+                      onClick:()=>setUserMenuOpen(false),
                       items: [
                         {
                           key: "current-user",
@@ -1127,16 +1056,21 @@ function WorkspaceLayout() {
                                 key: "switch-workspace",
                                 icon: <SwapOutlined />,
                                 label: "切换工作区",
-                                onClick: () => setSwitcherOpen(true)
+                                onClick: () => {setPreferencesOpen(false);setPasswordDrawerOpen(false);setUserMenuOpen(false);setSwitcherOpen(true);}
                               }
                             ]
                           : []),
+                        {
+                          key:"personal-preferences",icon:<SettingOutlined/>,label:"个人偏好",
+                          onClick:()=>{setUserMenuOpen(false);setSwitcherOpen(false);setPasswordDrawerOpen(false);setNetworkLogOpen(false);setPreferencesOpen(true);}
+                        },
                         {
                           key: "change-password",
                           icon: <KeyOutlined />,
                           label: "修改登录密码",
                           onClick: handleOpenChangePassword
                         },
+                        { type: "divider" },
                         {
                           key: "logout",
                           icon: <LogoutOutlined />,
@@ -1296,6 +1230,8 @@ function WorkspaceLayout() {
                 </Space>
               </Drawer>
             ) : null}
+
+            <PersonalPreferencesDrawer open={preferencesOpen&&!locked} onClose={()=>setPreferencesOpen(false)} />
 
             <Drawer
               destroyOnClose

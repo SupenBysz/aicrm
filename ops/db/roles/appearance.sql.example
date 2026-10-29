@@ -1,0 +1,6 @@
+-- psql -v auth_writer=actual_auth_role -v org_writer=actual_org_role -f this-file
+-- Apply only when runtime service roles are separate from the migration role.
+GRANT SELECT,INSERT,UPDATE ON ky_user_appearance TO :"auth_writer";
+GRANT SELECT,INSERT,UPDATE ON ky_platform_appearance TO :"org_writer";
+GRANT SELECT,INSERT ON ky_platform_appearance_change TO :"org_writer";
+GRANT USAGE ON SEQUENCE ky_platform_appearance_change_id_seq TO :"org_writer";

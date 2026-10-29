@@ -16,6 +16,7 @@ export const WORKSPACE_LABELS: Record<string, string> = {
 };
 
 export const RESOURCE_LABELS: Record<string, string> = {
+  appearance: "外观主题",
   access: "访问控制",
   agencies: "机构",
   ai_configuration: "AI 配置",

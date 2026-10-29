@@ -49,3 +49,11 @@
 .agency-brand-preview-header .agency-brand-wordmark{min-width:0;max-width:100%;flex-shrink:1}
 
 .agency-brand-preview-header .agency-brand-lockup{width:calc(var(--admin-sidebar-width,177px) - 32px);gap:0}
+/* Upload chrome follows appearance; image substrates remain neutral. */
+.agency-brand-upload{background:var(--admin-surface-soft)}
+.agency-brand-upload-button.ant-btn{background:var(--admin-accent-soft)}
+.agency-brand-upload-button.ant-btn:not(:disabled):hover{background:var(--admin-toolbar-hover)!important;color:var(--admin-accent)!important}
+.agency-brand-upload .ant-typography{color:var(--admin-text)}
+.agency-brand-upload .ant-typography.ant-typography-secondary{color:var(--admin-text-muted)}
+.agency-brand-upload .agency-brand-upload-button.ant-btn{color:var(--admin-accent)}
+.agency-brand-upload .agency-brand-upload-button.ant-btn-dangerous{color:var(--ant-color-error,#c43c3c)}

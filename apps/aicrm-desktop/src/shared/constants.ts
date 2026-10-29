@@ -31,6 +31,7 @@ export const IPC_CHANNELS = {
   sessionLoad: "session:load",
   sessionSave: "session:save",
   sessionClear: "session:clear",
+  windowSetAppearance: "window:set-appearance",
   windowGetState: "window:get-state",
   windowMinimize: "window:minimize",
   windowToggleMaximize: "window:toggle-maximize",

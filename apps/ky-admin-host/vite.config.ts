@@ -15,6 +15,7 @@ export default defineConfig({
   define: { __KWW_ADMIN_PLUGIN_BUILD__: JSON.stringify({buildId, versions}) },
   plugins: [react()],
   resolve: {
+    dedupe: ["react", "react-dom", "antd", "@ant-design/icons"],
     alias: {
       "@ky/plugin-script-management": new URL("../../plugins/ky-script-management/src/index.tsx", import.meta.url).pathname,
       "@ky/admin-core": new URL("../../packages/ky-admin-core/src/index.ts", import.meta.url).pathname,
