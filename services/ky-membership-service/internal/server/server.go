@@ -40,6 +40,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /internal/v1/agency-statistics", s.agencyStatistics)
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("POST /internal/v1/access-decisions", s.internalAccessDecision)
