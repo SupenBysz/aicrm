@@ -7,6 +7,8 @@ import (
 )
 
 type Config struct {
+	AuthServiceURL  string
+	OrgServiceURL   string
 	ServiceName     string
 	HTTPAddr        string
 	RuntimeEnvFile  string
@@ -29,6 +31,8 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 	}
 
 	return Config{
+		AuthServiceURL:  os.Getenv("KY_AUTH_SERVICE_URL"),
+		OrgServiceURL:   os.Getenv("KY_ORG_SERVICE_URL"),
 		ServiceName:     serviceName,
 		HTTPAddr:        addr,
 		RuntimeEnvFile:  runtimeEnvFile,

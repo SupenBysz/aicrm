@@ -1,18 +1,28 @@
+import {useQuery} from "@tanstack/react-query";
+import {requestClient} from "../remote-api";
+import type {CopyrightStyle} from "@ky/admin-core";
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from "antd";
-import { useState } from "react";
+import { useState,useLayoutEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { bootstrap, login, pickRecommendedWorkspace } from "../remote-api";
 import { saveSession, setBootstrap, selectWorkspace, workspaceWorkbenchPath } from "../app-store";
 import { usePlatformProfile } from "../platform-profile";
 
+import { formatCopyright } from "@ky/admin-core";
+
 const PASSWORD_MIN_LENGTH = 6;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { icpRecord, logoTextLong, name: companyName } = usePlatformProfile();
+  const profile=usePlatformProfile();
+ const entry=useQuery({queryKey:["public-entry",window.location.host],retry:false,queryFn:()=>requestClient.request<{institution:boolean;brand?:{name:string;applicationName:string;copyrightHolder:string;copyrightStyle:CopyrightStyle;wordmarkGenerated?:boolean;wordmark?:{url:string}}}>("/api/v1/public/entry",{skipAuthRedirect:true})});
+ const brand=entry.data?.institution?entry.data.brand:undefined;
+ const {icpRecord,refresh}=profile;const logoTextLong=brand?.name??profile.logoTextLong,companyName=brand?.copyrightHolder??profile.name,copyrightStyle=brand?.copyrightStyle??profile.copyrightStyle,ready=profile.ready&&entry.isSuccess&&(!entry.data.institution||!!brand),error=profile.error||entry.isError;
   const [submitting, setSubmitting] = useState(false);
-  const currentYear = new Date().getFullYear();
+ const [imageBroken,setImageBroken]=useState(false);
+ useLayoutEffect(()=>{document.title=ready?`${logoTextLong} 后台`:"管理后台";return()=>{document.title="管理后台"}},[ready,logoTextLong]);
+ if(!ready)return <div role="status" className="auth-page">{error?<Button onClick={()=>{refresh();void entry.refetch()}}>品牌加载失败，重试</Button>:"正在加载…"}</div>;
 
   async function handleFinish(values: { username: string; password: string }) {
     setSubmitting(true);
@@ -51,7 +61,7 @@ export function LoginPage() {
               <div className="login-hero">
                 <div>
                   <Typography.Text className="login-eyebrow" type="secondary">
-                    {logoTextLong} Console
+                    {entry.data?.institution&&brand?.wordmark?.url&&!imageBroken?<img src={brand.wordmark.url} alt={logoTextLong} style={{maxWidth:240,maxHeight:48,filter:brand.wordmarkGenerated?"var(--brand-generated-filter,none)":undefined}} onError={()=>setImageBroken(true)}/>:`${logoTextLong} Console`}
                   </Typography.Text>
                   <Typography.Title className="login-title" level={1}>
                     后台登录
@@ -152,7 +162,7 @@ export function LoginPage() {
 
         <Space className="login-footer" direction="vertical" size={2}>
           <Typography.Text type="secondary">
-            © {currentYear} {companyName}
+            {formatCopyright(companyName, copyrightStyle)}
           </Typography.Text>
           {icpRecord ? <Typography.Text type="secondary">{icpRecord}</Typography.Text> : null}
         </Space>

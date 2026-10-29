@@ -1,3 +1,5 @@
+import {WorkspaceBrandLogo} from "./workspace-brand-logo";
+import {Presence} from "./presence";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ApartmentOutlined,
@@ -278,6 +280,7 @@ export function App() {
       }}
     >
       <QueryClientProvider client={queryClient}>
+ <Presence />
         <RequestClientProvider client={requestClient}>
           <AntdApp>
             <DesktopClientFrame>
@@ -981,7 +984,7 @@ function WorkspaceLayout() {
                     className="brand-title"
                     style={effectiveSidebarCollapsed ? platformProfile.logoTextShortStyle : platformProfile.logoTextLongStyle}
                   >
-                    {workspaceBackendTitle(currentWorkspace, platformProfile, effectiveSidebarCollapsed ? "short" : "full")}
+                    {<WorkspaceBrandLogo workspace={currentWorkspace} collapsed={effectiveSidebarCollapsed}/>}
                   </Typography.Text>
                 </div>
               </div>

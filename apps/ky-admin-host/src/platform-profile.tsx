@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
-import { isDesktopClientMode } from "./desktop-client";
+import type { CopyrightStyle } from "@ky/admin-core";
 
 export interface PlatformProfile {
   companyName: string;
+  copyrightStyle: CopyrightStyle;
   brandLogoTextLong: string;
   brandLogoTextShort: string;
   longLogoFontSize: number;
@@ -14,7 +15,7 @@ export interface PlatformProfile {
   icpRecord: string;
 }
 
-export const DEFAULT_PLATFORM_NAME = "AiCRM";
+export const DEFAULT_PLATFORM_NAME = "KyCRM";
 const STORAGE_KEY = "ky.platform.profile.v1";
 // Components can dispatch this after editing 基础信息 to refresh the brand immediately.
 export const PLATFORM_PROFILE_UPDATED_EVENT = "ky:platform-profile-updated";
@@ -28,6 +29,8 @@ interface PlatformProfileContextValue extends PlatformProfile {
   logoTextShort: string;
   logoTextLongStyle: LogoTextStyle;
   logoTextShortStyle: LogoTextStyle;
+  ready:boolean;
+  error:boolean;
   refresh: () => void;
 }
 
@@ -54,6 +57,7 @@ function compactLogoText(value: string): string {
 function normalizeProfile(value: Partial<PlatformProfile> | null | undefined): PlatformProfile {
   return {
     companyName: value?.companyName ?? "",
+    copyrightStyle: value?.copyrightStyle === "full" || value?.copyrightStyle === "chinese" ? value.copyrightStyle : "standard",
     brandLogoTextLong: value?.brandLogoTextLong ?? "",
     brandLogoTextShort: value?.brandLogoTextShort ?? "",
     longLogoFontSize: value?.longLogoFontSize && value.longLogoFontSize >= 8 && value.longLogoFontSize <= 72 ? value.longLogoFontSize : 16,
@@ -89,6 +93,8 @@ const defaultResolved = resolveProfile(defaultProfile);
 const PlatformProfileContext = createContext<PlatformProfileContextValue>({
   ...defaultProfile,
   ...defaultResolved,
+  ready:false,
+  error:false,
   refresh: () => {}
 });
 
@@ -105,17 +111,20 @@ function readCache(): PlatformProfile {
 export function PlatformProfileProvider({ children }: PropsWithChildren) {
   const [profile, setProfile] = useState<PlatformProfile>(readCache);
   const refreshGeneration = useRef(0);
+ const [ready,setReady]=useState(false),[error,setError]=useState(false);
 
   const refresh = useCallback(() => {
     const generation = ++refreshGeneration.current;
     // Public, no-auth endpoint: usable on the login page before sign-in.
     fetch("/api/v1/public/platform-profile")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {if(!r.ok)throw new Error("profile unavailable");return r.json()})
       .then((body) => {
         const data = body?.data;
+ if(!data || typeof data!=="object")throw new Error("profile unavailable");
         if (data && generation === refreshGeneration.current) {
           const next = normalizeProfile(data);
           setProfile(next);
+ setReady(true);setError(false);
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
           } catch {
@@ -124,7 +133,7 @@ export function PlatformProfileProvider({ children }: PropsWithChildren) {
         }
       })
       .catch(() => {
-        // keep cached / default
+        if(generation===refreshGeneration.current)setError(true);
       });
   }, []);
 
@@ -140,15 +149,10 @@ export function PlatformProfileProvider({ children }: PropsWithChildren) {
 
   const resolved = resolveProfile(profile);
 
-  // The desktop program title is the configured brand name. Browser tabs keep
-  // the context suffix so they remain distinguishable from the native client.
-  useEffect(() => {
-    document.title = isDesktopClientMode() ? resolved.logoTextLong : `${resolved.logoTextLong} 后台`;
-  }, [resolved.logoTextLong]);
 
   return (
-    <PlatformProfileContext.Provider value={{ ...profile, ...resolved, refresh }}>
-      {children}
+    <PlatformProfileContext.Provider value={{ ...profile, ...resolved, ready,error,refresh }}>
+      {ready?children:<div role="status" style={{padding:24}}>{error?<button onClick={refresh}>品牌加载失败，重试</button>:"正在加载…"}</div>}
     </PlatformProfileContext.Provider>
   );
 }

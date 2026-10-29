@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"time"
 
 	sessionpkg "github.com/Kysion/KyaiCRM/shared/session"
@@ -70,11 +71,22 @@ func (s *Store) FindPasswordCredentialByUserID(ctx context.Context, userID strin
 }
 
 func (s *Store) CreateSession(ctx context.Context, session Session) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO ky_user_session (id, user_id, token_id, user_agent, ip_address, status, expires_at)
-		VALUES ($1, $2, $3, $4, $5, 'active', $6)
-	`, session.ID, session.UserID, session.TokenID, session.UserAgent, session.IPAddress, session.ExpiresAt)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO ky_user_session(id,user_id,token_id,user_agent,ip_address,status,expires_at) VALUES($1,$2,$3,$4,$5,'active',$6)`, session.ID, session.UserID, session.TokenID, session.UserAgent, session.IPAddress, session.ExpiresAt)
+	if err != nil {
+		return err
+	}
+	entry := domainentry.From(ctx)
+	if entry.BindingID != "" {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO ky_auth_session_entry(session_id,hostname,binding_id,agency_id,generation) VALUES($1,$2,$3,$4,$5)`, session.ID, entry.Host, entry.BindingID, entry.AgencyID, entry.Generation); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) RevokeSession(ctx context.Context, sessionID string) error {

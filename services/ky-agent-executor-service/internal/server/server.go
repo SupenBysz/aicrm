@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"net/http"
 	"os"
 	"strings"
@@ -132,6 +133,14 @@ func newWithControl(cfg config.Config, reader store.Reader, control controlStore
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if err := domainentry.Validate(); err != nil {
+		return err
+	}
+	if os.Getenv("KY_DOMAIN_ENTRY_ENABLED") == "1" {
+		if err := domainentry.LoopbackListen(s.cfg.HTTPAddr); err != nil {
+			return err
+		}
+	}
 	if err := s.cfg.Validate(); err != nil {
 		return err
 	}
@@ -297,7 +306,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	httpServer := &http.Server{
 		Addr:              s.cfg.HTTPAddr,
-		Handler:           s.buildMux(),
+		Handler:           domainentry.Wrap(s.buildMux(), false, "ky-agent-executor-service"),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

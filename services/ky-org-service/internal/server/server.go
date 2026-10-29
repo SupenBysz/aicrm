@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-org-service/internal/config"
@@ -36,6 +38,14 @@ type wsContext struct {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if err := domainentry.Validate(); err != nil {
+		return err
+	}
+	if os.Getenv("KY_DOMAIN_ENTRY_ENABLED") == "1" {
+		if err := domainentry.LoopbackListen(s.cfg.HTTPAddr); err != nil {
+			return err
+		}
+	}
 	if s.cfg.DatabaseURL != "" {
 		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
 		if err != nil {
@@ -55,12 +65,25 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
+	s.domainRoutes(mux)
+	mux.HandleFunc("POST /internal/v1/agencies/{id}/branding", s.internalAgencyBrand)
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /healthz", s.healthz)
 
 	perms := func(codes ...string) []string { return codes }
 	const orgWs = "agency,enterprise"
 
+	mux.HandleFunc("GET /api/v1/public/brand-assets/{assetId}", s.publicBrandAsset)
+	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding", s.ws("platform", perms("platform.agency_branding.view"), s.getAgencyBrand))
+	mux.HandleFunc("POST /api/v1/platform/agencies/{id}/branding/draft", s.ws("platform", perms("platform.agency_branding.update"), s.saveAgencyBrand))
+	mux.HandleFunc("POST /api/v1/platform/agencies/{id}/branding/assets", s.ws("platform", perms("platform.agency_branding.update"), s.uploadBrandAsset))
+	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding/assets/{assetId}", s.ws("platform", perms("platform.agency_branding.view"), s.draftBrandAsset))
+	mux.HandleFunc("POST /api/v1/platform/agencies/{id}/branding/publish", s.ws("platform", perms("platform.agency_branding.publish"), s.publishAgencyBrand))
+	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding/history", s.ws("platform", perms("platform.agency_branding.view"), s.brandHistory))
+	mux.HandleFunc("GET /api/v1/organizations/current/branding", s.ws(orgWs, nil, s.currentWorkspaceBrand))
+
+	mux.HandleFunc("POST /api/v1/platform/agencies/statistics", s.ws("platform", perms("platform.agencies.view"), s.agencyStatistics))
+	mux.HandleFunc("POST /api/v1/platform/enterprises/statistics", s.ws("platform", perms("platform.enterprises.view"), s.agencyStatistics))
 	// Platform agencies
 	mux.HandleFunc("GET /api/v1/platform/plugin-management/service-health", s.pluginServiceHealth)
 
@@ -112,6 +135,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/public/platform-profile", s.getPublicPlatformProfile)
 	mux.HandleFunc("GET /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.view"), s.getPlatformProfile))
 	mux.HandleFunc("PATCH /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.update"), s.updatePlatformProfile))
+	mux.HandleFunc("PATCH /api/v1/platform/platform-profile/edit", s.ws("platform", perms("platform.basic_info.update"), s.editPlatformProfile))
 
 	// 通知模板 (notification templates)
 	mux.HandleFunc("GET /api/v1/platform/notification-templates", s.ws("platform", perms("platform.notification_templates.view"), s.listNotificationTemplates))
@@ -175,7 +199,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("PATCH /api/v1/teams/{id}", s.ws(orgWs, perms("agency.teams.update", "enterprise.teams.update"), s.updateTeam))
 	mux.HandleFunc("POST /api/v1/teams/{id}/members", s.ws(orgWs, perms("agency.teams.manage_members", "enterprise.teams.manage_members"), s.setTeamMembers))
 
-	server := &http.Server{Addr: s.cfg.HTTPAddr, Handler: mux}
+	server := &http.Server{Addr: s.cfg.HTTPAddr, Handler: domainentry.Wrap(mux, false, "ky-org-service")}
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()

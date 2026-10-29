@@ -41,7 +41,7 @@ export class HostRequestClient implements RequestClient {
     const response = await this.fetch(path, options);
     const requestId = response.requestId;
     const envelope = await readEnvelope<T>(response.response, requestId);
-    if (!options.skipAuthRedirect && (response.response.status === 401 || envelope.error?.code === "unauthorized")) {
+    if (!options.skipAuthRedirect && (response.response.status === 401 || (envelope.error?.code === "unauthorized" || envelope.error?.code === "entry_denied"))) {
       handleSessionExpired();
     }
     if (!response.response.ok || envelope.error) {
@@ -63,6 +63,7 @@ export class HostRequestClient implements RequestClient {
     }
     if (!response.ok) {
       const envelope = await readEnvelope<unknown>(response, "");
+      if (!options.skipAuthRedirect && envelope.error?.code === "entry_denied") handleSessionExpired();
       throw new ApiError(envelope.error?.message ?? `Request failed: ${response.status}`, envelope.error?.code ?? "request_failed");
     }
     return response;

@@ -1,0 +1,15 @@
+[Unit]
+Description=KyCRM institutional domain gateway
+After=network-online.target
+[Service]
+User=ky-domain-gateway
+Group=ky-domain-gateway
+EnvironmentFile=/etc/kycrm/domain-gateway.env
+ExecStart=/opt/kycrm/bin/domain-gateway
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+-- Runtime roles are supplied by the operator; no new global permissions.
+GRANT SELECT,INSERT,UPDATE ON ky_agency_domain,ky_agency_domain_task TO :"org_writer";
+GRANT SELECT,INSERT ON ky_agency_domain_command,ky_agency_domain_audit TO :"org_writer";
+GRANT USAGE ON SEQUENCE ky_agency_domain_audit_id_seq TO :"org_writer";
+GRANT SELECT,INSERT ON ky_auth_session_entry TO :"auth_writer";
+-- Worker/gateway use controlled Org APIs, no database access or additional table grants.
