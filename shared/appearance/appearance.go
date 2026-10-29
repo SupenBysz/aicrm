@@ -36,7 +36,7 @@ func (v Value) Valid(personal bool) bool {
 	if !personal && v.Source != "platform" {
 		return false
 	}
-	return (v.ThemeID == "classic-gold" || v.ThemeID == "business-blue" || v.ThemeID == "jade-green") && (v.Mode == "light" || v.Mode == "dark" || v.Mode == "system")
+	return (v.ThemeID == "classic-gold" || v.ThemeID == "business-blue" || v.ThemeID == "jade-green" || v.ThemeID == "graphite-cyan") && (v.Mode == "light" || v.Mode == "dark" || v.Mode == "system")
 }
 
 func Decode(w http.ResponseWriter, r *http.Request, v *Value) bool {
