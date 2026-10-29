@@ -22,6 +22,7 @@ export const systemSettingsPlugin: AdminPlugin = {
       menuKey: "system.settings.view",
       requiredAnyPermissions: [
         "platform.settings.view",
+        "platform.appearance.view",
         "agency.settings.view",
         "enterprise.settings.view",
         "platform.dictionaries.view",

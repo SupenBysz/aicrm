@@ -1,3 +1,4 @@
+import { storedNativeBackground } from "../window-appearance";
 import { registerSender } from "../guarded-ipc";
 import { guardedIpc as ipcMain } from "../guarded-ipc";
 import { join } from "node:path";
@@ -47,7 +48,7 @@ function openTerminalWindow(
     minHeight: TERMINAL_WINDOW_DEFAULT_HEIGHT,
     title: windowTitle,
     autoHideMenuBar: true,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#050806" : "#f7efe4",
+    backgroundColor: storedNativeBackground() ?? (nativeTheme.shouldUseDarkColors ? "#050505" : "#f7efe4"),
     frame: false,
     show: false,
     webPreferences: {

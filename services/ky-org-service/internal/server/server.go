@@ -129,6 +129,9 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/settings", s.ws(orgWs, perms("agency.settings.view", "enterprise.settings.view"), s.getSettings))
 	mux.HandleFunc("PATCH /api/v1/settings", s.ws(orgWs, perms("agency.settings.update", "enterprise.settings.update"), s.updateSettings))
 	mux.HandleFunc("GET /api/v1/platform/system-settings", s.ws("platform", perms("platform.settings.view"), s.getPlatformSettings))
+	mux.HandleFunc("GET /api/v1/public/appearance", s.publicAppearance)
+	mux.HandleFunc("GET /api/v1/platform/appearance", s.ws("platform", perms("platform.appearance.view"), s.getAppearance))
+	mux.HandleFunc("PUT /api/v1/platform/appearance", s.ws("platform", perms("platform.appearance.update"), s.updateAppearance))
 	mux.HandleFunc("PATCH /api/v1/platform/system-settings", s.ws("platform", perms("platform.settings.update"), s.updatePlatformSettings))
 
 	// 基础信息 (platform identity) — public read + platform manage.

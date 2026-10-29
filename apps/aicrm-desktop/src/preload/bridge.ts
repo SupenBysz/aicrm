@@ -19,6 +19,7 @@ const bridge: AiCrmDesktopBridge = {
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.sessionClear)
   },
   window: {
+    setAppearance: (value) => ipcRenderer.invoke(IPC_CHANNELS.windowSetAppearance, value).then((result: {ok:boolean;data?:boolean}) => result.ok && result.data===true),
     getState: () => ipcRenderer.invoke(IPC_CHANNELS.windowGetState),
     minimize: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),
     toggleMaximize: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),

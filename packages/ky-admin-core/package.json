@@ -7,6 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test:appearance": "node --test src/theme/theme.test.mjs",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:ai-executor-desktop": "node --test src/ai-executor-desktop.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -22,6 +22,7 @@ export interface DesktopBridgeLike {
     getConfig?: () => Promise<{ debugMode?: boolean }>;
   };
   window?: {
+    setAppearance?: (value: {themeId: string; dark: boolean}) => Promise<boolean>;
     getState?: () => Promise<DesktopWindowState>;
     setFullScreen?: (enabled: boolean) => Promise<DesktopWindowState>;
     setAlwaysOnTop?: (enabled: boolean) => Promise<DesktopWindowState>;

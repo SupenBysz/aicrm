@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { resolveSettingsTab } from "../settings-tab-selection";
+import { AppearancePage } from "./appearance-page";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { Empty, Tabs } from "antd";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -33,6 +35,7 @@ interface Section {
 
 const SECTIONS: Section[] = [
   { key: "basic-info", label: "基础信息", icon: <IdcardOutlined />, perm: "platform.basic_info.view", element: <BasicInfoPage /> },
+  { key: "appearance", label: "外观主题", icon: <SlidersOutlined />, perm: "platform.appearance.view", element: <AppearancePage /> },
   { key: "settings", label: "参数配置", icon: <SlidersOutlined />, anyPerms: ["platform.settings.view", "agency.settings.view", "enterprise.settings.view"], element: <SettingsPage /> },
   { key: "dictionaries", label: "数据字典", icon: <BookOutlined />, perm: "platform.dictionaries.view", element: <DictionariesPage /> },
   { key: "notification-templates", label: "通知模板", icon: <NotificationOutlined />, perm: "platform.notification_templates.view", element: <NotificationTemplatesPage /> },
@@ -49,28 +52,26 @@ export function SettingsHubPage() {
     () => SECTIONS.filter((s) => (s.anyPerms ? permissions.canAny(s.anyPerms) : s.perm ? permissions.can(s.perm) : true)),
     [permissions]
   );
-  const [active, setActive] = useState("");
-
-  const urlTabToKey = (value: string | null) => (value === "parameters" || value === "settings" ? "settings" : value ?? "");
   const keyToUrlTab = (key: string) => (key === "settings" ? "parameters" : key);
-
-  useEffect(() => {
-    const requested = urlTabToKey(searchParams.get("tab"));
-    setActive(sections.some((section) => section.key === requested) ? requested : sections[0]?.key ?? "");
-  }, [searchParams, sections]);
+  const selection=resolveSettingsTab(searchParams.get("tab"),sections.map(section=>section.key));
+  const activeKey=selection?.key??"";
+  const canonicalTab=selection?.urlValue??"";
+  useEffect(()=>{
+    if(!canonicalTab||searchParams.get("tab")===canonicalTab)return;
+    const next=new URLSearchParams(searchParams);next.set("tab",canonicalTab);
+    setSearchParams(next,{replace:true});
+  },[canonicalTab,searchParams,setSearchParams]);
 
   if (sections.length === 0) {
     return <Empty style={{ marginTop: 80 }} description="暂无可访问的系统配置项" />;
   }
 
-  const activeKey = sections.some((s) => s.key === active) ? active : sections[0].key;
 
   return (
     <Tabs
       className="system-settings-hub-tabs"
       activeKey={activeKey}
       onChange={(key) => {
-        setActive(key);
         const next = new URLSearchParams(searchParams);
         next.set("tab", keyToUrlTab(key));
         setSearchParams(next);
@@ -82,7 +83,7 @@ export function SettingsHubPage() {
             {s.icon} {s.label}
           </span>
         ),
-        // Only the active tab mounts — avoids 8 pages firing queries at once.
+        // Only the active tab mounts — avoids inactive pages firing queries at once.
         children: s.key === activeKey ? <div className="system-settings-hub-tab-content">{s.element}</div> : null
       }))}
     />

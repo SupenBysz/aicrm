@@ -146,7 +146,7 @@ func Wrap(next http.Handler, authService bool, serviceNames ...string) http.Hand
 		r = r.WithContext(With(r.Context(), entry))
 		w.Header().Set("Cache-Control", "no-store")
 		// Public institution surface is intentionally small until every additional auth path is reviewed.
-		public := r.Method == "GET" && r.URL.Path == "/api/v1/public/platform-profile" || entry.BindingID != "" && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/public/brand-assets/") || r.Method == "POST" && r.URL.Path == "/api/v1/auth/login" || r.Method == "GET" && r.URL.Path == "/api/v1/public/entry"
+		public := r.Method == "GET" && (r.URL.Path == "/api/v1/public/platform-profile" || r.URL.Path == "/api/v1/public/appearance") || entry.BindingID != "" && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/public/brand-assets/") || r.Method == "POST" && r.URL.Path == "/api/v1/auth/login" || r.Method == "GET" && r.URL.Path == "/api/v1/public/entry"
 		if entry.BindingID != "" && (r.URL.Path == "/api/v1/auth/register" || strings.EqualFold(r.Header.Get("Upgrade"), "websocket")) {
 			Fail(w, 403)
 			return

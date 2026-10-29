@@ -55,6 +55,7 @@ template/   从本工程梳理出的衍生模板资产和解决方案级 skill�
 
 当前阶段基线以 `docs/` 下的文档为准，重点文档包括：
 
+- 多配色外观主题：[需求与迭代方案](docs/appearance-theme/需求与迭代方案.md)、[实施与验证记录](docs/appearance-theme/实施与验证记录.md)、[个人偏好入口方案](docs/appearance-theme/个人偏好入口与设置迭代方案.md)
 - 总体架构：`docs/kyai_crm_architecture.md`
 - Post-Phase1 v9.1 执行架构：`docs/kyai_crm_v9_execution_architecture.md`
 - Matrix Account v9：`docs/kyai_crm_matrix_account_requirements.md`
