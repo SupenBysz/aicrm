@@ -9,32 +9,32 @@
     {
       "name": "ghcr.io/supenbysz/kycrm-web",
       "newName": "ghcr.io/supenbysz/kycrm-web",
-      "digest": "sha256:0ef129ffcfb58298c8c3e360333756579667c52684822800e07ec5bbdcbe9bdd"
+      "digest": "sha256:11672b7488e9d35cd83b217691b195b69f1317307b178d37c400bc3f8d7cb65b"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-auth",
       "newName": "ghcr.io/supenbysz/kycrm-auth",
-      "digest": "sha256:1f3b10608c99ac7aacf9e7a7c82658077054229d7f73cc55630824b69372f5fb"
+      "digest": "sha256:a8bc947281c34952d1815b15a5a757d912412f84b0f1857861c5f90c6e88baa6"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-org",
       "newName": "ghcr.io/supenbysz/kycrm-org",
-      "digest": "sha256:ba58e6c2300d2ba1bde3e64d4354628c06274dd80132f215d3987d008134721a"
+      "digest": "sha256:5062523f852265003fcfcc412d52c5bd4e8d3dae1556c97ef3a2b3f37e9188a1"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-membership",
       "newName": "ghcr.io/supenbysz/kycrm-membership",
-      "digest": "sha256:ce43a63ba68fa5bd9fb26ca805e593bfe5fb66fd366e00e8b91a377582b0bd03"
+      "digest": "sha256:d709c3cc080e151455b5d12d4a3489799c36b646f707ac9e298aa04750e5e144"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-matrix",
       "newName": "ghcr.io/supenbysz/kycrm-matrix",
-      "digest": "sha256:10f44b8eb31f4ce94c5c4ce5a89cddc657e771de214ebfd47cf86914d496246e"
+      "digest": "sha256:d1ae6ab415f9702c4f2ce06a764cecb6c20cf890a80c09cdae3906417bc774a8"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-ai",
       "newName": "ghcr.io/supenbysz/kycrm-ai",
-      "digest": "sha256:a2ffb193fafdf55425f183790367ac4b06b92485e66aac601940db20a144d4c2"
+      "digest": "sha256:38d6dfea71105f6b6dc296b954eab9ff103f8cead5d7ca0f0e2a70640608a9b1"
     }
   ]
 }
