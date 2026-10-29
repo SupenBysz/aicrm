@@ -95,6 +95,21 @@ export interface DesktopWindowState {
   isAlwaysOnTop: boolean;
 }
 
+export interface MenuWebViewOpenInput { directoryType: "management" | "workbench"; menuKey: string; workspaceType: WorkspaceType; workspaceId: string }
+export interface MenuWebViewOpenResult { instanceId: string; openMode: "embedded" | "window"; title: string }
+export interface MenuWebViewBoundsInput { instanceId: string; x: number; y: number; width: number; height: number; visible: boolean }
+export interface MenuWebViewNavigateInput { instanceId: string; command: "back" | "forward" | "reload" }
+export interface MenuWebViewCloseInput { instanceId: string }
+export interface MenuWebViewState { instanceId: string; status: "loading" | "ready" | "failed" | "closed"; title: string; url?: string; errorCode?: string }
+export interface MenuWebViewStateChanged { instanceId: string; state: MenuWebViewState }
+export interface MenuWebViewDesktopBridge {
+  open(input: MenuWebViewOpenInput): Promise<DesktopCommandResult<MenuWebViewOpenResult>>;
+  setBounds(input: MenuWebViewBoundsInput): Promise<DesktopCommandResult<{ updated: boolean }>>;
+  navigate(input: MenuWebViewNavigateInput): Promise<DesktopCommandResult<{ navigated: boolean }>>;
+  close(input: MenuWebViewCloseInput): Promise<DesktopCommandResult<{ closed: boolean }>>;
+  onChanged(listener: (event: MenuWebViewStateChanged) => void): () => void;
+}
+
 export interface DesktopOpenDevToolsResult {
   opened: boolean;
   reason?: "production" | "unavailable";

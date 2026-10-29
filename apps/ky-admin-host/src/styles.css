@@ -478,6 +478,39 @@ body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.i
   transition: margin-left 0.2s ease;
 }
 
+.workspace-area-route-pane {
+  display: contents;
+}
+
+.workspace-area-route-pane[hidden] {
+  display: none;
+}
+
+.workspace-area-route-overlay-root {
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 1000;
+}
+
+.workspace-area-route-overlay-root > * {
+  pointer-events: auto;
+}
+
+.app-content:has(> .workspace-area-route-pane:not([hidden]) .menu-webview-page) {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+  padding-bottom: 12px;
+  scrollbar-gutter: auto;
+}
+
+.app-content:has(> .workspace-area-route-pane:not([hidden]) .menu-webview-page) .menu-webview-page {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
+
 .app-content::-webkit-scrollbar {
   width: 8px;
 }

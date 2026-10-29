@@ -1,8 +1,14 @@
 import { desktopPlugins } from "./plugin-host-bridge";
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC_CHANNELS } from "../shared/constants";
-import type { DesktopSession, DesktopWindowState } from "../shared/types";
+import type { DesktopSession, DesktopWindowState, MenuWebViewStateChanged } from "../shared/types";
 import type { AiCrmDesktopBridge } from "./types";
+
+async function menuWebViewInvoke<T>(channel: string, input: unknown): Promise<import("../shared/types").DesktopCommandResult<T>> {
+  const envelope = await ipcRenderer.invoke(channel, input) as { ok?: boolean; data?: import("../shared/types").DesktopCommandResult<T>; error?: { code?: string; message?: string } };
+  if (envelope?.ok === true && envelope.data && typeof envelope.data === "object") return envelope.data;
+  return { ok: false, error: { code: envelope?.error?.code || "permission_denied", message: envelope?.error?.message || "菜单页面请求被拒绝" } };
+}
 
 const bridge: AiCrmDesktopBridge = {
   desktopPlugins,
@@ -111,6 +117,17 @@ const bridge: AiCrmDesktopBridge = {
       const handler = (_event: Electron.IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
       ipcRenderer.on(IPC_CHANNELS.matrixAccountOnboardingEvent, handler);
       return () => ipcRenderer.off(IPC_CHANNELS.matrixAccountOnboardingEvent, handler);
+    }
+  },
+  menuWebView: {
+    open: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewOpen, input),
+    setBounds: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewSetBounds, input),
+    navigate: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewNavigate, input),
+    close: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewClose, input),
+    onChanged: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: MenuWebViewStateChanged) => listener(payload);
+      ipcRenderer.on(IPC_CHANNELS.menuWebViewChanged, handler);
+      return () => ipcRenderer.off(IPC_CHANNELS.menuWebViewChanged, handler);
     }
   }
 };

@@ -19,6 +19,7 @@ import { registerCodexExecutorIpc } from "./ipc/codex-executor-ipc";
 import { registerDesktopDeviceIpc } from "./ipc/desktop-device-ipc";
 import { registerDesktopExecutorDeviceBindingIpc } from "./ipc/desktop-executor-device-binding-ipc";
 import { registerMatrixAccountIpc } from "./ipc/matrix-account-ipc";
+import { registerMenuWebViewIpc } from "./ipc/menu-webview-ipc";
 import { registerNetworkIpc } from "./ipc/network-ipc";
 import { registerWindowIpc } from "./ipc/window-ipc";
 import { installNetworkLogCapture } from "./network-log";
@@ -68,6 +69,7 @@ registerDesktopExecutorDeviceBindingIpc(
   ipcMain
 );
 registerMatrixAccountIpc();
+registerMenuWebViewIpc();
 registerNetworkIpc();
 registerWindowIpc();
 registerVersionDialogIpc();

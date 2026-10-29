@@ -3,7 +3,7 @@ import { PersonalPreferencesDrawer } from "./personal-preferences-drawer";
 import { useAppearance, appearanceAntdTheme } from "@ky/admin-core";
 import {WorkspaceBrandLogo} from "./workspace-brand-logo";
 import {Presence} from "./presence";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   ApartmentOutlined,
   ApiOutlined,
@@ -31,6 +31,7 @@ import {
   StarOutlined,
   SwapOutlined,
   TeamOutlined,
+  TikTokOutlined,
   UserOutlined,
   UsergroupAddOutlined
 } from "@ant-design/icons";
@@ -66,7 +67,7 @@ import {
   Tooltip,
   Typography
 } from "antd";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   Navigate,
   Outlet,
@@ -75,6 +76,8 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useNavigationType,
+  useOutlet,
   useParams
 } from "react-router-dom";
 import {
@@ -115,6 +118,24 @@ import {
 } from "./desktop-client";
 import { useTableHorizontalScrollbars } from "./table-horizontal-scrollbar";
 import { createPluginInventoryPort } from "./plugin-inventory";
+import { MenuWebViewPage } from "./pages/menu-webview-page";
+import { WorkspaceAreaRoutePane } from "./workspace-area-route-pane";
+import {
+  activateWorkspaceAreaScroll,
+  createWorkspaceAreaScrollMemory,
+  createWorkspaceAreaRouteCache,
+  rememberWorkspaceAreaScroll,
+  rememberWorkspaceAreaRoute,
+  selectWorkspaceAreaRoute,
+  workspaceAreaLocationKey,
+  type WorkspaceArea,
+  type WorkspaceAreaRouteSnapshot
+} from "./workspace-area-route-cache";
+import {
+  buildMenuNavigation,
+  normalizeMenuIconName,
+  type MenuNavigationDirectoryRow
+} from "./menu-navigation-model";
 
 const HEADER_HEIGHT = 76;
 const SIDEBAR_WIDTH = 177;
@@ -182,8 +203,47 @@ interface NavGroupMeta {
   items: NavMeta[];
 }
 
+type VisibleMenuItem = MenuNavigationDirectoryRow;
+
+function visibleWebViewGroups(
+  directoryType: "management" | "workbench",
+  items: VisibleMenuItem[],
+  ancestors: VisibleMenuItem[],
+  workspaceType: string,
+  workspacePath: (path: string) => string
+) {
+  const navigation = buildMenuNavigation({
+    candidates: [],
+    directory: [...items, ...ancestors],
+    workspaceType,
+    fallbackGroupLabel: directoryType === "workbench" ? WORKBENCH_LABEL : MANAGEMENT_CENTER_LABEL,
+    fallbackGroupIconName: (_label, fallback) => normalizeMenuIconName(fallback),
+    targetForWebView: (menuKey) => workspacePath(`/menu-pages/${directoryType}/${encodeURIComponent(menuKey)}`),
+    authoritative: true,
+    allowDynamicWebView: (row) => (row.status === undefined || row.status === "active")
+      && (!row.workspaceTypes || row.workspaceTypes.includes(workspaceType))
+  });
+  const toNavMeta = (item: (typeof navigation.standalone)[number]): NavMeta => ({
+    key: `server:${directoryType}:${item.menuKey}`,
+    icon: menuIcon(item.iconName),
+    label: item.label,
+    target: item.target,
+    groupLabel: item.groupLabel
+  });
+  return {
+    standalone: navigation.standalone.map(toNavMeta),
+    groups: navigation.groups.map((group) => ({
+      key: `server:${directoryType}:${group.key}`,
+      label: group.label,
+      icon: menuIcon(group.iconName),
+      items: group.items.map(toNavMeta)
+    }))
+  };
+}
+
 function menuIcon(name?: string): ReactNode {
-  return (name && MENU_ICONS[name]) || <AppstoreOutlined />;
+  const normalized = normalizeMenuIconName(name);
+  return MENU_ICONS[normalized] || (normalized === "TikTokOutlined" ? <TikTokOutlined /> : null) || <AppstoreOutlined />;
 }
 
 function menuGroupIcon(label: string, fallback?: ReactNode): ReactNode {
@@ -252,6 +312,7 @@ function ThemedApp() {
                   <Route index element={<Navigate to="workbench" replace />} />
                   <Route path="workbench" element={<WorkbenchPage />} />
                   <Route path="workbench/:section" element={<WorkbenchPage />} />
+                  <Route path="menu-pages/:directoryType/:menuKey" element={<MenuWebViewPage />} />
                   {pluginRoutes.map((route) => (
                     <Route
                       key={route.path}
@@ -343,9 +404,32 @@ interface ChangePasswordFormValues {
   confirmPassword: string;
 }
 
+function workspaceAreaScopeKey(userId: string, workspace: WorkspaceIdentity): string {
+  return JSON.stringify({
+    userId,
+    workspaceType: workspace.type,
+    workspaceId: workspace.id,
+    membershipId: workspace.membershipId,
+    roles: [...workspace.roles].sort(),
+    permissions: [...workspace.permissions].sort(),
+    actionPermissions: [...workspace.actionPermissions].sort(),
+    menuKeys: [...workspace.menuKeys].sort(),
+    dataScopes: [...workspace.dataScopes]
+      .map((scope) => ({
+        ...scope,
+        teamIds: [...(scope.teamIds ?? [])].sort(),
+        agencyIds: [...(scope.agencyIds ?? [])].sort(),
+        enterpriseIds: [...(scope.enterpriseIds ?? [])].sort()
+      }))
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  });
+}
+
 function WorkspaceLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
+  const nestedOutlet = useOutlet();
   const params = useParams();
   const platformProfile = usePlatformProfile();
   const { message } = AntdApp.useApp();
@@ -367,6 +451,9 @@ function WorkspaceLayout() {
   const [networkLogOpen, setNetworkLogOpen] = useState(false);
   const [networkLogSnapshot, setNetworkLogSnapshot] = useState<DesktopNetworkLogSnapshot | null>(null);
   const [networkLogLoading, setNetworkLogLoading] = useState(false);
+  const [areaRouteCache, setAreaRouteCache] = useState(() => createWorkspaceAreaRouteCache<ReactNode>(""));
+  const appContentRef = useRef<HTMLDivElement | null>(null);
+  const areaScrollMemoryRef = useRef(createWorkspaceAreaScrollMemory("", "manage"));
   const [locked, setLocked] = useState(() => isAdminLocked());
   const [webFullscreen, setWebFullscreen] = useState(() => {
     if (typeof document === "undefined") return false;
@@ -439,6 +526,27 @@ function WorkspaceLayout() {
   const currentWorkspace = workspaces.find(
     (workspace) => workspace.id === params.workspaceId && workspace.type === params.workspaceType
   );
+  const currentArea: WorkspaceArea = pathActive(location.pathname, `/w/${params.workspaceType}/${params.workspaceId}/workbench`)
+    || location.pathname.includes("/menu-pages/workbench/") ? "workbench" : "manage";
+  const areaScopeKey = currentWorkspace ? workspaceAreaScopeKey(user?.id ?? "", currentWorkspace) : "";
+  const terminalWindowMode = new URLSearchParams(location.search).get("terminalWindow") === "1";
+  useLayoutEffect(() => {
+    const element = appContentRef.current;
+    if (!element) return;
+    const activated = activateWorkspaceAreaScroll(areaScrollMemoryRef.current, areaScopeKey, currentArea);
+    areaScrollMemoryRef.current = activated.memory;
+    element.scrollTop = activated.scrollTop;
+  }, [currentArea, areaScopeKey]);
+  const managementDirectoryQuery = useQuery({
+    queryKey: ["menu-directory", "management", "visible", currentWorkspace?.type, currentWorkspace?.id],
+    enabled: Boolean(currentWorkspace),
+    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[] }>("/api/v1/menu-directory/management/visible")
+  });
+  const workbenchDirectoryQuery = useQuery({
+    queryKey: ["menu-directory", "workbench", "visible", currentWorkspace?.type, currentWorkspace?.id],
+    enabled: Boolean(currentWorkspace),
+    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[] }>("/api/v1/menu-directory/workbench/visible")
+  });
   const inventoryPort = useMemo(() => createPluginInventoryPort(requestClient), [currentWorkspace?.type, currentWorkspace?.id, currentWorkspace?.membershipId, currentWorkspace?.permissions.join("|"), user?.id]);
   useEffect(() => () => inventoryPort.clear(), [inventoryPort]);
   const canViewNotifications = Boolean(
@@ -521,12 +629,11 @@ function WorkspaceLayout() {
   }
   selectWorkspace(currentWorkspace);
 
-  const terminalWindowMode = new URLSearchParams(location.search).get("terminalWindow") === "1";
   const workbenchPath = `/w/${currentWorkspace.type}/${currentWorkspace.id}/workbench`;
   const workbenchPathFor = (section?: string) => `${workbenchPath}${section ? `/${section}` : ""}`;
   const workspacePath = (path: string) =>
     `/w/${currentWorkspace.type}/${currentWorkspace.id}${path === "/" ? "/workbench" : path}`;
-  const currentNavMode: HeaderNavMode = pathActive(location.pathname, workbenchPath) ? "workbench" : "manage";
+  const currentNavMode: HeaderNavMode = currentArea;
   const builtinWorkbenchNavMetas: NavMeta[] = [
     { key: WORKBENCH_KEY, icon: <AppstoreOutlined />, label: "概览", target: workbenchPathFor() },
     { key: "workbench.todos", icon: <BookOutlined />, label: "待办事项", target: workbenchPathFor("todos") },
@@ -560,6 +667,8 @@ function WorkspaceLayout() {
       };
     })
     .filter((group): group is NonNullable<typeof group> => group !== null);
+  const managementWebViewNav = visibleWebViewGroups("management", managementDirectoryQuery.data?.items ?? [], managementDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
+  navGroups.push(...managementWebViewNav.groups);
   const pluginWorkbenchStandalone: NavMeta[] = [];
   const pluginWorkbenchGroups: NavGroupMeta[] = [];
   for (const plugin of orderedPlugins) {
@@ -593,12 +702,57 @@ function WorkspaceLayout() {
       }
     }
   }
+  const workbenchWebViewNav = visibleWebViewGroups("workbench", workbenchDirectoryQuery.data?.items ?? [], workbenchDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
   const workbenchNavMetas = [
     ...builtinWorkbenchNavMetas,
     ...pluginWorkbenchStandalone,
-    ...pluginWorkbenchGroups.flatMap((group) => group.items)
+    ...pluginWorkbenchGroups.flatMap((group) => group.items),
+    ...workbenchWebViewNav.standalone,
+    ...workbenchWebViewNav.groups.flatMap((group) => group.items)
   ];
-  const navMetas = navGroups.flatMap((group) => group.items);
+  const navMetas = [...managementWebViewNav.standalone, ...navGroups.flatMap((group) => group.items)];
+  const cachedRouteIsAllowed = (area: WorkspaceArea, snapshot: WorkspaceAreaRouteSnapshot<ReactNode>) => {
+    const routeList = area === "workbench" ? workbenchNavMetas : navMetas;
+    return routeList.some((item) => pathActive(snapshot.location.pathname, item.target));
+  };
+  const currentPathKey = workspaceAreaLocationKey(location);
+  const liveRouteSnapshot: WorkspaceAreaRouteSnapshot<ReactNode> | null = nestedOutlet ? {
+    pathKey: currentPathKey,
+    location,
+    navigationType,
+    node: nestedOutlet
+  } : null;
+  let effectiveAreaRouteCache = areaRouteCache.scopeKey === areaScopeKey
+    ? areaRouteCache
+    : createWorkspaceAreaRouteCache<ReactNode>(areaScopeKey);
+  const workspaceRootPath = `/w/${currentWorkspace.type}/${currentWorkspace.id}`;
+  if (!terminalWindowMode && liveRouteSnapshot && location.pathname !== workspaceRootPath) {
+    effectiveAreaRouteCache = rememberWorkspaceAreaRoute(
+      effectiveAreaRouteCache,
+      areaScopeKey,
+      currentArea,
+      liveRouteSnapshot
+    );
+  }
+  if (effectiveAreaRouteCache !== areaRouteCache) setAreaRouteCache(effectiveAreaRouteCache);
+  const workbenchRouteSnapshot = terminalWindowMode ? liveRouteSnapshot : selectWorkspaceAreaRoute({
+    cache: effectiveAreaRouteCache,
+    scopeKey: areaScopeKey,
+    area: "workbench",
+    activeArea: currentArea,
+    activePathKey: currentPathKey,
+    liveSnapshot: liveRouteSnapshot,
+    isAllowed: (snapshot) => cachedRouteIsAllowed("workbench", snapshot)
+  });
+  const managementRouteSnapshot = terminalWindowMode ? null : selectWorkspaceAreaRoute({
+    cache: effectiveAreaRouteCache,
+    scopeKey: areaScopeKey,
+    area: "manage",
+    activeArea: currentArea,
+    activePathKey: currentPathKey,
+    liveSnapshot: liveRouteSnapshot,
+    isAllowed: (snapshot) => cachedRouteIsAllowed("manage", snapshot)
+  });
   const menuTargets = new Map<string, string>(
     (currentNavMode === "workbench" ? workbenchNavMetas : navMetas).map((item) => [item.key, item.target])
   );
@@ -618,14 +772,19 @@ function WorkspaceLayout() {
             icon: group.icon,
             label: group.label,
             children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
-          }))
+          })),
+          ...workbenchWebViewNav.standalone.map((item) => ({ key: item.key, icon: item.icon, label: item.label })),
+          ...workbenchWebViewNav.groups.map((group) => ({ key: group.key, icon: group.icon, label: group.label, children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label })) }))
         ]
-      : navGroups.map((group) => ({
-          key: group.key,
-          icon: group.icon,
-          label: group.label,
-          children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
-        }));
+      : [
+          ...navGroups.map((group) => ({
+            key: group.key,
+            icon: group.icon,
+            label: group.label,
+            children: group.items.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
+          })),
+          ...managementWebViewNav.standalone.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
+        ];
   const activeKey = currentNavMode === "workbench" ? activeWorkbenchMenu?.key ?? WORKBENCH_KEY : activeMenu?.key;
   const breadcrumbItems =
     currentNavMode === "workbench"
@@ -651,6 +810,21 @@ function WorkspaceLayout() {
   const handleHeaderNavModeChange = (nextMode: HeaderNavMode) => {
     setMobileMenuOpen(false);
     if (nextMode === currentNavMode) return;
+    const savedRoute = effectiveAreaRouteCache.scopeKey === areaScopeKey
+      ? effectiveAreaRouteCache[nextMode]
+      : null;
+    const workspacePrefix = `/w/${currentWorkspace.type}/${currentWorkspace.id}/`;
+    const savedPathIsWorkbench = Boolean(savedRoute && (
+      pathActive(savedRoute.location.pathname, workbenchPath) || savedRoute.location.pathname.includes("/menu-pages/workbench/")
+    ));
+    const savedPathIsInArea = Boolean(savedRoute
+      && savedRoute.location.pathname.startsWith(workspacePrefix)
+      && cachedRouteIsAllowed(nextMode, savedRoute)
+      && (nextMode === "workbench" ? savedPathIsWorkbench : !savedPathIsWorkbench));
+    if (savedRoute && savedPathIsInArea) {
+      navigate({ pathname: savedRoute.location.pathname, search: savedRoute.location.search, hash: savedRoute.location.hash }, { state: savedRoute.location.state });
+      return;
+    }
     if (nextMode === "workbench") {
       navigate(workbenchPath);
       return;
@@ -1140,7 +1314,19 @@ function WorkspaceLayout() {
                 </Drawer>
               )}
 
-              <Layout.Content className="app-content" style={{ marginLeft: isDesktop ? sidebarWidth : 0 }}>
+              <Layout.Content
+                className="app-content"
+                onScroll={(event) => {
+                  areaScrollMemoryRef.current = rememberWorkspaceAreaScroll(
+                    areaScrollMemoryRef.current,
+                    areaScopeKey,
+                    currentArea,
+                    event.currentTarget.scrollTop
+                  );
+                }}
+                ref={appContentRef}
+                style={{ marginLeft: isDesktop ? sidebarWidth : 0 }}
+              >
                 <div className="workspace-breadcrumb">
                   {isDesktop ? (
                     <Tooltip title={effectiveSidebarCollapsed ? "展开导航" : "收起导航"} placement="bottom">
@@ -1156,7 +1342,20 @@ function WorkspaceLayout() {
                   ) : null}
                   <Breadcrumb className="workspace-breadcrumb-trail" items={breadcrumbItems} />
                 </div>
-                <Outlet />
+                {terminalWindowMode ? nestedOutlet : <>
+                  <WorkspaceAreaRoutePane
+                    key={`${areaScopeKey}:workbench`}
+                    area="workbench"
+                    active={currentArea === "workbench"}
+                    snapshot={workbenchRouteSnapshot}
+                  />
+                  <WorkspaceAreaRoutePane
+                    key={`${areaScopeKey}:manage`}
+                    area="manage"
+                    active={currentArea === "manage"}
+                    snapshot={managementRouteSnapshot}
+                  />
+                </>}
               </Layout.Content>
             </Layout>
 

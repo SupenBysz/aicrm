@@ -1,5 +1,6 @@
 import { ipcMain, type WebContents, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
+import { legacyWindowChannelRoles } from './window-ipc-role-policy';
 export type WindowRole = 'main' | 'terminal' | 'controlled' | 'offline' | 'plugin' | 'version-dialog';
 type Registration = {role:WindowRole; generation:number; ready:boolean; origin:(url:string)=>boolean};
 const senders=new Map<WebContents,Registration>();
@@ -32,7 +33,7 @@ const legacyChannels=new Set<string>([IPC_CHANNELS.apiRequest, IPC_CHANNELS.appG
 const windowChannels=new Set<string>(Object.entries(IPC_CHANNELS).filter(([k])=>k.startsWith('window')).map(([,v])=>v));
 const terminalChannels=new Set<string>([IPC_CHANNELS.appGetVersion,IPC_CHANNELS.appGetConfig,IPC_CHANNELS.apiRequest,IPC_CHANNELS.sessionLoad]);
 export const guardedIpc={
- handle(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?['main','terminal']:terminalChannels.has(channel)?['main','terminal']:['main'],'handle',fn,bounded);},
- on(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?['main','terminal']:['main'],'on',fn,bounded);}
+ handle(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?legacyWindowChannelRoles(channel):terminalChannels.has(channel)?['main','terminal']:['main'],'handle',fn,bounded);},
+ on(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?legacyWindowChannelRoles(channel):['main'],'on',fn,bounded);}
 };
 export function ipcRegistrationSnapshot(){return [...entries].map(([channel,v])=>({channel,...v}));}

@@ -35,6 +35,7 @@ export interface DesktopBridgeLike {
     clear?: () => Promise<DesktopNetworkLogSnapshot>;
   };
   matrixAccount?: MatrixAccountDesktopBridgeContract;
+  menuWebView?: import("../../aicrm-desktop/src/shared/types").MenuWebViewDesktopBridge;
   desktopDevice?: {
     ensureRegistration?: () => Promise<
       DesktopCommandResult<AiExecutorDesktopRegistrationProjection>
