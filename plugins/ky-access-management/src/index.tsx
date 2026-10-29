@@ -24,7 +24,7 @@ export const accessManagementPlugin: AdminPlugin = {
     },
     {
       key: "ky-access-management.menu-directory",
-      label: "菜单目录",
+      label: "菜单管理",
       path: "/menu-directory",
       icon: "PartitionOutlined",
       menuKey: "platform.menu_catalog.view",

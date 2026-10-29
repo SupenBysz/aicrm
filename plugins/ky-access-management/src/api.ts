@@ -40,6 +40,7 @@ export interface Permission {
 
 export type MenuDirectoryType = "management" | "workbench";
 export interface MenuDirectoryEntry {
+  usageScope?:"browser_and_client"|"client_only";permissionBindings?: Record<string,string[]>; sourceVersion?: number;
   directoryType: MenuDirectoryType; menuKey: string; nodeType: "group" | "leaf"; parentKey?: string;
   name: string; icon: string; permissionCode: string; workspaceTypes: string[]; routeKey?: string;
   routePath?: string; pageType: "internal" | "webview"; status: "active" | "disabled"; sortOrder: number; revision: number;
@@ -56,7 +57,7 @@ export interface MenuWebViewConfig {
   scheduleMode: "page_first"|"strict_document_start"; revision: number;
 }
 
-export function listMenuDirectory(client: RequestClient, directory: MenuDirectoryType, includeDisabled = false): Promise<{items:MenuDirectoryEntry[]}> {
+export function listMenuDirectory(client: RequestClient, directory: MenuDirectoryType, includeDisabled = false): Promise<{items:MenuDirectoryEntry[];registeredRoutes:MenuDirectoryEntry[];menuPermissions:Permission[]}> {
   return client.request(`/api/v1/menu-directory/${directory}${includeDisabled ? "?includeDisabled=1" : ""}`);
 }
 export function listAssignableMenuDirectory(client: RequestClient, directory: MenuDirectoryType): Promise<{items:MenuDirectoryEntry[];ancestors:MenuDirectoryEntry[]}> {
@@ -117,3 +118,7 @@ export function listPermissions(
   const suffix = q.toString();
   return client.request<Permission[]>(`/api/v1/permissions${suffix ? `?${suffix}` : ""}`);
 }
+
+export interface MenuConfigEditor { config:MenuWebViewConfig|null; scopeRevision:number; scope:"common"|"workspace"; hasOverride:boolean }
+export function getMenuConfigEditor(client:RequestClient,directory:MenuDirectoryType,key:string,scope:"common"|"workspace"="workspace"):Promise<MenuConfigEditor>{return client.request(`/api/v1/menu-webviews/${directory}/${encodeURIComponent(key)}/editor?scope=${scope}`);}
+export function resetMenuWorkspaceConfig(client:RequestClient,directory:MenuDirectoryType,key:string,expectedScopeRevision:number):Promise<{reset:boolean;scopeRevision:number}>{return client.request(`/api/v1/menu-webviews/${directory}/${encodeURIComponent(key)}/override`,{method:"DELETE",body:{expectedScopeRevision}});}

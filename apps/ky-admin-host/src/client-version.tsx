@@ -21,5 +21,5 @@ export function ClientVersion() {
     return () => { active = false; };
   }, []);
 
-  return <Button type="text" size="small" className="client-version" title={`客户端版本：${label}`} onClick={() => { void getDesktopBridge()?.app?.openVersionDialog?.().catch(() => {}); }}>{label}</Button>;
+  return <Button type="text" size="small" className="client-version" title={`客户端版本：${label}`} onClick={(event) => { const rect=event.currentTarget.getBoundingClientRect(); void getDesktopBridge()?.app?.openVersionDialog?.({x:rect.x,y:rect.y,width:rect.width,height:rect.height}).catch(() => {}); }}>{label}</Button>;
 }

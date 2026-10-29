@@ -39,7 +39,10 @@ export interface MenuNavigationGroup {
   items: MenuNavigationItem[];
 }
 
+export interface MenuNavigationTreeNode { key: string; label: string; iconName: string; sortOrder: number; item?: MenuNavigationItem; children?: MenuNavigationTreeNode[] }
+
 export interface MenuNavigationResult {
+  tree: MenuNavigationTreeNode[];
   standalone: MenuNavigationItem[];
   groups: MenuNavigationGroup[];
 }
@@ -123,7 +126,7 @@ export function buildMenuNavigation(input: {
       parentChain.push(ancestor);
       nextParentKey = ancestor.parentKey;
     }
-    const parent = parentChain[parentChain.length - 1];
+    const parent = parentChain[0];
     const parentLabel = parent?.name.trim() || candidate.groupLabel || input.fallbackGroupLabel;
     const parentIconName = normalizeMenuIconName(
       parent?.icon,
@@ -134,7 +137,7 @@ export function buildMenuNavigation(input: {
       label: row?.name.trim() || candidate.label,
       iconName: normalizeMenuIconName(row?.icon, candidate.iconName),
       groupKey: parentKey,
-      groupLabel: parentKey ? parentLabel : undefined,
+      groupLabel: parentKey ? (parentChain.length ? [...parentChain].reverse().map(row=>row.name).join(" / ") : parentLabel) : undefined,
       groupIconName: parentKey ? parentIconName : undefined,
       sortOrder: row?.sortOrder ?? candidate.sortOrder
     };
@@ -163,5 +166,21 @@ export function buildMenuNavigation(input: {
   stableSort(standalone);
   const groups = [...groupsByKey.values()].sort((left, right) => left.sortOrder - right.sortOrder || left.key.localeCompare(right.key));
   for (const group of groups) stableSort(group.items);
-  return { standalone, groups };
+  const tree: MenuNavigationTreeNode[] = [];
+  const groupNodes = new Map<string, MenuNavigationTreeNode>();
+  const groupFor = (key: string): MenuNavigationTreeNode => {
+    const existing = groupNodes.get(key); if (existing) return existing;
+    const row = rows.get(key)!;
+    const node: MenuNavigationTreeNode = {key, label:row.name, iconName:normalizeMenuIconName(row.icon), sortOrder:row.sortOrder, children:[]};
+    groupNodes.set(key,node);
+    if (row.parentKey && rows.has(row.parentKey)) groupFor(row.parentKey).children!.push(node); else tree.push(node);
+    return node;
+  };
+  for (const item of [...standalone,...groups.flatMap(group=>group.items)]) {
+    const node: MenuNavigationTreeNode = {key:item.key,label:item.label,iconName:item.iconName,sortOrder:item.sortOrder,item};
+    if (item.groupKey && rows.has(item.groupKey)) groupFor(item.groupKey).children!.push(node); else tree.push(node);
+  }
+  const sortTree=(nodes:MenuNavigationTreeNode[])=>{stableSort(nodes);for(const node of nodes)if(node.children)sortTree(node.children);};
+  sortTree(tree);
+  return { standalone, groups, tree };
 }

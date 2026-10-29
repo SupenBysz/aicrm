@@ -1,3 +1,5 @@
+import {syncDesktopSession} from "./desktop-session-sync";
+import builtinMenuCatalog from "../../../shared/menucatalog/builtin.json";
 import { AppearanceProvider } from "./appearance-provider";
 import { PersonalPreferencesDrawer } from "./personal-preferences-drawer";
 import { useAppearance, appearanceAntdTheme } from "@ky/admin-core";
@@ -49,6 +51,7 @@ import {
 } from "@tabler/icons-react";
 import {
   App as AntdApp,
+  Alert,
   Badge,
   Breadcrumb,
   Button,
@@ -215,14 +218,17 @@ function visibleWebViewGroups(
   workspacePath: (path: string) => string
 ) {
   const navigation = buildMenuNavigation({
-    candidates: [],
+    candidates: items.filter(row=>row.pageType === "internal").flatMap(row=>{
+      const registered = builtinMenuCatalog.entries.find(entry=>entry.directoryType===directoryType && entry.routeKey===row.routeKey && entry.nodeType==="leaf");
+      return registered?.routePath ? [{key:row.menuKey, menuKey:row.menuKey,label:row.name,iconName:row.icon,target:workspacePath(registered.routePath),sortOrder:row.sortOrder,groupSortOrder:0}] : [];
+    }),
     directory: [...items, ...ancestors],
     workspaceType,
     fallbackGroupLabel: directoryType === "workbench" ? WORKBENCH_LABEL : MANAGEMENT_CENTER_LABEL,
     fallbackGroupIconName: (_label, fallback) => normalizeMenuIconName(fallback),
     targetForWebView: (menuKey) => workspacePath(`/menu-pages/${directoryType}/${encodeURIComponent(menuKey)}`),
     authoritative: true,
-    allowDynamicWebView: (row) => (row.status === undefined || row.status === "active")
+    allowDynamicWebView: (row) => (row.usageScope!=="client_only" || Boolean(getDesktopBridge()?.menuWebView)) && (row.status === undefined || row.status === "active")
       && (!row.workspaceTypes || row.workspaceTypes.includes(workspaceType))
   });
   const toNavMeta = (item: (typeof navigation.standalone)[number]): NavMeta => ({
@@ -232,7 +238,10 @@ function visibleWebViewGroups(
     target: item.target,
     groupLabel: item.groupLabel
   });
+  interface NavTree {key:string;label:string;icon:ReactNode;children?:NavTree[]}
+  const toTree = (node: (typeof navigation.tree)[number]): NavTree => ({key:node.item ? `server:${directoryType}:${node.item.menuKey}` : `server:${directoryType}:${node.key}`,label:node.label,icon:menuIcon(node.iconName),...(node.children ? {children:node.children.map(toTree)} : {})});
   return {
+    tree: navigation.tree.map(toTree),
     standalone: navigation.standalone.map(toNavMeta),
     groups: navigation.groups.map((group) => ({
       key: `server:${directoryType}:${group.key}`,
@@ -266,7 +275,8 @@ function setAdminLocked(locked: boolean): void {
   }
 }
 
-export function App() { return <AppearanceProvider><ThemedApp /></AppearanceProvider>; }
+function DesktopSessionSync(){useEffect(()=>{const sync=()=>{void syncDesktopSession().catch(()=>{});};sync();window.addEventListener("ky:session-changed",sync);return()=>window.removeEventListener("ky:session-changed",sync);},[]);return null;}
+export function App() { return <AppearanceProvider><DesktopSessionSync/><ThemedApp /></AppearanceProvider>; }
 
 function ThemedApp() {
  const appearance=useAppearance();
@@ -468,6 +478,7 @@ function WorkspaceLayout() {
   const [unlocking, setUnlocking] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [passwordDrawerOpen, setPasswordDrawerOpen] = useState(false);
+  const [passwordError,setPasswordError]=useState("");
   const [passwordChanging, setPasswordChanging] = useState(false);
   const [passwordForm] = Form.useForm<ChangePasswordFormValues>();
   const navScrollRef = useRef<HTMLDivElement | null>(null);
@@ -521,6 +532,45 @@ function WorkspaceLayout() {
   const workspaces = bootstrapState?.workspaces ?? [];
   const user = bootstrapState?.user ?? null;
   useEffect(()=>{setPreferencesOpen(false);setUserMenuOpen(false);},[params.workspaceType,params.workspaceId,user?.id,locked]);
+  const nativeOverlay=desktopBridge?.hostOverlay;
+  const appearanceProjection=JSON.stringify({origin:appearance.origin,syncState:appearance.syncState,canReload:appearance.canReload,enabled:appearance.enabled,preference:appearance.preference,platform:appearance.platform,themeId:appearance.themeId,mode:appearance.mode,dark:appearance.dark,status:appearance.status,dirty:appearance.dirty,loading:appearance.loading,
+    username:user?.username||user?.displayName||"当前用户",displayName:user?.displayName||"",passwordChanging,passwordError,unlockError,unlocking,
+    workspaces:workspaces.map(item=>({id:item.id,type:item.type,name:item.name,roles:item.roles.map(role=>role.name),current:item.id===params.workspaceId&&item.type===params.workspaceType})),
+    network:{loading:networkLogLoading,entries:(networkLogSnapshot?.entries??[]).slice(0,50).map(item=>({id:item.id,method:item.method,url:(()=>{try{const url=new URL(item.url);return `${url.origin}${url.pathname}`;}catch{return "无效地址";}})(),statusCode:item.statusCode,status:item.status,durationMs:item.durationMs}))}
+  });
+  const nativeOverlayKind=locked?"lock":passwordDrawerOpen?"password":switcherOpen?"workspaces":networkLogOpen?"network":preferencesOpen?"preferences":userMenuOpen?"user":null;
+  useEffect(()=>{
+    if(!nativeOverlay)return;
+    if(!nativeOverlayKind){void nativeOverlay.close();return;}
+    let disposed=false;
+    const project=()=>{
+      const top=document.querySelector(".app-header")?.getBoundingClientRect().bottom??0;
+      const footer=document.querySelector(".desktop-status-bar")?.getBoundingClientRect();
+      void syncDesktopSession().then(()=>{if(disposed)return true;return nativeOverlay.show({kind:nativeOverlayKind,projection:JSON.parse(appearanceProjection),top:nativeOverlayKind==="lock"?0:top,bottom:nativeOverlayKind==="lock"?0:footer?Math.max(0,window.innerHeight-footer.top):0});}).then(ok=>{if(!ok&&!disposed){setPreferencesOpen(false);setPasswordDrawerOpen(false);setSwitcherOpen(false);setNetworkLogOpen(false);setUserMenuOpen(false);void message.error("原生浮层初始化失败，请重试。");}}).catch(()=>{if(!disposed)void message.error("桌面会话同步失败，请重新登录后重试。");});
+    };
+    project();window.addEventListener("resize",project);
+    return()=>{disposed=true;window.removeEventListener("resize",project);};
+  },[nativeOverlay,nativeOverlayKind,appearanceProjection]);
+  useEffect(()=>{
+    if(!nativeOverlay)return;
+    return nativeOverlay.onAction(action=>{
+      if(action.type==="unlocked"){void desktopBridge?.session?.load().then(session=>{if(session){saveSession(session);setAdminLocked(false);setLocked(false);setUnlockError("");window.dispatchEvent(new Event("ky-native-unlocked"));}});return;}
+      if(action.type==="close"){setPreferencesOpen(false);setPasswordDrawerOpen(false);setSwitcherOpen(false);setNetworkLogOpen(false);setUserMenuOpen(false);return;}
+      if(action.type==="openPreferences"){setUserMenuOpen(false);setPreferencesOpen(true);return;}
+      if(action.type==="openPassword"){setUserMenuOpen(false);setPasswordError("");setPasswordDrawerOpen(true);return;}
+      if(action.type==="openWorkspaces"){setUserMenuOpen(false);setSwitcherOpen(true);return;}
+      if(action.type==="logout"){void handleLogout();return;}
+      if(action.type==="workspace"){const target=workspaces.find(item=>item.id===action.id&&item.type===action.workspaceType);if(target)enterWorkspace(target);return;}
+      if(action.type==="password"){void handleChangePassword(action);return;}
+      if(action.type==="refreshNetwork"){void refreshNetworkLogs();return;}
+      if(action.type==="clearNetwork"){void handleClearNetworkLogs();return;}
+      if(action.type==="choose")appearance.choose(action.themeId,action.mode);
+      else if(action.type==="followPlatform")appearance.followPlatform();
+      else if(action.type==="retry")appearance.retry();
+      else if(action.type==="refresh")void appearance.refresh();
+    });
+  },[nativeOverlay,appearance,workspaces]);
+  useEffect(()=>()=>{void nativeOverlay?.close();},[nativeOverlay]);
   const currentUserName = user?.username || user?.displayName || "当前用户";
   const currentUserDisplayName = user?.displayName || currentUserName;
   const canSwitchWorkspace = workspaces.length > 1;
@@ -544,12 +594,12 @@ function WorkspaceLayout() {
   const managementDirectoryQuery = useQuery({
     queryKey: ["menu-directory", "management", "visible", currentWorkspace?.type, currentWorkspace?.id],
     enabled: Boolean(currentWorkspace),
-    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[] }>("/api/v1/menu-directory/management/visible")
+    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[]; catalogReady: boolean }>("/api/v1/menu-directory/management/visible")
   });
   const workbenchDirectoryQuery = useQuery({
     queryKey: ["menu-directory", "workbench", "visible", currentWorkspace?.type, currentWorkspace?.id],
     enabled: Boolean(currentWorkspace),
-    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[] }>("/api/v1/menu-directory/workbench/visible")
+    queryFn: () => requestClient.request<{ items: VisibleMenuItem[]; ancestors: VisibleMenuItem[]; catalogReady: boolean }>("/api/v1/menu-directory/workbench/visible")
   });
   const inventoryPort = useMemo(() => createPluginInventoryPort(requestClient), [currentWorkspace?.type, currentWorkspace?.id, currentWorkspace?.membershipId, currentWorkspace?.permissions.join("|"), user?.id]);
   useEffect(() => () => inventoryPort.clear(), [inventoryPort]);
@@ -671,7 +721,7 @@ function WorkspaceLayout() {
       };
     })
     .filter((group): group is NonNullable<typeof group> => group !== null);
-  const managementWebViewNav = visibleWebViewGroups("management", managementDirectoryQuery.data?.items ?? [], managementDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
+  const managementWebViewNav = visibleWebViewGroups("management", managementDirectoryQuery.isError || managementDirectoryQuery.data?.catalogReady!==true ? [] : managementDirectoryQuery.data?.items ?? [], managementDirectoryQuery.isError || managementDirectoryQuery.data?.catalogReady!==true ? [] : managementDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
   navGroups.push(...managementWebViewNav.groups);
   const pluginWorkbenchStandalone: NavMeta[] = [];
   const pluginWorkbenchGroups: NavGroupMeta[] = [];
@@ -706,15 +756,18 @@ function WorkspaceLayout() {
       }
     }
   }
-  const workbenchWebViewNav = visibleWebViewGroups("workbench", workbenchDirectoryQuery.data?.items ?? [], workbenchDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
-  const workbenchNavMetas = [
+  const workbenchWebViewNav = visibleWebViewGroups("workbench", workbenchDirectoryQuery.isError || workbenchDirectoryQuery.data?.catalogReady!==true ? [] : workbenchDirectoryQuery.data?.items ?? [], workbenchDirectoryQuery.isError || workbenchDirectoryQuery.data?.catalogReady!==true ? [] : workbenchDirectoryQuery.data?.ancestors ?? [], currentWorkspace.type, workspacePath);
+  const legacyWorkbenchNavMetas = [
     ...builtinWorkbenchNavMetas,
     ...pluginWorkbenchStandalone,
     ...pluginWorkbenchGroups.flatMap((group) => group.items),
     ...workbenchWebViewNav.standalone,
     ...workbenchWebViewNav.groups.flatMap((group) => group.items)
   ];
-  const navMetas = [...managementWebViewNav.standalone, ...navGroups.flatMap((group) => group.items)];
+  const managementCatalogReady = managementDirectoryQuery.data?.catalogReady === true || managementDirectoryQuery.isPending || (managementDirectoryQuery.isError && (managementDirectoryQuery.error as {status?:number})?.status!==404);
+  const workbenchCatalogReady = workbenchDirectoryQuery.data?.catalogReady === true || workbenchDirectoryQuery.isPending || (workbenchDirectoryQuery.isError && (workbenchDirectoryQuery.error as {status?:number})?.status!==404);
+  const workbenchNavMetas = workbenchCatalogReady ? [...workbenchWebViewNav.standalone,...workbenchWebViewNav.groups.flatMap(group=>group.items)] : legacyWorkbenchNavMetas;
+  const navMetas = managementCatalogReady ? [...managementWebViewNav.standalone,...managementWebViewNav.groups.flatMap(group=>group.items)] : [...managementWebViewNav.standalone, ...navGroups.flatMap((group) => group.items)];
   const cachedRouteIsAllowed = (area: WorkspaceArea, snapshot: WorkspaceAreaRouteSnapshot<ReactNode>) => {
     const routeList = area === "workbench" ? workbenchNavMetas : navMetas;
     return routeList.some((item) => pathActive(snapshot.location.pathname, item.target));
@@ -766,7 +819,7 @@ function WorkspaceLayout() {
   const activeMenu = [...navMetas]
     .sort((a, b) => b.target.length - a.target.length)
     .find((item) => pathActive(location.pathname, item.target));
-  const menuItems =
+  const legacyMenuItems =
     currentNavMode === "workbench"
       ? [
           ...builtinWorkbenchNavMetas.map((item) => ({ key: item.key, icon: item.icon, label: item.label })),
@@ -789,6 +842,7 @@ function WorkspaceLayout() {
           })),
           ...managementWebViewNav.standalone.map((item) => ({ key: item.key, icon: item.icon, label: item.label }))
         ];
+  const menuItems = currentNavMode === "workbench" ? (workbenchCatalogReady ? workbenchWebViewNav.tree : legacyMenuItems) : (managementCatalogReady ? managementWebViewNav.tree : legacyMenuItems);
   const activeKey = currentNavMode === "workbench" ? activeWorkbenchMenu?.key ?? WORKBENCH_KEY : activeMenu?.key;
   const breadcrumbItems =
     currentNavMode === "workbench"
@@ -882,6 +936,7 @@ function WorkspaceLayout() {
   }
 
   async function handleChangePassword(values: ChangePasswordFormValues) {
+    setPasswordError("");
     setPasswordChanging(true);
     try {
       await changeLoginPassword({
@@ -892,6 +947,7 @@ function WorkspaceLayout() {
       setPasswordDrawerOpen(false);
       void message.success("登录密码已修改。");
     } catch {
+      setPasswordError("修改登录密码失败，请确认当前密码是否正确。");
       void message.error("修改登录密码失败，请确认当前密码是否正确。");
     } finally {
       setPasswordChanging(false);
@@ -992,6 +1048,7 @@ function WorkspaceLayout() {
   }
 
   function handleLockScreen() {
+    setPreferencesOpen(false);setUserMenuOpen(false);setPasswordDrawerOpen(false);setNetworkLogOpen(false);setSwitcherOpen(false);
     setUnlockPassword("");
     setUnlockError("");
     setAdminLocked(true);
@@ -1041,6 +1098,7 @@ function WorkspaceLayout() {
 
   const navMenu = (
     <div className="app-nav-menu-wrap">
+      {(currentNavMode==="workbench"?workbenchDirectoryQuery:managementDirectoryQuery).isError && (currentNavMode==="workbench"?workbenchCatalogReady:managementCatalogReady) ? <Alert type="error" showIcon title="菜单读取失败" action={<Button size="small" onClick={()=>void (currentNavMode==="workbench"?workbenchDirectoryQuery:managementDirectoryQuery).refetch()}>重试</Button>}/> : null}
       <Menu
         className={`app-menu${effectiveSidebarCollapsed ? " app-menu--collapsed" : ""}`}
         defaultOpenKeys={[]}
@@ -1223,7 +1281,7 @@ function WorkspaceLayout() {
                 </Tooltip>
                 {user ? (
                   <Dropdown
-                    open={userMenuOpen} onOpenChange={setUserMenuOpen}
+                    open={userMenuOpen&&!nativeOverlay} onOpenChange={open=>setUserMenuOpen(nativeOverlay?!userMenuOpen:open)}
                     menu={{
                       onClick:()=>setUserMenuOpen(false),
                       items: [
@@ -1379,7 +1437,7 @@ function WorkspaceLayout() {
                   setSwitcherOpen(false);
                   setSwitcherSearch("");
                 }}
-                open={switcherOpen}
+                open={switcherOpen&&!nativeOverlay}
                 title="切换工作区"
                 width={isDesktop ? 420 : "94vw"}
               >
@@ -1444,7 +1502,7 @@ function WorkspaceLayout() {
               </Drawer>
             ) : null}
 
-            <PersonalPreferencesDrawer open={preferencesOpen&&!locked} onClose={()=>setPreferencesOpen(false)} />
+            <PersonalPreferencesDrawer open={preferencesOpen&&!locked&&!nativeOverlay} onClose={()=>setPreferencesOpen(false)} />
 
             <Drawer
               destroyOnClose
@@ -1452,7 +1510,7 @@ function WorkspaceLayout() {
                 setPasswordDrawerOpen(false);
                 passwordForm.resetFields();
               }}
-              open={passwordDrawerOpen}
+              open={passwordDrawerOpen&&!nativeOverlay}
               title="修改登录密码"
               width={isDesktop ? 420 : "94vw"}
               extra={
@@ -1525,7 +1583,7 @@ function WorkspaceLayout() {
             <Drawer
               className="desktop-network-log-drawer"
               onClose={() => setNetworkLogOpen(false)}
-              open={networkLogOpen}
+              open={networkLogOpen&&!nativeOverlay}
               title="网络日志"
               width={isDesktop ? 620 : "94vw"}
               extra={
@@ -1576,7 +1634,7 @@ function WorkspaceLayout() {
               </Space>
             </Drawer>
 
-            {locked ? (
+            {locked&&!nativeOverlay ? (
               <div className="desktop-lock-overlay" role="dialog" aria-modal="true" aria-label="后台已锁屏">
                 <Card className="desktop-lock-card">
                   <Space direction="vertical" size={16} style={{ width: "100%" }}>

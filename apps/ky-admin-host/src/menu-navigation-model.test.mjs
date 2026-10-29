@@ -50,3 +50,20 @@ test("静态候选权限与动态叶节点权限继续受限，缺少权威投�
   assert.deepEqual(result.standalone.map((item) => item.menuKey), ["web.allowed"]);
   assert.deepEqual(result.groups, []);
 });
+
+test("内部菜单采用目录元数据，多级目录递归投影，合法空目录不恢复静态项",()=>{
+ const candidate={key:"route",menuKey:"roles",label:"旧名称",iconName:"OldIcon",target:"/roles",sortOrder:0,groupSortOrder:0};
+ const input={workspaceType:"platform",fallbackGroupLabel:"其他",fallbackGroupIconName,targetForWebView,authoritative:true,candidates:[candidate],allowDynamicWebView:()=>true};
+ const result=buildMenuNavigation({...input,directory:[
+  {menuKey:"root",nodeType:"group",name:"管理",icon:"team",parentKey:null,sortOrder:2},
+  {menuKey:"child",nodeType:"group",name:"权限中心",icon:"team",parentKey:"root",sortOrder:1},
+  {menuKey:"roles",nodeType:"leaf",pageType:"internal",name:"已改名角色",icon:"KeyOutlined",parentKey:"child",sortOrder:0}
+ ]});
+ assert.equal(result.tree[0].label,"管理");
+ assert.equal(result.tree[0].children[0].label,"权限中心");
+ assert.equal(result.tree[0].children[0].children[0].label,"已改名角色");
+ assert.equal(result.groups[0].label,"权限中心");
+ assert.equal(result.groups[0].items[0].groupLabel,"管理 / 权限中心");
+ assert.equal(result.groups[0].items[0].target,"/roles");
+ assert.deepEqual(buildMenuNavigation({...input,directory:[]}).tree,[]);
+});

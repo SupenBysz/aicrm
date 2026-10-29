@@ -28,7 +28,8 @@ export class ApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly requestId?: string,
-    public readonly details?: unknown
+    public readonly details?: unknown,
+    public readonly status?: number
   ) {
     super(message);
   }
@@ -49,7 +50,8 @@ export class HostRequestClient implements RequestClient {
         envelope.error?.message ?? `Request failed: ${response.response.status}`,
         envelope.error?.code ?? "request_failed",
         envelope.requestId,
-        envelope.error?.details
+        envelope.error?.details,
+        response.response.status
       );
     }
 

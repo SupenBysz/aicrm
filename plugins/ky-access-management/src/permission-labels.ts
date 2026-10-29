@@ -17,6 +17,24 @@ export const WORKSPACE_LABELS: Record<string, string> = {
 
 export const RESOURCE_LABELS: Record<string, string> = {
   appearance: "外观主题",
+  menu_catalog: "菜单管理",
+  matrix_accounts: "矩阵账号",
+  matrix_account_scripts: "账号脚本",
+  matrix_account_douyin_scripts: "抖音脚本",
+  matrix_account_login_scripts: "登录脚本",
+  matrix_account_login_script_policies: "登录脚本策略",
+  matrix_account_public_styles: "公共样式",
+  matrix_account_web_spaces: "账号登录空间",
+  matrix_account_sensitive_debug: "敏感调试",
+  enterprise_shop_bindings: "企业店铺绑定",
+  plugin_management: "插件管理",
+  shop_management: "店铺管理",
+  talent_square: "达人广场",
+  workbench_menu_grants: "工作台菜单授权",
+  workbench_menus: "工作台菜单",
+  "access.workbench_menus": "工作台菜单访问",
+  ai_executors: "AI 执行器",
+  ai_executor_tasks: "AI 执行任务",
   access: "访问控制",
   agencies: "机构",
   ai_configuration: "AI 配置",
@@ -124,7 +142,7 @@ export const RESOURCE_DOMAIN: Record<string, DomainKey> = {
 };
 
 export function label(map: Record<string, string>, value: string): string {
-  return map[value] ?? value;
+  return map[value] ?? (map === RESOURCE_LABELS ? "其他功能" : value);
 }
 
 export function resourceDomain(resource: string): DomainKey {

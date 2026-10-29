@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { buildAuthorizationTree, authorizationNodePermissionIds } from "../authorization-tree";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Drawer, Form, Input, Popconfirm, Segmented, Space, Table, Tag, Tree, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -58,7 +59,11 @@ export function RolesPage() {
   const [editing, setEditing] = useState<Role | null>(null);
   const [form] = Form.useForm<RoleInput>();
   const [permRole, setPermRole] = useState<Role | null>(null);
+  const [permissionCategory,setPermissionCategory]=useState<string>("all");
   const [checkedPerms, setCheckedPerms] = useState<string[]>([]);
+  const permissionContext=JSON.stringify([workspace?.type,workspace?.id]);
+  const permissionContextRef=useRef(permissionContext);permissionContextRef.current=permissionContext;
+  useEffect(()=>{setPermRole(null);setCheckedPerms([]);setDrawerOpen(false);setSelectedRowKeys([]);},[permissionContext]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
   const canCreate = permissions.canAny(["platform.roles.create", "agency.roles.create", "enterprise.roles.create"]);
@@ -71,17 +76,13 @@ export function RolesPage() {
   ]);
 
   const { data, isFetching } = useQuery({
-    queryKey: ["roles", queryState.page, queryState.pageSize, queryState.status],
+    queryKey: ["roles", workspace?.type, workspace?.id, queryState.page, queryState.pageSize, queryState.status],
     queryFn: () => listRoles(client, { page: queryState.page, pageSize: queryState.pageSize, status: queryState.status })
   });
   const permissionsQuery = useQuery({ queryKey: ["permissions", "catalog", workspace?.type, workspace?.id], enabled:!!workspace, queryFn: () => listPermissions(client) });
   const managementMenusQuery = useQuery({queryKey:["menu-directory","management","assignable",workspace?.type,workspace?.id],enabled:!!workspace,queryFn:()=>listAssignableMenuDirectory(client,"management")});
   const workbenchMenusQuery = useQuery({queryKey:["menu-directory","workbench","assignable",workspace?.type,workspace?.id],enabled:!!workspace,queryFn:()=>listAssignableMenuDirectory(client,"workbench")});
-  const assignableMenuCodes = useMemo(()=>new Set([...(managementMenusQuery.data?.items??[]),...(workbenchMenusQuery.data?.items??[])].map(item=>item.permissionCode)),[managementMenusQuery.data,workbenchMenusQuery.data]);
-  const visiblePermissions = useMemo(
-    () => (permissionsQuery.data ?? []).filter((perm) => isPermissionResourceVisible(perm.resource) && (perm.category!=="menu"||assignableMenuCodes.has(perm.code))),
-    [assignableMenuCodes,permissionsQuery.data]
-  );
+  const visiblePermissions = useMemo(() => (permissionsQuery.data ?? []).filter(perm=>isPermissionResourceVisible(perm.resource)),[permissionsQuery.data]);
   const visiblePermissionIds = useMemo(() => new Set(visiblePermissions.map((perm) => perm.id)), [visiblePermissions]);
 
   function applyState(next: Partial<ListQueryState>) {
@@ -130,14 +131,14 @@ export function RolesPage() {
   });
 
   const permMutation = useMutation({
-    mutationFn: (ids: string[]) => {
-      const hiddenExistingIds = (permRole?.permissionIds ?? []).filter((id) => !visiblePermissionIds.has(id));
-      if(!Number.isSafeInteger(permRole?.permissionRevision)||!permRole?.permissionRevision)throw new Error("角色授权版本无效，请重新打开授权。");
-      return setRolePermissions(client, permRole!.id, [...hiddenExistingIds, ...ids],permRole.permissionRevision);
+    mutationFn: ({role,ids}:{role:Role;ids:string[];context:string}) => {
+      const hiddenExistingIds = role.permissionIds.filter(id=>!visiblePermissionIds.has(id));
+      if(!Number.isSafeInteger(role.permissionRevision)||!role.permissionRevision)throw new Error("角色授权版本无效，请重新打开授权。");
+      return setRolePermissions(client,role.id,[...new Set([...hiddenExistingIds,...ids])],role.permissionRevision);
     },
-    onSuccess: () => {
+    onSuccess: (_,request) => {
       void message.success("角色权限已更新。");
-      setPermRole(null);
+      if(permissionContextRef.current===request.context)setPermRole(current=>current?.id===request.role.id?null:current);
       invalidate();
     },
     onError: (error: Error) => message.error(error.message)
@@ -155,47 +156,13 @@ export function RolesPage() {
   }
   function openPermissions(role: Role) {
     setPermRole(role);
-    setCheckedPerms(role.permissionIds.filter((id) => visiblePermissionIds.has(id)));
+    setCheckedPerms([...role.permissionIds]);
   }
 
-  // 3-level authorization tree: 领域(中文) → 资源(中文) → 具体权限. Checking a
-  // domain or resource node selects all descendants for quick bulk assignment.
-  const permTreeData = useMemo(() => {
-    const domains = new Map<DomainKey, Map<string, { title: string; key: string }[]>>();
-    visiblePermissions.filter((perm)=>perm.category!=="menu").forEach((perm) => {
-      const dom = resourceDomain(perm.resource);
-      if (!domains.has(dom)) domains.set(dom, new Map());
-      const byResource = domains.get(dom)!;
-      const list = byResource.get(perm.resource) ?? [];
-      list.push({ title: `${perm.name}（${perm.code}）`, key: perm.id });
-      byResource.set(perm.resource, list);
-    });
-    return DOMAIN_ORDER.filter((dom) => domains.has(dom)).map((dom) => {
-      const byResource = domains.get(dom)!;
-      let domainCount = 0;
-      const resourceNodes = [...byResource.entries()]
-        .sort((a, b) => label(RESOURCE_LABELS, a[0]).localeCompare(label(RESOURCE_LABELS, b[0]), "zh"))
-        .map(([resource, children]) => {
-          domainCount += children.length;
-          return {
-            title: `${label(RESOURCE_LABELS, resource)}（${children.length}）`,
-            key: `res:${dom}:${resource}`,
-            selectable: false,
-            children: [...children].sort((a, b) => a.title.localeCompare(b.title, "zh"))
-          };
-        });
-      return {
-        title: `${DOMAIN_LABELS[dom]}（${domainCount}）`,
-        key: `dom:${dom}`,
-        selectable: false,
-        children: resourceNodes
-      };
-    });
-  }, [visiblePermissions]);
-  const menuTreeData=useMemo(()=>[
-    ...buildMenuPermissionTree(visiblePermissions,managementMenusQuery.data?.items??[],managementMenusQuery.data?.ancestors??[],"management").nodes,
-    ...buildMenuPermissionTree(visiblePermissions,workbenchMenusQuery.data?.items??[],workbenchMenusQuery.data?.ancestors??[],"workbench").nodes
-  ],[managementMenusQuery.data,visiblePermissions,workbenchMenusQuery.data]);
+  const authorizationTree=useMemo(()=>buildAuthorizationTree(visiblePermissions,[
+    {directory:"management",entries:managementMenusQuery.data?.items??[],ancestors:managementMenusQuery.data?.ancestors??[]},
+    {directory:"workbench",entries:workbenchMenusQuery.data?.items??[],ancestors:workbenchMenusQuery.data?.ancestors??[]}
+  ],permissionCategory==="all"?undefined:permissionCategory),[visiblePermissions,managementMenusQuery.data,workbenchMenusQuery.data,permissionCategory]);
   const permissionTreeLoading=permissionsQuery.isFetching||managementMenusQuery.isFetching||workbenchMenusQuery.isFetching;
   const permissionTreeUnavailable=permissionsQuery.isError||managementMenusQuery.isError||workbenchMenusQuery.isError||!permissionsQuery.data||!managementMenusQuery.data||!workbenchMenusQuery.data;
 
@@ -398,26 +365,25 @@ export function RolesPage() {
         extra={
           <Space>
             <Button onClick={() => setPermRole(null)}>取消</Button>
-            <Button type="primary" loading={permMutation.isPending} disabled={permissionTreeUnavailable||permissionTreeLoading} onClick={() => permMutation.mutate(checkedPerms)}>
+            <Button type="primary" loading={permMutation.isPending} disabled={permissionTreeUnavailable||permissionTreeLoading} onClick={() => permRole && permMutation.mutate({role:{...permRole,permissionIds:[...permRole.permissionIds]},ids:[...checkedPerms],context:permissionContext})}>
               保存授权
             </Button>
           </Space>
         }
       >
         {permissionTreeUnavailable?<Typography.Text type="danger">菜单或权限目录未完整载入，保存已停用以保护现有授权。</Typography.Text>:null}
+        <Segmented style={{marginBottom:16}} value={permissionCategory} onChange={setPermissionCategory} options={[{value:"all",label:"全部"},{value:"action",label:"操作"},{value:"menu",label:"菜单"},{value:"page",label:"页面"}]}/>
         <Tree
           checkable
           blockNode
           disabled={permissionTreeUnavailable||permissionTreeLoading}
-          checkedKeys={checkedPerms}
-          onCheck={(checked) => {
-            const keys = Array.isArray(checked) ? checked : checked.checked;
-            setCheckedPerms(
-              keys.map(String).filter((key) => visiblePermissionIds.has(key))
-            );
+          checkedKeys={[...authorizationTree.keyToId].filter(([,id])=>checkedPerms.includes(id)).map(([key])=>key)}
+          onCheck={(_checked, info) => {
+            const affected=authorizationNodePermissionIds(authorizationTree.nodes,authorizationTree.keyToId,String(info.node.key));
+            setCheckedPerms(previous=>info.checked ? [...new Set([...previous,...affected])] : previous.filter(id=>!affected.has(id)));
           }}
-          treeData={[...permTreeData,...menuTreeData]}
-          defaultExpandedKeys={[...DOMAIN_ORDER.map((dom) => `dom:${dom}`),...buildMenuPermissionTree(visiblePermissions,managementMenusQuery.data?.items??[],managementMenusQuery.data?.ancestors??[],"management").expandedKeys,...buildMenuPermissionTree(visiblePermissions,workbenchMenusQuery.data?.items??[],workbenchMenusQuery.data?.ancestors??[],"workbench").expandedKeys]}
+          treeData={authorizationTree.nodes}
+          defaultExpandedKeys={["directory:management","directory:workbench","public"]}
         />
       </Drawer>
     </>
