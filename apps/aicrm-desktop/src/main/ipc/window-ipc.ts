@@ -39,7 +39,7 @@ export function emitWindowState(window: BrowserWindow): void {
 }
 
 export function registerWindowIpc(): void {
-  scopedIpc(["main", "terminal"], args => args.length===1 && !!args[0] && Object.keys(args[0]).length===2 && ["classic-gold","business-blue","jade-green"].includes(args[0].themeId) && typeof args[0].dark==="boolean").handle(IPC_CHANNELS.windowSetAppearance, (event,value) => {
+  scopedIpc(["main", "terminal"], args => args.length===1 && !!args[0] && Object.keys(args[0]).length===2 && ["classic-gold","business-blue","jade-green","graphite-cyan"].includes(args[0].themeId) && typeof args[0].dark==="boolean").handle(IPC_CHANNELS.windowSetAppearance, (event,value) => {
     const window=getSenderWindow(event); if(!window||window.isDestroyed())return false;
     applyNativeAppearance(window,value);setVersionDialogTheme(value.dark ? "dark" : "light");return true;
   });

@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("kyVersionDialog", api);
 const applyTheme = (value: unknown) => {
  const payload=value && typeof value==="object" ? value as {theme?:unknown;themeId?:unknown} : {theme:value};
  if(payload.theme==="light"||payload.theme==="dark")document.documentElement.dataset.theme=payload.theme;
- if(["classic-gold","business-blue","jade-green"].includes(String(payload.themeId)))document.documentElement.dataset.palette=String(payload.themeId);
+ if(["classic-gold","business-blue","jade-green","graphite-cyan"].includes(String(payload.themeId)))document.documentElement.dataset.palette=String(payload.themeId);
 };
 ipcRenderer.on(IPC_CHANNELS.versionDialogThemeChanged, (_event, value: unknown) => applyTheme(value));
 window.addEventListener("DOMContentLoaded", () => {

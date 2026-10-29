@@ -44,7 +44,7 @@ function validAction(value: unknown): value is HostOverlayAction {
         return [v.currentPassword, v.newPassword, v.confirmPassword].every(value => typeof value === "string" && value.length > 0 && value.length <= 1024);
     if (v.type === "unlock")
         return typeof v.password === "string" && v.password.length > 0 && v.password.length <= 1024;
-    return v.type === "choose" && ["classic-gold", "business-blue", "jade-green"].includes(String(v.themeId)) && ["light", "dark", "system"].includes(String(v.mode));
+    return v.type === "choose" && ["classic-gold", "business-blue", "jade-green", "graphite-cyan"].includes(String(v.themeId)) && ["light", "dark", "system"].includes(String(v.mode));
 }
 function validInput(value: unknown): value is HostOverlayInput {
     if (!value || typeof value !== "object")

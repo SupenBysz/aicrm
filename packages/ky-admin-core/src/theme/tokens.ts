@@ -1,6 +1,6 @@
 import { classicVariables } from "./classic-tokens";
 export type AppearanceMode = "light" | "dark" | "system";
-export type ThemeId = "classic-gold" | "business-blue" | "jade-green";
+export type ThemeId = "classic-gold" | "business-blue" | "jade-green" | "graphite-cyan";
 export interface AppearanceValue {
     schemaVersion: 1;
     source: "personal" | "platform";
@@ -13,7 +13,8 @@ export const APPEARANCE_SNAPSHOT_KEY = "ky.admin.appearance.snapshot.v1";
 export const THEMES = [
     { id: "classic-gold", name: "经典金", light: "#d49a3d", dark: "#ffd47d" },
     { id: "business-blue", name: "商务蓝", light: "#2563c4", dark: "#8bb8ff" },
-    { id: "jade-green", name: "翡翠绿", light: "#167554", dark: "#76d4ae" }
+    { id: "jade-green", name: "翡翠绿", light: "#167554", dark: "#76d4ae" },
+    { id: "graphite-cyan", name: "石墨青", light: "#087f8c", dark: "#35d1db" }
 ] as const;
 export function validAppearance(value: unknown, personal = false): value is AppearanceValue {
     if (!value || typeof value !== "object")
@@ -27,6 +28,16 @@ export function validAppearance(value: unknown, personal = false): value is Appe
 }
 export function themeColors(themeId: string, dark: boolean) {
     const preset = THEMES.find(t => t.id === themeId) ?? THEMES[0];
+    if (preset.id === "graphite-cyan") return {
+        primary: dark ? preset.dark : preset.light,
+        bg: dark ? "#181818" : "#f3f5f6",
+        nav: dark ? "#202020" : "#fafbfc",
+        surface: dark ? "#262626" : "#ffffff",
+        soft: dark ? "#353535" : "#edf1f3",
+        text: dark ? "#f3f3f3" : "#202428",
+        muted: dark ? "#ababab" : "#667078",
+        selectedText: dark ? preset.dark : preset.light
+    };
     const gold = preset.id === "classic-gold";
     const green = preset.id === "jade-green";
     return {
@@ -72,6 +83,35 @@ export function themeVariables(themeId: string, dark: boolean): Record<string, s
         const p = themeColors(themeId, mode === "dark");
         const prefix = `--admin-shell-${mode}-`;
         Object.assign(v, { [prefix + "base"]: p.bg, [prefix + "nav"]: p.nav, [prefix + "right"]: p.bg, [prefix + "divider"]: `color-mix(in srgb, ${p.primary} 18%, transparent)`, [prefix + "toolbar"]: `color-mix(in srgb, ${p.primary} 16%, transparent)`, [prefix + "toolbar-text"]: p.muted, [prefix + "toolbar-border"]: `color-mix(in srgb, ${p.primary} 24%, transparent)`, [prefix + "selected"]: mode === "dark" ? p.soft : p.nav, [prefix + "selected-text"]: p.selectedText });
+    }
+    if (themeId === "graphite-cyan") {
+        // Neutral chrome is deliberate: cyan indicates actions and selection only.
+        Object.assign(v, {
+            "--admin-divider": dark ? "#333333" : "#e4e8ea",
+            "--admin-stroke": dark ? "#3a3a3a" : "#dce2e5",
+            "--admin-border-color": dark ? "#3a3a3a" : "#dce2e5",
+            "--admin-bg-elevated": dark ? "#303030" : "#ffffff",
+            "--admin-shadow-soft": dark ? "0 12px 32px #0006" : "0 12px 32px #14202b14",
+            "--admin-scrollbar-thumb-bg": dark ? "#575757" : "#b9c2c7",
+            "--admin-content-top-gradient-bg": c.bg,
+            "--admin-toolbar-bg": c.nav, "--admin-toolbar-border": dark ? "#3a3a3a" : "#dce2e5",
+            "--admin-toolbar-hover": c.soft,
+            "--admin-segmented-bg": c.bg, "--admin-segmented-border": dark ? "#3a3a3a" : "#dce2e5",
+            "--admin-segmented-selected-bg": c.surface,
+            "--admin-text-subtle": dark ? "#969696" : "#667078",
+            "--admin-on-primary": dark ? "#102629" : "#ffffff"
+        });
+        for (const mode of ["light", "dark"] as const) {
+            const isDark = mode === "dark";
+            const p = themeColors(themeId, isDark);
+            const prefix = `--admin-shell-${mode}-`;
+            Object.assign(v, {
+                [prefix + "divider"]: isDark ? "#333333" : "#e4e8ea",
+                [prefix + "toolbar"]: p.nav,
+                [prefix + "toolbar-border"]: isDark ? "#3a3a3a" : "#dce2e5",
+                [prefix + "selected"]: `color-mix(in srgb, ${p.primary} 14%, ${p.nav})`
+            });
+        }
     }
     if (themeId === "classic-gold")
         Object.assign(v, classicVariables[dark ? "dark" : "light"]);

@@ -7,7 +7,7 @@ import (
 )
 
 func TestContract(t *testing.T) {
-	for _, theme := range []string{"classic-gold", "business-blue", "jade-green"} {
+	for _, theme := range []string{"classic-gold", "business-blue", "jade-green", "graphite-cyan"} {
 		for _, mode := range []string{"light", "dark", "system"} {
 			v := Default()
 			v.ThemeID = theme

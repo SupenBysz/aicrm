@@ -61,10 +61,38 @@ func TestAppearanceDatabase(t *testing.T) {
 	if _, err = s.db.Exec(string(raw)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.db.Exec(`INSERT INTO ky_user VALUES('legacy');
+ INSERT INTO ky_user_appearance(user_id,source,theme_id,mode,revision) VALUES('legacy','personal','jade-green','dark',7);`); err != nil {
+		t.Fatal(err)
+	}
+	// Upgrade legacy constraints and verify the additive migration is repeatable.
+	upgrade, err := os.ReadFile("../../../../ops/db/110_graphite_cyan_theme.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err = s.db.Exec(string(upgrade)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var legacyTheme string
+	var legacyRevision int
+	if err = s.db.QueryRow(`SELECT theme_id,revision FROM ky_user_appearance WHERE user_id='legacy'`).Scan(&legacyTheme, &legacyRevision); err != nil || legacyTheme != "jade-green" || legacyRevision != 7 {
+		t.Fatal("existing preference changed", err)
+	}
+	for _, statement := range []string{
+		`UPDATE ky_user_appearance SET theme_id='unsafe' WHERE user_id='legacy'`,
+		`UPDATE ky_user_appearance SET source='platform',theme_id='graphite-cyan' WHERE user_id='legacy'`,
+		`UPDATE ky_platform_appearance SET theme_id='unsafe' WHERE id='default'`,
+	} {
+		if _, err = s.db.Exec(statement); err == nil {
+			t.Fatal("invalid appearance accepted")
+		}
+	}
 	id := "a"
 	v := appearance.Default()
 	v.Source = "personal"
-	v.ThemeID = "business-blue"
+	v.ThemeID = "graphite-cyan"
 	v.Mode = "dark"
 	var wg sync.WaitGroup
 	results := make(chan error, 2)
@@ -88,7 +116,7 @@ func TestAppearanceDatabase(t *testing.T) {
 		t.Fatal(success, conflict)
 	}
 	got, err := s.GetAppearance(ctx, id)
-	if err != nil || got.Revision != 1 || got.ThemeID != "business-blue" {
+	if err != nil || got.Revision != 1 || got.ThemeID != "graphite-cyan" {
 		t.Fatal(got, err)
 	}
 	other, err := s.GetAppearance(ctx, "b")
