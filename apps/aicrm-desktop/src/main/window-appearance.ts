@@ -29,3 +29,9 @@ export function applyNativeAppearance(window: BrowserWindow, value: NativeAppear
     writeFileSync(join(app.getPath("userData"), "appearance.json"), JSON.stringify(value), { mode: 0o600 });
 }
 catch { /* Window theme still applies when preferences are read-only. */ } }
+
+export function storedNativeThemeId(): "classic-gold" | "business-blue" | "jade-green" {
+ try { const value=JSON.parse(readFileSync(join(app.getPath("userData"),"appearance.json"),"utf8")) as NativeAppearance;
+ if(value.themeId==="business-blue"||value.themeId==="jade-green")return value.themeId;
+ }catch{} return "classic-gold";
+}

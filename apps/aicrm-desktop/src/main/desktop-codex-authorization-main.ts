@@ -1,6 +1,7 @@
+import {localCredentialStorage as safeStorage,localCredentialRoot} from "./local-credential-storage";
 import { senderRegistration } from "./guarded-ipc";
 import path from "node:path";
-import { app, BrowserWindow, safeStorage, shell } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { DESKTOP_APPLICATION_NAME, IPC_CHANNELS } from "../shared/constants.ts";
 import { CodexAppServerAuthClient } from "./codex-app-server-auth-client.ts";
 import { loadDesktopConfig } from "./config.ts";
@@ -53,7 +54,7 @@ export function getDesktopCodexAuthorizationMainServices(): DesktopCodexAuthoriz
   if (singleton) return singleton;
   if (!app.isReady()) throw mainUnavailable();
 
-  const userDataRoot = app.getPath("userData");
+  const userDataRoot = localCredentialRoot();
   const trust = getDesktopDeviceTrustMainServices();
   const credentials = getDesktopCredentialTreeManager();
   const transport = new DesktopAuthorizationTransportClient({

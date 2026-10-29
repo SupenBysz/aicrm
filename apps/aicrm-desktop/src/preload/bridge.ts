@@ -12,13 +12,18 @@ async function menuWebViewInvoke<T>(channel: string, input: unknown): Promise<im
 
 const bridge: AiCrmDesktopBridge = {
   desktopPlugins,
+  hostOverlay:{
+    show:input=>ipcRenderer.invoke(IPC_CHANNELS.hostOverlayShow,input).then(result=>result?.ok===true&&result.data===true),
+    close:()=>ipcRenderer.invoke(IPC_CHANNELS.hostOverlayClose).then(result=>result?.ok===true&&result.data===true),
+    onAction:listener=>{const handler=(_event:Electron.IpcRendererEvent,action:import("../shared/host-overlay").HostOverlayAction)=>listener(action);ipcRenderer.on(IPC_CHANNELS.hostOverlayAction,handler);return()=>ipcRenderer.removeListener(IPC_CHANNELS.hostOverlayAction,handler);}
+  },
   api: {
     request: (request) => ipcRenderer.invoke(IPC_CHANNELS.apiRequest, request)
   },
   app: {
     getConfig: () => ipcRenderer.invoke(IPC_CHANNELS.appGetConfig),
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion),
-    openVersionDialog: () => ipcRenderer.invoke(IPC_CHANNELS.versionDialogOpen).then((result: {ok:boolean;data?:boolean}) => result.ok && result.data === true)
+    openVersionDialog: (anchor?:{x:number;y:number;width:number;height:number}) => ipcRenderer.invoke(IPC_CHANNELS.versionDialogOpen,anchor).then((result: {ok:boolean;data?:boolean}) => result.ok && result.data === true)
   },
   session: {
     load: () => ipcRenderer.invoke(IPC_CHANNELS.sessionLoad),
@@ -120,6 +125,7 @@ const bridge: AiCrmDesktopBridge = {
     }
   },
   menuWebView: {
+    protocolVersion:2,
     open: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewOpen, input),
     setBounds: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewSetBounds, input),
     navigate: (input) => menuWebViewInvoke(IPC_CHANNELS.menuWebViewNavigate, input),

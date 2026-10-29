@@ -1,3 +1,5 @@
+import {isHostScreenLocked,onHostScreenLock} from "../host-screen-lock";
+import {restoreHostOverlayOrder} from "../host-overlay";
 import { createHash, randomUUID } from "node:crypto";
 import { BrowserWindow, WebContentsView, session as electronSession, type IpcMainInvokeEvent, type Session, type WebContents } from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
@@ -57,6 +59,8 @@ type RuntimeResponse = {
   publicStyles: Array<{ identifier: string; version: string; sourceContent: string; sourceBytes: number; sourceSha256: string; runAt: string; priority: number }>;
 };
 type Instance = {
+  activationId:string;
+  boundsSequence:number;
   id: string;
   opener: WebContents;
   hostWindow: BrowserWindow;
@@ -87,6 +91,7 @@ type Instance = {
   ownerDispose?: () => void;
 };
 
+const openGenerations=new Map<number,number>();
 const instances = new Map<string, Instance>();
 const instancesByStableKey = new Map<string, Instance>();
 const activeEmbeddedByOwner = new Map<number, string>();
@@ -214,6 +219,7 @@ function emit(instance: Instance, status: MenuWebViewState["status"], errorCode?
   if (instance.contents.isDestroyed() || instance.opener.isDestroyed()) return;
   instance.state = {
     instanceId: instance.id,
+    sequence: (instance.state.sequence ?? 0) + 1,
     status,
     title: instance.state.title || instance.config.name || instance.menuKey,
     url: safeDisplayedUrl(instance.contents.getURL() || instance.data.url),
@@ -224,6 +230,7 @@ function emit(instance: Instance, status: MenuWebViewState["status"], errorCode?
 }
 
 async function sendCdp(instance: Instance, method: string, params?: Record<string, unknown>): Promise<any> {
+  if(isHostScreenLocked(instance.opener.id))throw Error("screen_locked");
   const debuggerApi = instance.contents.debugger;
   if (!debuggerApi.isAttached()) debuggerApi.attach("1.3");
   return debuggerApi.sendCommand(method, params);
@@ -308,6 +315,7 @@ async function refreshSpaRoute(instance: Instance, url: string): Promise<void> {
 }
 
 async function resolveAndNavigate(instance: Instance, rawUrl: string, resolved?: RuntimeResponse, historyIndex: number | null = null): Promise<boolean> {
+  if(isHostScreenLocked(instance.opener.id))return false;
   const url = safePageUrl(rawUrl);
   if (!url) {
     instance.view.setVisible(false);
@@ -321,7 +329,7 @@ async function resolveAndNavigate(instance: Instance, rawUrl: string, resolved?:
   emit(instance, "loading");
   try {
     const data = resolved ?? await resolveRuntime({ directoryType: instance.directoryType, menuKey: instance.menuKey, workspaceType: instance.workspaceType, workspaceId: instance.workspaceId }, url);
-    if (generation !== instance.generation || instance.contents.isDestroyed()) return false;
+    if (generation !== instance.generation || instance.contents.isDestroyed() || isHostScreenLocked(instance.opener.id)) return false;
     if (!menuWebViewUrlAllowed(data.url, data.menu.navigationProtocols) || data.url !== url) throw new Error("navigation_protocol_denied");
     instance.pendingHistoryIndex = historyIndex;
     instance.data = data;
@@ -329,7 +337,7 @@ async function resolveAndNavigate(instance: Instance, rawUrl: string, resolved?:
     instance.ran.clear();
     instance.assetErrors.clear();
     await installDocumentStart(instance, data);
-    if (generation !== instance.generation || instance.contents.isDestroyed()) return false;
+    if (generation !== instance.generation || instance.contents.isDestroyed() || isHostScreenLocked(instance.opener.id)) return false;
     instance.allowedNextNavigation = data.url;
     await instance.contents.loadURL(data.url);
     return true;
@@ -446,10 +454,11 @@ function runtimeFingerprint(data: RuntimeResponse): string {
     ...data.publicStyles.map((item) => ["public-style", item.identifier, item.version, item.runAt, item.priority, item.sourceSha256]),
     ...data.assets.map((item) => [item.assetType, item.identifier, item.id, item.version, item.runAt, item.priority, item.sourceSha256])
   ];
-  return JSON.stringify([data.menu.revision, data.url, rows]);
+  return JSON.stringify([data.menu, data.url, rows]);
 }
 
 function activateEmbedded(instance: Instance): void {
+  restoreHostOverlayOrder(instance.hostWindow);
   const ownerId = instance.hostWindow.id;
   for (const other of instances.values()) {
     if (other !== instance && other.mode === "embedded" && other.hostWindow.id === ownerId) {
@@ -489,9 +498,12 @@ export function menuWebViewIdentityFromToken(token: string): string {
 }
 
 async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput): Promise<DesktopCommandResult<MenuWebViewOpenResult>> {
+  if(isHostScreenLocked(event.sender.id))return fail("screen_locked","屏幕已锁定");
   if (!validMenuWebViewOpenInput(input)) return fail("validation_error", "菜单 WebView 参数无效");
   const owner = BrowserWindow.fromWebContents(event.sender);
   if (!owner || owner.isDestroyed() || event.senderFrame !== event.sender.mainFrame) return fail("permission_denied", "仅管理端主页面可以打开菜单 WebView");
+  const openGeneration=(openGenerations.get(event.sender.id)??0)+1;openGenerations.set(event.sender.id,openGeneration);
+  const assertCurrent=()=>{if(isHostScreenLocked(event.sender.id))throw new Error("screen_locked");if(openGenerations.get(event.sender.id)!==openGeneration)throw new Error("open_superseded");};
   let pendingView: WebContentsView | undefined;
   let pendingWindow: BrowserWindow | undefined;
   let cached: Instance | undefined;
@@ -503,21 +515,25 @@ async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput):
     cached = instancesByStableKey.get(stableKey);
     const cachedUrl = cached && !cached.contents.isDestroyed() ? safePageUrl(cached.contents.getURL()) : null;
     const runtimeResponse = await resolveRuntime(input, cachedUrl || "", desktopSession.token);
+    assertCurrent();
     if (!authorized(event, ["main"]) || owner.isDestroyed()) throw new Error("owner_context_changed");
     const latestSession = await loadSession();
     if (!latestSession?.token || sessionIdentity(latestSession.token) !== identityKey || latestSession.token !== desktopSession.token) throw new Error("auth_context_changed");
+    assertCurrent();
     if (cached && cached.opener === event.sender && cached.mode === runtimeResponse.menu.openMode && !cached.contents.isDestroyed()) {
+      cached.activationId=randomUUID();cached.boundsSequence=0;cached.bounds=null;
       if (cached.mode === "embedded") activateEmbedded(cached);
       cached.touchedAt = Date.now();
       if (cached.mode === "window" && !cached.hostWindow.isDestroyed()) { cached.hostWindow.show(); cached.hostWindow.focus(); }
       if (cached.state.status === "loading" && cached.pendingNavigation.size > 0) {
         event.sender.send(IPC_CHANNELS.menuWebViewChanged, { instanceId: cached.id, state: cached.state });
-        return ok({ instanceId: cached.id, openMode: cached.mode, title: runtimeResponse.menu.name || input.menuKey });
+        return ok({ instanceId: cached.id, openMode: cached.mode, title: runtimeResponse.menu.name || input.menuKey, activationId:cached.activationId, protocolVersion: 2, stateSnapshot: { ...cached.state } });
       }
       const needsReload = cached.state.status === "failed" || !cachedUrl || cachedUrl !== runtimeResponse.url
         || runtimeFingerprint(cached.data) !== runtimeFingerprint(runtimeResponse);
       if (needsReload) {
         const moved = await resolveAndNavigate(cached, runtimeResponse.url, runtimeResponse);
+        assertCurrent();
         if (!moved) throw new Error(cached.state.errorCode || "runtime_resolve_failed");
       } else {
         cached.data = runtimeResponse;
@@ -525,7 +541,7 @@ async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput):
         cached.state.url = safeDisplayedUrl(cachedUrl || runtimeResponse.url);
         event.sender.send(IPC_CHANNELS.menuWebViewChanged, { instanceId: cached.id, state: cached.state });
       }
-      return ok({ instanceId: cached.id, openMode: cached.mode, title: runtimeResponse.menu.name || input.menuKey });
+      return ok({ instanceId: cached.id, openMode: cached.mode, title: runtimeResponse.menu.name || input.menuKey, activationId:cached.activationId, protocolVersion: 2, stateSnapshot: { ...cached.state } });
     }
     if (cached) detach(cached);
     pendingView = new WebContentsView({
@@ -552,6 +568,7 @@ async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput):
     const id = randomUUID();
     const state: MenuWebViewState = { instanceId: id, status: "loading", title: runtimeResponse.menu.name || input.menuKey, url: safeDisplayedUrl(runtimeResponse.url) };
     const instance: Instance = {
+      activationId:randomUUID(), boundsSequence:0,
       id, opener: event.sender, hostWindow, view: pendingView, contents: pendingView.webContents,
       mode: runtimeResponse.menu.openMode, stableKey, identityKey, active: false, touchedAt: Date.now(),
       workspaceType: input.workspaceType, workspaceId: input.workspaceId,
@@ -562,6 +579,7 @@ async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput):
     instances.set(id, instance);
     instancesByStableKey.set(stableKey, instance);
     hostWindow.contentView.addChildView(pendingView);
+    restoreHostOverlayOrder(hostWindow);
     attachInstance(instance);
     const ownerNavigation = (_event: unknown, _url: string, inPlace: boolean, isMainFrame: boolean) => {
       if (isMainFrame && !inPlace) detach(instance);
@@ -597,11 +615,12 @@ async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput):
     pendingWindow = undefined;
     trimOwnerCache(event.sender.id);
     const moved = await resolveAndNavigate(instance, runtimeResponse.url, runtimeResponse);
+    assertCurrent();
     if (!moved) { detach(instance); throw new Error(instance.state.errorCode || "runtime_resolve_failed"); }
     if (instance.mode === "window" && !instance.hostWindow.isDestroyed()) instance.hostWindow.show();
-    return ok({ instanceId: id, openMode: instance.mode, title: runtimeResponse.menu.name || input.menuKey });
+    return ok({ instanceId: id, openMode: instance.mode, title: runtimeResponse.menu.name || input.menuKey, activationId:instance.activationId, protocolVersion: 2, stateSnapshot: { ...instance.state } });
   } catch (error) {
-    if (cached && !cached.contents.isDestroyed()) {
+    if (cached && !cached.contents.isDestroyed() && !(error instanceof Error && error.message==="open_superseded")) {
       cached.active = false;
       cached.view.setVisible(false);
       if (cached.state.status === "failed" || error instanceof Error && ["not_found", "menu_config_invalid", "auth_context_changed", "owner_context_changed"].includes(error.message)) detach(cached);
@@ -613,13 +632,21 @@ async function openMenu(event: IpcMainInvokeEvent, input: MenuWebViewOpenInput):
   }
 }
 
+// The shared native lock controller covers every application window.
+// Menu instances require fresh authorization before being exposed again.
+onHostScreenLock((ownerId,locked)=>{for(const instance of instances.values()){if(instance.opener.id!==ownerId)continue;instance.active=false;if(!locked)instance.view.setVisible(false);}});
+
 const menuWebViewIpc = scopedIpc(["main"], (args) => args.length === 1 && Buffer.byteLength(JSON.stringify(args)) <= 64 * 1024);
 export function registerMenuWebViewIpc(): void {
   menuWebViewIpc.handle(IPC_CHANNELS.menuWebViewOpen, (event, input: MenuWebViewOpenInput) => openMenu(event, input));
   menuWebViewIpc.handle(IPC_CHANNELS.menuWebViewSetBounds, (event, input: MenuWebViewBoundsInput) => {
+    if(isHostScreenLocked(event.sender.id))return ok({updated:false});
     if (!validMenuWebViewBounds(input)) return fail("validation_error", "菜单 WebView 区域无效");
     const instance = getInstance(input.instanceId);
     if (!instance || instance.opener !== event.sender || instance.mode !== "embedded") return fail("permission_denied", "无权控制该菜单 WebView");
+    if(input.activationId!==instance.activationId || !Number.isSafeInteger(input.boundsSequence) || input.boundsSequence<=instance.boundsSequence) return ok({updated:false});
+    if(input.visible && activeEmbeddedByOwner.get(instance.hostWindow.id)!==instance.id)return ok({updated:false});
+    instance.boundsSequence=input.boundsSequence;
     const content = instance.hostWindow.getContentBounds();
     const zoom = Math.max(0.5, Math.min(3, instance.hostWindow.webContents.getZoomFactor()));
     const left = Math.max(0, Math.round(input.x * zoom));
@@ -636,15 +663,16 @@ export function registerMenuWebViewIpc(): void {
     return ok({ updated: true });
   });
   menuWebViewIpc.handle(IPC_CHANNELS.menuWebViewNavigate, async (event, input: MenuWebViewNavigateInput) => {
+    if(isHostScreenLocked(event.sender.id))return fail("screen_locked","屏幕已锁定");
     if (!validMenuWebViewCommand(input)) return fail("validation_error", "菜单 WebView 导航参数无效");
     const instance = getInstance(input.instanceId);
-    if (!instance || instance.opener !== event.sender) return fail("permission_denied", "无权控制该菜单 WebView");
+    if (!instance || instance.opener !== event.sender || input.activationId!==instance.activationId) return fail("permission_denied", "无权控制该菜单 WebView");
     const currentUrl = safePageUrl(instance.contents.getURL());
     if (!currentUrl || instance.contents.isDestroyed()) return fail("not_ready", "菜单页面尚未就绪");
     try {
       // Re-authorize the currently displayed page before running user_action assets.
       const currentData = await resolveRuntime({ directoryType: instance.directoryType, menuKey: instance.menuKey, workspaceType: instance.workspaceType, workspaceId: instance.workspaceId }, currentUrl);
-      if (!authorized(event, ["main"]) || instance.contents.isDestroyed() || safePageUrl(instance.contents.getURL()) !== currentUrl) throw new Error("owner_context_changed");
+      if (isHostScreenLocked(event.sender.id) || !authorized(event, ["main"]) || instance.contents.isDestroyed() || safePageUrl(instance.contents.getURL()) !== currentUrl) throw new Error("owner_context_changed");
       instance.data = currentData;
       instance.config = currentData.menu;
       await injectAt(instance, "user_action", currentUrl);
@@ -666,9 +694,10 @@ export function registerMenuWebViewIpc(): void {
     }
   });
   menuWebViewIpc.handle(IPC_CHANNELS.menuWebViewClose, (event, input: MenuWebViewCloseInput) => {
+    if(isHostScreenLocked(event.sender.id))return fail("screen_locked","屏幕已锁定");
     if (!validMenuWebViewClose(input)) return fail("validation_error", "菜单 WebView 标识无效");
     const instance = getInstance(input.instanceId);
-    if (!instance || instance.opener !== event.sender) return fail("permission_denied", "无权关闭该菜单 WebView");
+    if (!instance || instance.opener !== event.sender || input.activationId!==instance.activationId) return fail("permission_denied", "无权关闭该菜单 WebView");
     detach(instance);
     return ok({ closed: true });
   });

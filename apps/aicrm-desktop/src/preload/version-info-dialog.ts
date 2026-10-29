@@ -14,7 +14,11 @@ const api = {
   }
 };
 contextBridge.exposeInMainWorld("kyVersionDialog", api);
-const applyTheme = (value: unknown) => { if (value === "light" || value === "dark") document.documentElement.dataset.theme = value; };
+const applyTheme = (value: unknown) => {
+ const payload=value && typeof value==="object" ? value as {theme?:unknown;themeId?:unknown} : {theme:value};
+ if(payload.theme==="light"||payload.theme==="dark")document.documentElement.dataset.theme=payload.theme;
+ if(["classic-gold","business-blue","jade-green"].includes(String(payload.themeId)))document.documentElement.dataset.palette=String(payload.themeId);
+};
 ipcRenderer.on(IPC_CHANNELS.versionDialogThemeChanged, (_event, value: unknown) => applyTheme(value));
 window.addEventListener("DOMContentLoaded", () => {
   document.querySelector("[data-close]")?.addEventListener("click", () => { void api.close(); });
@@ -22,7 +26,7 @@ window.addEventListener("DOMContentLoaded", () => {
   veil?.addEventListener("click", (event) => { if (event.target === veil) void api.close(); });
   document.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); void api.close(); } });
   void api.getInfo().then((info) => {
-    applyTheme(info.theme);
+    applyTheme(info);
     for (const [id, value] of [["client", info.clientVersion], ["plugin", info.pluginVersion], ["phase", info.runtimePhase]] as const) {
       const target = document.getElementById(id); if (target) target.textContent = value;
     }

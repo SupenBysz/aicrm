@@ -1,3 +1,4 @@
+import {registerHostOverlayIpc} from "./host-overlay";
 import { registerPluginSchemes, startPluginHost, getPluginHost } from "./desktop-plugin-host/host";
 import { guardedIpc as ipcMain } from "./guarded-ipc";
 import { existsSync, mkdirSync } from "node:fs";
@@ -70,6 +71,7 @@ registerDesktopExecutorDeviceBindingIpc(
 );
 registerMatrixAccountIpc();
 registerMenuWebViewIpc();
+  registerHostOverlayIpc();
 registerNetworkIpc();
 registerWindowIpc();
 registerVersionDialogIpc();
