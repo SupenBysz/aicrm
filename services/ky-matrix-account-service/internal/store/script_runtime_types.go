@@ -31,6 +31,8 @@ type RuntimeAsset struct {
 type RuntimeAssetSelector struct {
 	Identifier              string `json:"identifier,omitempty"`
 	Version                 string `json:"version,omitempty"`
+	VersionID               string `json:"versionId,omitempty"`
+	VersionPolicy           string `json:"versionPolicy,omitempty"`
 	MatchConfiguredURLRules *bool  `json:"matchConfiguredUrlRules,omitempty"`
 	RunAt                   string `json:"runAt,omitempty"`
 	Priority                *int   `json:"priority,omitempty"`
@@ -43,22 +45,24 @@ type RuntimeWorkspace struct {
 }
 
 type ScriptRuntimeResolveRequest struct {
-	Platform               string                  `json:"platform"`
-	URL                    string                  `json:"url"`
-	WorkspaceType          string                  `json:"workspaceType"`
-	WorkspaceID            string                  `json:"workspaceId"`
-	Workspace              *RuntimeWorkspace       `json:"workspace,omitempty"`
-	VersionPolicy          string                  `json:"versionPolicy"`
-	Script                 *RuntimeAssetSelector   `json:"script,omitempty"`
-	ScriptIdentifiers      []string                `json:"scriptIdentifiers,omitempty"`
-	StyleIdentifiers       []string                `json:"styleIdentifiers,omitempty"`
-	ScriptSelectors        []*RuntimeAssetSelector `json:"scriptSelectors,omitempty"`
-	StyleSelectors         []*RuntimeAssetSelector `json:"styleSelectors,omitempty"`
-	PublicIdentifiers      []string                `json:"publicIdentifiers,omitempty"`
-	PublicStyleIdentifiers []string                `json:"publicStyleIdentifiers,omitempty"`
-	Style                  *RuntimeAssetSelector   `json:"style,omitempty"`
-	RunAt                  string                  `json:"runAt,omitempty"`
-	PreloadBoundAssets     bool                    `json:"preloadBoundAssets,omitempty"`
+	Platform                   string                  `json:"platform"`
+	URL                        string                  `json:"url"`
+	WorkspaceType              string                  `json:"workspaceType"`
+	WorkspaceID                string                  `json:"workspaceId"`
+	Workspace                  *RuntimeWorkspace       `json:"workspace,omitempty"`
+	VersionPolicy              string                  `json:"versionPolicy"`
+	Script                     *RuntimeAssetSelector   `json:"script,omitempty"`
+	ScriptIdentifiers          []string                `json:"scriptIdentifiers,omitempty"`
+	StyleIdentifiers           []string                `json:"styleIdentifiers,omitempty"`
+	ScriptSelectors            []*RuntimeAssetSelector `json:"scriptSelectors,omitempty"`
+	StyleSelectors             []*RuntimeAssetSelector `json:"styleSelectors,omitempty"`
+	PublicIdentifiers          []string                `json:"publicIdentifiers,omitempty"`
+	PublicStyleIdentifiers     []string                `json:"publicStyleIdentifiers,omitempty"`
+	Style                      *RuntimeAssetSelector   `json:"style,omitempty"`
+	RunAt                      string                  `json:"runAt,omitempty"`
+	PreloadBoundAssets         bool                    `json:"preloadBoundAssets,omitempty"`
+	SkipUnselectedPublicStyles bool                    `json:"-"`
+	AllowEmptyResult           bool                    `json:"-"`
 }
 
 var scriptRuntimeRunAtOrder = map[string]int{

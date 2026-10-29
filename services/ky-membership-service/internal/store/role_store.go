@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-const roleColumns = `id, workspace_type, workspace_id, name, code, description, is_system, status`
+const roleColumns = `id, workspace_type, workspace_id, name, code, description, is_system, status, permission_revision`
 
 func scanRoleRow(row interface{ Scan(...any) error }) (Role, error) {
 	var r Role
-	err := row.Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status)
+	err := row.Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status, &r.PermissionRevision)
 	return r, err
 }
 
@@ -45,7 +45,81 @@ func (s *Store) ListRoles(ctx context.Context, wsType, wsID, status string, page
 		r.DataScopes = []DataScope{}
 		items = append(items, r)
 	}
-	return items, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if len(items) == 0 {
+		return items, total, nil
+	}
+	roleIDs := make([]string, len(items))
+	for i := range items {
+		roleIDs[i] = items[i].ID
+	}
+	permissionRows, err := s.db.QueryContext(ctx, `SELECT role_id, permission_id FROM ky_role_permission WHERE role_id IN (`+rolePermissionPlaceholders(1, len(roleIDs))+`) ORDER BY role_id, permission_id`, roleIDsAsQueryArgs(roleIDs)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer permissionRows.Close()
+	pairs := make([]rolePermissionPair, 0)
+	for permissionRows.Next() {
+		var pair rolePermissionPair
+		if err := permissionRows.Scan(&pair.roleID, &pair.permissionID); err != nil {
+			_ = permissionRows.Close()
+			return nil, 0, err
+		}
+		pairs = append(pairs, pair)
+	}
+	if err := permissionRows.Err(); err != nil {
+		_ = permissionRows.Close()
+		return nil, 0, err
+	}
+	if err := permissionRows.Close(); err != nil {
+		return nil, 0, err
+	}
+	permissionsByRole := groupRolePermissionIDs(roleIDs, pairs)
+	for i := range items {
+		items[i].PermissionIDs = permissionsByRole[items[i].ID]
+	}
+	return items, total, nil
+}
+
+type rolePermissionPair struct {
+	roleID       string
+	permissionID string
+}
+
+func groupRolePermissionIDs(roleIDs []string, pairs []rolePermissionPair) map[string][]string {
+	out := make(map[string][]string, len(roleIDs))
+	for _, roleID := range roleIDs {
+		out[roleID] = []string{}
+	}
+	for _, pair := range pairs {
+		if _, ok := out[pair.roleID]; !ok {
+			continue
+		}
+		out[pair.roleID] = append(out[pair.roleID], pair.permissionID)
+	}
+	return out
+}
+
+func rolePermissionPlaceholders(start, count int) string {
+	values := make([]string, count)
+	for i := range values {
+		values[i] = "$" + itoa(start+i)
+	}
+	return strings.Join(values, ",")
+}
+
+func roleIDsAsQueryArgs(values []string) []any {
+	args := make([]any, len(values))
+	for i := range values {
+		args[i] = values[i]
+	}
+	return args
 }
 
 func (s *Store) GetRole(ctx context.Context, id, wsType, wsID string) (Role, error) {
@@ -98,8 +172,8 @@ func (s *Store) roleDataScopes(ctx context.Context, roleID string) ([]DataScope,
 // template) and is not a system role; otherwise an error.
 func (s *Store) roleEditable(ctx context.Context, tx *sql.Tx, id, wsType, wsID string) (Role, error) {
 	var r Role
-	err := tx.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM ky_role WHERE id=$1 AND deleted_at IS NULL`, id).
-		Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status)
+	err := tx.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM ky_role WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).
+		Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status, &r.PermissionRevision)
 	if err == sql.ErrNoRows {
 		return Role{}, ErrNotFound
 	}
@@ -178,22 +252,43 @@ func (s *Store) UpdateRoleStatus(ctx context.Context, id, wsType, wsID, status, 
 	return tx.Commit()
 }
 
-func (s *Store) SetRolePermissions(ctx context.Context, id, wsType, wsID string, permissionIDs []string, updatedBy string) error {
+func (s *Store) SetRolePermissions(ctx context.Context, id, wsType, wsID string, permissionIDs []string, updatedBy string, expectedRevision int64) (int64, error) {
+	if expectedRevision < 1 {
+		return 0, ErrValidation
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := s.roleEditable(ctx, tx, id, wsType, wsID); err != nil {
-		return err
+		return 0, err
+	}
+	var currentRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT permission_revision FROM ky_role WHERE id=$1`, id).Scan(&currentRevision); err != nil {
+		return 0, err
+	}
+	if currentRevision != expectedRevision {
+		return 0, ErrConflict
 	}
 	if err := setRolePermissionsTx(ctx, tx, id, permissionIDs); err != nil {
-		return classifyWriteErr(err)
+		return 0, classifyWriteErr(err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ky_role SET updated_by=$2, updated_at=now() WHERE id=$1`, id, updatedBy); err != nil {
-		return err
+	res, err := tx.ExecContext(ctx, `UPDATE ky_role SET permission_revision=permission_revision+1,updated_by=$2, updated_at=now() WHERE id=$1 AND permission_revision=$3`, id, updatedBy, expectedRevision)
+	if err != nil {
+		return 0, err
 	}
-	return tx.Commit()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if rows == 0 {
+		return 0, ErrConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return expectedRevision + 1, nil
 }
 
 func setRolePermissionsTx(ctx context.Context, tx *sql.Tx, roleID string, permissionIDs []string) error {

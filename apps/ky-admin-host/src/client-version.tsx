@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getDesktopBridge } from "./desktop-client";
+import { Button } from "antd";
 
 /** 通过既有 preload 查询应用版本，不读取浏览器或 Electron 引擎版本。 */
 export function ClientVersion() {
@@ -20,5 +21,5 @@ export function ClientVersion() {
     return () => { active = false; };
   }, []);
 
-  return <span className="client-version" title={`客户端版本：${label}`}>{label}</span>;
+  return <Button type="text" size="small" className="client-version" title={`客户端版本：${label}`} onClick={(event) => { const rect=event.currentTarget.getBoundingClientRect(); void getDesktopBridge()?.app?.openVersionDialog?.({x:rect.x,y:rect.y,width:rect.width,height:rect.height}).catch(() => {}); }}>{label}</Button>;
 }

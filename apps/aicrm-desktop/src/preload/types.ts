@@ -54,6 +54,7 @@ import type {
   MatrixAccountWebSpaceSnapshotInput,
   MatrixAccountWebSpaceSnapshotResult,
   MatrixAccountWebSpaceStatePayload,
+  MenuWebViewDesktopBridge,
   DesktopNetworkLogSnapshot,
   DesktopOpenDevToolsResult,
   DesktopSession,
@@ -65,9 +66,11 @@ export interface AiCrmDesktopBridge {
   api: {
     request: <T = unknown>(request: DesktopApiRequest) => Promise<DesktopApiResponse<T>>;
   };
+  hostOverlay?: import("../shared/host-overlay").HostOverlayBridge;
   app: {
     getConfig: () => Promise<DesktopConfig>;
     getVersion: () => Promise<string>;
+    openVersionDialog: (anchor?:{x:number;y:number;width:number;height:number}) => Promise<boolean>;
   };
   session: {
     load: () => Promise<DesktopSession | null>;
@@ -173,4 +176,5 @@ export interface AiCrmDesktopBridge {
     ) => Promise<DesktopCommandResult<MatrixAccountSessionWebSpaceCleanupResult>>;
     onAccountOnboardingEvent: (listener: (payload: MatrixAccountOnboardingEvent) => void) => () => void;
   };
+  menuWebView: MenuWebViewDesktopBridge;
 }

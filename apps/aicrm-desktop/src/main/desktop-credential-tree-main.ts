@@ -1,5 +1,6 @@
+import {localCredentialStorage as safeStorage,localCredentialRoot} from "./local-credential-storage";
 import path from "node:path";
-import { app, safeStorage } from "electron";
+import { app } from "electron";
 import { DesktopCredentialTreeManager } from "./desktop-credential-tree-manager.ts";
 
 const VAULT_DIRECTORY = "agent-executor-credential-vault";
@@ -15,7 +16,7 @@ export function getDesktopCredentialTreeManager(): DesktopCredentialTreeManager 
     throw new Error("Desktop credential Vault requires Electron app readiness");
   }
   singleton = new DesktopCredentialTreeManager({
-    root: path.join(app.getPath("userData"), VAULT_DIRECTORY),
+    root: path.join(localCredentialRoot(), VAULT_DIRECTORY),
     safeStorage
   });
   return singleton;

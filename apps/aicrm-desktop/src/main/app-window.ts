@@ -6,6 +6,13 @@ import { DESKTOP_APPLICATION_NAME } from "../shared/constants";
 import { loadDesktopConfig } from "./config";
 import { emitWindowState } from "./ipc/window-ipc";
 import { isDesktopDebugMode, isDesktopProductionMode } from "./runtime-mode";
+import { createDesktopStartupNavigationController } from "./desktop-startup-navigation";
+
+let startupNavigation: ReturnType<typeof createDesktopStartupNavigationController> | null = null;
+
+export function retryMainWindowConnection(): boolean {
+  return startupNavigation?.retry() ?? false;
+}
 
 function getUrlOrigin(url: string | undefined): string | null {
   if (!url) return null;
@@ -73,6 +80,7 @@ function bindWindowStateEvents(window: BrowserWindow): void {
 }
 
 export function createMainWindow(): BrowserWindow {
+  startupNavigation?.dispose();
   const config = loadDesktopConfig();
   const webOrigin = getUrlOrigin(config.webUrl);
   const window = new BrowserWindow({
@@ -96,12 +104,34 @@ export function createMainWindow(): BrowserWindow {
 
   registerSender(window.webContents, "main", (url) => getUrlOrigin(url) === webOrigin || url === "kww-offline://local/");
   window.webContents.on("did-frame-navigate", (_event,url,_code,_text,main) => { if(main) changeSenderRole(window.webContents, url === "kww-offline://local/" ? "offline" : "main"); });
-  window.webContents.on("did-fail-load", (_event, code, _text, _url, main) => { if (main && code !== -3 && window.webContents.getURL() !== "kww-offline://local/") void window.loadURL("kww-offline://local/"); });
+  startupNavigation = createDesktopStartupNavigationController({
+    webUrl: config.webUrl,
+    offlineUrl: "kww-offline://local/",
+    loadUrl: (url) => window.loadURL(url),
+    showWindow: () => {
+      if (!window.isDestroyed()) {
+        window.show();
+        emitWindowState(window);
+      }
+    },
+    isWebUrl: (url) => getUrlOrigin(url) === webOrigin,
+    log: (diagnostic) => console.warn("桌面启动导航状态", diagnostic)
+  });
+  const navigation = startupNavigation;
+  window.webContents.on("did-fail-load", (_event, code, _text, url, main) => {
+    navigation.onMainFrameFailed(code, url, main);
+  });
+  window.webContents.on("did-finish-load", () => {
+    navigation.onMainFrameFinished(window.webContents.getURL());
+  });
+  window.once("closed", () => {
+    navigation.dispose();
+    if (startupNavigation === navigation) startupNavigation = null;
+  });
   bindWindowStateEvents(window);
 
   window.once("ready-to-show", () => {
-    window.show();
-    emitWindowState(window);
+    navigation.onReadyToShow();
   });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -125,7 +155,7 @@ export function createMainWindow(): BrowserWindow {
     void shell.openExternal(url);
   });
 
-  void window.loadURL(config.webUrl);
+  navigation.start();
 
   return window;
 }

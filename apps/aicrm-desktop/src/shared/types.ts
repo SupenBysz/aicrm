@@ -95,6 +95,22 @@ export interface DesktopWindowState {
   isAlwaysOnTop: boolean;
 }
 
+export interface MenuWebViewOpenInput { directoryType: "management" | "workbench"; menuKey: string; workspaceType: WorkspaceType; workspaceId: string }
+export interface MenuWebViewOpenResult { instanceId: string; openMode: "embedded" | "window"; title: string; activationId: string; protocolVersion: 2; stateSnapshot: MenuWebViewState }
+export interface MenuWebViewBoundsInput { instanceId: string; activationId: string; boundsSequence:number; x: number; y: number; width: number; height: number; visible: boolean }
+export interface MenuWebViewNavigateInput { instanceId: string; activationId:string; command: "back" | "forward" | "reload" }
+export interface MenuWebViewCloseInput { instanceId: string; activationId:string }
+export interface MenuWebViewState { instanceId: string; status: "loading" | "ready" | "failed" | "closed"; title: string; url?: string; errorCode?: string; sequence?: number }
+export interface MenuWebViewStateChanged { instanceId: string; state: MenuWebViewState }
+export interface MenuWebViewDesktopBridge {
+  readonly protocolVersion:2;
+  open(input: MenuWebViewOpenInput): Promise<DesktopCommandResult<MenuWebViewOpenResult>>;
+  setBounds(input: MenuWebViewBoundsInput): Promise<DesktopCommandResult<{ updated: boolean }>>;
+  navigate(input: MenuWebViewNavigateInput): Promise<DesktopCommandResult<{ navigated: boolean }>>;
+  close(input: MenuWebViewCloseInput): Promise<DesktopCommandResult<{ closed: boolean }>>;
+  onChanged(listener: (event: MenuWebViewStateChanged) => void): () => void;
+}
+
 export interface DesktopOpenDevToolsResult {
   opened: boolean;
   reason?: "production" | "unavailable";
@@ -818,6 +834,16 @@ export interface DesktopNetworkLogSnapshot {
   enabled: boolean;
   maxEntries: number;
   entries: DesktopNetworkLogEntry[];
+}
+
+export interface VersionDialogAnchor { x:number; y:number; width:number; height:number }
+
+export interface VersionDialogInfo {
+  themeId?: "classic-gold" | "business-blue" | "jade-green";
+  clientVersion: string;
+  pluginVersion: string;
+  runtimePhase: string;
+  theme: "light" | "dark";
 }
 
 /** 客户端宿主插件的安全 UI 投影，不携带业务上下文。 */

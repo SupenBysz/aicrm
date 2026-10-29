@@ -1,6 +1,8 @@
+import {isAnyHostScreenLocked} from "./host-screen-lock";
 import { ipcMain, type WebContents, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-export type WindowRole = 'main' | 'terminal' | 'controlled' | 'offline' | 'plugin';
+import { legacyWindowChannelRoles } from './window-ipc-role-policy';
+export type WindowRole = 'main' | 'terminal' | 'controlled' | 'offline' | 'plugin' | 'version-dialog' | 'host-overlay';
 type Registration = {role:WindowRole; generation:number; ready:boolean; origin:(url:string)=>boolean};
 const senders=new Map<WebContents,Registration>();
 const cleanups=new Set<(wc:WebContents)=>void>();
@@ -18,11 +20,12 @@ export function registerSender(wc:WebContents,role:WindowRole,origin:(url:string
  return ()=>{invalidate();senders.delete(wc);};
 }
 export function authorized(event:IpcMainInvokeEvent|IpcMainEvent,roles:readonly WindowRole[]){const r=senders.get(event.sender);return !!r&&r.ready&&roles.includes(r.role)&&!!event.senderFrame&&event.senderFrame===event.sender.mainFrame&&!event.sender.isDestroyed()&&r.origin(event.senderFrame.url);}
+const lockAllowedChannels=new Set<string>([IPC_CHANNELS.hostOverlayShow,IPC_CHANNELS.hostOverlayClose,IPC_CHANNELS.hostOverlayGet,IPC_CHANNELS.hostOverlayDispatch,IPC_CHANNELS.sessionLoad,IPC_CHANNELS.sessionClear,IPC_CHANNELS.apiRequest,IPC_CHANNELS.windowGetState,IPC_CHANNELS.windowMinimize,IPC_CHANNELS.windowClose]);
 const entries=new Map<string,{roles:readonly WindowRole[];kind:'handle'|'on'}>();
 const deny=()=>{throw new Error('permission_denied');};
 function register(channel:string,roles:readonly WindowRole[],kind:'handle'|'on',handler:(event:any,...args:any[])=>any,valid:(args:any[])=>boolean,envelope=false){
  if(!roles.length||entries.has(channel)||!Object.values(IPC_CHANNELS).includes(channel as any))throw Error('IPC 注册合同无效');entries.set(channel,{roles,kind});
- const run=(event:any,...args:any[])=>{if(!authorized(event,roles)||!valid(args)){if(kind==='handle')return deny();return;}const generation=senders.get(event.sender)!.generation;const result=handler(event,...args);if(result&&typeof result.then==='function')return result.then((value:any)=>{if(!authorized(event,roles)||senders.get(event.sender)?.generation!==generation)return deny();return value;});return result;};
+ const run=(event:any,...args:any[])=>{if((isAnyHostScreenLocked()&&!lockAllowedChannels.has(channel))||!authorized(event,roles)||!valid(args)){if(kind==='handle')return deny();return;}const generation=senders.get(event.sender)!.generation;const result=handler(event,...args);if(result&&typeof result.then==='function')return result.then((value:any)=>{if(!authorized(event,roles)||senders.get(event.sender)?.generation!==generation)return deny();return value;});return result;};
  if(kind==='handle')ipcMain.handle(channel,envelope?async(event,...args)=>{try{return {ok:true,data:await run(event,...args)};}catch(e){return {ok:false,error:{code:(e as Error).message==='permission_denied'?'permission_denied':'validation_error',message:'客户端插件请求被拒绝'}};}}:run);else ipcMain.on(channel,run);
 }
 export function scopedIpc(roles:readonly WindowRole[],valid:(args:any[])=>boolean){return {handle:(channel:string,fn:(event:any,...args:any[])=>any)=>register(channel,roles,'handle',fn,valid,true),on:(channel:string,fn:(event:any,...args:any[])=>any)=>register(channel,roles,'on',fn,valid)};}
@@ -32,7 +35,7 @@ const legacyChannels=new Set<string>([IPC_CHANNELS.apiRequest, IPC_CHANNELS.appG
 const windowChannels=new Set<string>(Object.entries(IPC_CHANNELS).filter(([k])=>k.startsWith('window')).map(([,v])=>v));
 const terminalChannels=new Set<string>([IPC_CHANNELS.appGetVersion,IPC_CHANNELS.appGetConfig,IPC_CHANNELS.apiRequest,IPC_CHANNELS.sessionLoad]);
 export const guardedIpc={
- handle(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?['main','terminal']:terminalChannels.has(channel)?['main','terminal']:['main'],'handle',fn,bounded);},
- on(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?['main','terminal']:['main'],'on',fn,bounded);}
+ handle(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?legacyWindowChannelRoles(channel):terminalChannels.has(channel)?['main','terminal']:['main'],'handle',fn,bounded);},
+ on(channel:string,fn:(event:any,...args:any[])=>any){if(!legacyChannels.has(channel))throw Error('未声明旧通道');return register(channel,windowChannels.has(channel)?legacyWindowChannelRoles(channel):['main'],'on',fn,bounded);}
 };
 export function ipcRegistrationSnapshot(){return [...entries].map(([channel,v])=>({channel,...v}));}

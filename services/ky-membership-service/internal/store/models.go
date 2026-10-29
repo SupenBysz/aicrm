@@ -84,16 +84,17 @@ type DataScope struct {
 }
 
 type Role struct {
-	ID            string      `json:"id"`
-	WorkspaceType string      `json:"workspaceType"`
-	WorkspaceID   *string     `json:"workspaceId"`
-	Name          string      `json:"name"`
-	Code          string      `json:"code"`
-	Description   string      `json:"description"`
-	IsSystem      bool        `json:"isSystem"`
-	Status        string      `json:"status"`
-	PermissionIDs []string    `json:"permissionIds"`
-	DataScopes    []DataScope `json:"dataScopes"`
+	ID                 string      `json:"id"`
+	WorkspaceType      string      `json:"workspaceType"`
+	WorkspaceID        *string     `json:"workspaceId"`
+	Name               string      `json:"name"`
+	Code               string      `json:"code"`
+	Description        string      `json:"description"`
+	IsSystem           bool        `json:"isSystem"`
+	Status             string      `json:"status"`
+	PermissionRevision int64       `json:"permissionRevision"`
+	PermissionIDs      []string    `json:"permissionIds"`
+	DataScopes         []DataScope `json:"dataScopes"`
 }
 
 type Permission struct {
