@@ -591,7 +591,7 @@ export function AgencyBrandingDrawer({
             </span>
             <div className="agency-brand-preview-scroll">
               <div className="agency-brand-preview-header">
-                <BrandLogoLockup className="agency-brand-lockup" showAIIcon={showAiIcon === true}>
+                <BrandLogoLockup compactInset={6} className="agency-brand-lockup" showAIIcon={showAiIcon === true}>
                   {wordmarkId &&
                   (!wordmarkGenerated || name === data?.draft.name) ? (
                     <BrandAssetPreview

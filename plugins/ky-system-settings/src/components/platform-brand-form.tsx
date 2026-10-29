@@ -79,7 +79,7 @@ export function PlatformBrandForm({form,disabled,onBusyChange,onDirty}:{form:Ret
   <section className="agency-brand-previews"><Typography.Text strong>应用 LOGO 预览</Typography.Text>
    <Typography.Paragraph type="secondary">按后台顶部实际尺寸展示；窄屏可横向查看完整效果。</Typography.Paragraph>
    {[false,true].map(dark=><div key={String(dark)} className={`agency-brand-preview ${dark?"dark":"light"}`}><span className="agency-brand-preview-label">{dark?"深色背景":"浅色背景"}</span><div className="agency-brand-preview-scroll"><div className="agency-brand-preview-header">
-    <BrandLogoLockup className="agency-brand-lockup" showAIIcon={brand?.showAiIcon===true}><img className={`agency-brand-wordmark${!brand?.wordmarkId||brand?.wordmarkGenerated?" generated":""}`} src={image("wordmark")} alt="品牌文字"/></BrandLogoLockup>
+    <BrandLogoLockup compactInset={6} className="agency-brand-lockup" showAIIcon={brand?.showAiIcon===true}><img className={`agency-brand-wordmark${!brand?.wordmarkId||brand?.wordmarkGenerated?" generated":""}`} src={image("wordmark")} alt="品牌文字"/></BrandLogoLockup>
     <div className="agency-brand-preview-modes" aria-label="顶部导航位置参考"><span>工作台</span><span>管理中心</span></div>
    </div></div></div>)}
   </section>
