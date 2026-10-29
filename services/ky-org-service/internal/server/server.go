@@ -82,6 +82,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/platform/agencies/{id}/branding/history", s.ws("platform", perms("platform.agency_branding.view"), s.brandHistory))
 	mux.HandleFunc("GET /api/v1/organizations/current/branding", s.ws(orgWs, nil, s.currentWorkspaceBrand))
 
+	mux.HandleFunc("POST /api/v1/platform/agencies/statistics", s.ws("platform", perms("platform.agencies.view"), s.agencyStatistics))
+	mux.HandleFunc("POST /api/v1/platform/enterprises/statistics", s.ws("platform", perms("platform.enterprises.view"), s.agencyStatistics))
 	// Platform agencies
 	mux.HandleFunc("GET /api/v1/platform/plugin-management/service-health", s.pluginServiceHealth)
 

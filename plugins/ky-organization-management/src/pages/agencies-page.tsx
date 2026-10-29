@@ -1,6 +1,7 @@
 import {AgencyDomainDrawer,domainStates} from "../components/agency-domain-drawer";
 import {useCurrentWorkspace,useCurrentUser} from "@ky/admin-core";
 import {AgencyBrandingDrawer} from "../components/agency-branding-drawer";
+import { AgencyStatisticsCell, useAgencyStatistics } from "../components/agency-statistics";
 import { useEffect, useMemo, useState } from "react";
 import {
   Button,
@@ -180,6 +181,7 @@ export function AgenciesPage() {
     setDrawerOpen(true);
   }
 
+  const statistics = useAgencyStatistics((data?.items ?? []).map(item => item.id), "agencies");
   const columns: ColumnsType<Agency> = useMemo(
     () => [
       {
@@ -193,6 +195,9 @@ export function AgenciesPage() {
             </Typography.Text>
           </Space>
         )
+      },
+      {
+        title: "动态统计", key: "statistics", width: 220, render: (_,record) => <AgencyStatisticsCell id={record.id} summary={statistics.data?.[record.id]} loading={statistics.isFetching} scope="agencies" retry={()=>void statistics.refetch()} />
       },
       {
         title:"域名",key:"domain",width:220,render:(_,record)=>{const d=domainSummaries.data?.[record.id];return !permissions.can("platform.agency_domains.view")?"—":domainSummaries.error?"读取失败":domainSummaries.isFetching&&!domainSummaries.data?"加载中…":d?<Space direction="vertical" size={0}><Typography.Link href={`https://${d.hostname}/login`} target="_blank" rel="noopener noreferrer" title={d.hostname} ellipsis style={{maxWidth:200}}>{d.hostname}</Typography.Link><Typography.Text type="secondary">{domainStates[d.state]||d.state}</Typography.Text></Space>:"未绑定"}
@@ -295,7 +300,7 @@ export function AgenciesPage() {
         )
       }
     ],
-    [canUpdate, canDisable, statusMutation, permissions,domainSummaries.data,domainSummaries.error,domainSummaries.isFetching]
+    [canUpdate, canDisable, statusMutation, permissions,domainSummaries.data,domainSummaries.error,domainSummaries.isFetching,statistics.data,statistics.isFetching]
   );
 
   return (
