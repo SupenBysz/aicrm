@@ -332,7 +332,6 @@ async function resolveAndNavigate(instance: Instance, rawUrl: string, resolved?:
     if (generation !== instance.generation || instance.contents.isDestroyed()) return false;
     instance.allowedNextNavigation = data.url;
     await instance.contents.loadURL(data.url);
-    emit(instance, "loading");
     return true;
   } catch (error) {
     if (generation === instance.generation && !instance.contents.isDestroyed()) {
