@@ -1,6 +1,6 @@
 import {useQuery} from "@tanstack/react-query";
 import {requestClient} from "../remote-api";
-import type {CopyrightStyle} from "@ky/admin-core";
+import { BrandLogoLockup, type CopyrightStyle } from "@ky/admin-core";
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from "antd";
 import { useState,useLayoutEffect } from "react";
@@ -16,8 +16,13 @@ const PASSWORD_MIN_LENGTH = 6;
 export function LoginPage() {
   const navigate = useNavigate();
   const profile=usePlatformProfile();
- const entry=useQuery({queryKey:["public-entry",window.location.host],retry:false,queryFn:()=>requestClient.request<{institution:boolean;brand?:{name:string;applicationName:string;copyrightHolder:string;copyrightStyle:CopyrightStyle;wordmarkGenerated?:boolean;wordmark?:{url:string}}}>("/api/v1/public/entry",{skipAuthRedirect:true})});
- const brand=entry.data?.institution?entry.data.brand:undefined;
+ const entry=useQuery({queryKey:["public-entry",window.location.host],retry:false,queryFn:()=>requestClient.request<{institution:boolean;brand?:{name:string;applicationName:string;copyrightHolder:string;copyrightStyle:CopyrightStyle;showAiIcon?:boolean;wordmarkGenerated?:boolean;wordmark?:{url:string}}}>("/api/v1/public/entry",{skipAuthRedirect:true})});
+ const brand=entry.data?.institution?entry.data.brand:profile.brand?.name ? {
+ name:profile.brand.name, applicationName:profile.brand.applicationName || profile.logoTextLong,
+ copyrightHolder:profile.brand.copyrightHolder || profile.name, copyrightStyle:profile.copyrightStyle,
+ showAiIcon:profile.brand.showAiIcon, wordmarkGenerated:profile.brand.wordmarkGenerated,
+ wordmark:profile.brand.wordmarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkId)}:undefined
+ }:undefined;
  const {icpRecord,refresh}=profile;const logoTextLong=brand?.name??profile.logoTextLong,companyName=brand?.copyrightHolder??profile.name,copyrightStyle=brand?.copyrightStyle??profile.copyrightStyle,ready=profile.ready&&entry.isSuccess&&(!entry.data.institution||!!brand),error=profile.error||entry.isError;
   const [submitting, setSubmitting] = useState(false);
  const [imageBroken,setImageBroken]=useState(false);
@@ -61,7 +66,7 @@ export function LoginPage() {
               <div className="login-hero">
                 <div>
                   <Typography.Text className="login-eyebrow" type="secondary">
-                    {entry.data?.institution&&brand?.wordmark?.url&&!imageBroken?<img src={brand.wordmark.url} alt={logoTextLong} style={{maxWidth:240,maxHeight:48,filter:brand.wordmarkGenerated?"var(--brand-generated-filter,none)":undefined}} onError={()=>setImageBroken(true)}/>:`${logoTextLong} Console`}
+                    <BrandLogoLockup showAIIcon={brand?.showAiIcon === true} maxHeight={48}>{brand?.wordmark?.url&&!imageBroken?<img src={brand.wordmark.url} alt={logoTextLong} style={{maxWidth:240,maxHeight:48,filter:brand.wordmarkGenerated?"var(--brand-generated-filter,none)":undefined}} onError={()=>setImageBroken(true)}/>:`${logoTextLong} Console`}</BrandLogoLockup>
                   </Typography.Text>
                   <Typography.Title className="login-title" level={1}>
                     后台登录

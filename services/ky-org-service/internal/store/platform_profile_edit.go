@@ -48,6 +48,12 @@ func MergePlatformProfile(current PlatformProfile, fields map[string]json.RawMes
 		}
 		var err error
 		switch key {
+		case "brand":
+			current.Brand = BrandDraft{}
+			err = json.Unmarshal(raw, &current.Brand)
+			if err == nil && !validBrandDraft(current.Brand) {
+				err = ErrValidation
+			}
 		case "companyName":
 			err = text(&current.CompanyName, 120)
 		case "brandLogoTextLong":
@@ -117,7 +123,20 @@ func (s *Store) EditPlatformProfile(ctx context.Context, expected, actor, reques
 	if err != nil {
 		return out, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE ky_platform_profile SET company_name=$1,brand_logo_text_long=$2,brand_logo_text_short=$3,long_logo_font_size=$4,long_logo_font_family=$5,long_logo_font_weight=$6,short_logo_font_size=$7,short_logo_font_family=$8,short_logo_font_weight=$9,icp_record=$10,copyright_style=$11,revision=revision+1,updated_by=$12,updated_at=now() WHERE id='default' AND revision=$13`, out.CompanyName, out.BrandLogoTextLong, out.BrandLogoTextShort, out.LongLogoFontSize, out.LongLogoFontFamily, out.LongLogoFontWeight, out.ShortLogoFontSize, out.ShortLogoFontFamily, out.ShortLogoFontWeight, out.ICPRecord, out.CopyrightStyle, actor, revision)
+	for _, id := range []string{out.Brand.IconID, out.Brand.WordmarkID} {
+		if id == "" {
+			continue
+		}
+		var exists bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ky_platform_brand_asset WHERE id=$1)`, id).Scan(&exists); err != nil {
+			return out, err
+		}
+		if !exists {
+			return out, ErrValidation
+		}
+	}
+	brandRaw, _ := json.Marshal(out.Brand)
+	result, err := tx.ExecContext(ctx, `UPDATE ky_platform_profile SET company_name=$1,brand_logo_text_long=$2,brand_logo_text_short=$3,long_logo_font_size=$4,long_logo_font_family=$5,long_logo_font_weight=$6,short_logo_font_size=$7,short_logo_font_family=$8,short_logo_font_weight=$9,icp_record=$10,copyright_style=$11,brand_config=$14,revision=revision+1,updated_by=$12,updated_at=now() WHERE id='default' AND revision=$13`, out.CompanyName, out.BrandLogoTextLong, out.BrandLogoTextShort, out.LongLogoFontSize, out.LongLogoFontFamily, out.LongLogoFontWeight, out.ShortLogoFontSize, out.ShortLogoFontFamily, out.ShortLogoFontWeight, out.ICPRecord, out.CopyrightStyle, actor, revision, string(brandRaw))
 	if err != nil {
 		return out, err
 	}

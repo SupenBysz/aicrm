@@ -49,11 +49,26 @@ func resolveBrand(published *d.Brand, p PlatformProfile) *d.Brand {
 	if !validCopyrightStyle(style, false) {
 		style = "standard"
 	}
-	name := strings.TrimSpace(p.BrandLogoTextLong)
+	name := strings.TrimSpace(p.Brand.Name)
+	if name == "" {
+		name = strings.TrimSpace(p.BrandLogoTextLong)
+	}
 	if name == "" {
 		name = holder
 	}
-	out := d.Brand{Name: name, ApplicationName: name, Source: "platform"}
+	out := d.Brand{Name: name, ApplicationName: p.Brand.ApplicationName, Source: "platform", IconText: p.Brand.IconText, ShowAIIcon: p.Brand.ShowAIIcon, WordmarkGenerated: p.Brand.WordmarkGenerated, IconGenerated: p.Brand.IconGenerated}
+	if out.ApplicationName == "" {
+		out.ApplicationName = name
+	}
+	if p.Brand.CopyrightHolder != "" {
+		holder = p.Brand.CopyrightHolder
+	}
+	if p.Brand.WordmarkID != "" {
+		out.Wordmark.URL = "/api/v1/public/platform-brand-assets/" + p.Brand.WordmarkID
+	}
+	if p.Brand.IconID != "" {
+		out.Icon.URL = "/api/v1/public/platform-brand-assets/" + p.Brand.IconID
+	}
 	if published != nil {
 		out = *published
 		out.Source = "agency"

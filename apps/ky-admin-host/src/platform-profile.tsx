@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { CopyrightStyle } from "@ky/admin-core";
 
 export interface PlatformProfile {
+ brand?: { name?: string; applicationName?: string; iconText?: string; iconId?: string; wordmarkId?: string; showAiIcon?: boolean; wordmarkGenerated?: boolean; copyrightHolder?: string };
   companyName: string;
   copyrightStyle: CopyrightStyle;
   brandLogoTextLong: string;
@@ -56,6 +57,7 @@ function compactLogoText(value: string): string {
 
 function normalizeProfile(value: Partial<PlatformProfile> | null | undefined): PlatformProfile {
   return {
+    brand: value?.brand ?? {},
     companyName: value?.companyName ?? "",
     copyrightStyle: value?.copyrightStyle === "full" || value?.copyrightStyle === "chinese" ? value.copyrightStyle : "standard",
     brandLogoTextLong: value?.brandLogoTextLong ?? "",
@@ -72,8 +74,8 @@ function normalizeProfile(value: Partial<PlatformProfile> | null | undefined): P
 
 function resolveProfile(profile: PlatformProfile) {
   const name = profile.companyName.trim() || DEFAULT_PLATFORM_NAME;
-  const logoTextLong = profile.brandLogoTextLong.trim() || name;
-  const logoTextShort = profile.brandLogoTextShort.trim() || compactLogoText(logoTextLong || name);
+  const logoTextLong = profile.brand?.name?.trim() || profile.brandLogoTextLong.trim() || name;
+  const logoTextShort = profile.brand?.iconText?.trim() || profile.brandLogoTextShort.trim() || compactLogoText(logoTextLong || name);
   const logoTextLongStyle: LogoTextStyle = {
     fontSize: profile.longLogoFontSize,
     fontFamily: FONT_FAMILY_MAP[profile.longLogoFontFamily],
