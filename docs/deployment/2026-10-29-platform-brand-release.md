@@ -42,3 +42,13 @@
 - migrate: `ghcr.io/supenbysz/kycrm-migrate@sha256:8c157a1ed45c03507133c0387473aa90fde930705137bafdca72288dff0d19c3`
 - org: `ghcr.io/supenbysz/kycrm-org@sha256:a5fde015b5d1c68d5b98aa3693171152fb7ba2736eecbc7ac5bc04f05b9f9bff`
 - web: `ghcr.io/supenbysz/kycrm-web@sha256:ef3e4137b027bc0347b97a007bedabc4e09f571624ba614ad138d7e671f9fec4`
+
+## 宽 LOGO 居中与留白修正发布
+
+- 用户授权立即部署，运行源码 `ba97daf84a3648f80cc6bdefc9e1f188c69f577c`。顶部品牌区左右使用22px对称内边距，宽度受限的LOGO组合居中，较短组合继续左对齐，折叠态保持原规则。
+- 本地类型检查、宿主构建通过；[集中构建 40849453350](https://github.com/SupenBysz/kysion-build/actions/runs/40849453350) 成功。
+- 产物 ID `12886203153`，SHA256 `8c5fe81adc26e0181b47a0e5f12f9eec0ff6333c71a4c8751f6f7b06bb71889f`；固定构建来源、源码和digest校验通过。
+- 运行清单 `faa2b37b299e04d2db2205d534267147e4705ddc` 已推送并手动同步。六个新部署副本均1/1可用，镜像与产物逐项一致，Argo Synced/Healthy。
+- 公网新CSS `/assets/index-E-tTHru1.css` 与JS `/assets/index-BaTjcBRB.js` 已核验对称边距和居中逻辑。
+- 浏览器新标签打开线上平台品牌页，截图确认实际顶部Kysion+AI和表单预览均完整展示，品牌区留白已调整。未保存任何客户品牌配置，原标签页保留。
+- 更新前后认证API冒烟通过，测试会话已退出并验证失效。本次无数据库迁移，回滚运行清单为 `cc01c881bbe12c2cd02b63516f5b653815f7c625`。

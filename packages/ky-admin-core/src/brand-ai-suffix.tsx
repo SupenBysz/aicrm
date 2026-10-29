@@ -43,8 +43,8 @@ function imageInk(image: HTMLImageElement) {
 }
 
 /** Fit the lockup by visible artwork, excluding transparent wordmark padding. */
-export function BrandLogoLockup({ children, showAIIcon, maxHeight = 32, className }: {
-  children: ReactNode; showAIIcon: boolean; maxHeight?: number; className?: string;
+export function BrandLogoLockup({ children, showAIIcon, maxHeight = 32, compactInset = 0, className }: {
+  children: ReactNode; showAIIcon: boolean; maxHeight?: number; compactInset?: number; className?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
@@ -62,7 +62,9 @@ export function BrandLogoLockup({ children, showAIIcon, maxHeight = 32, classNam
       // Keep compact logos left aligned; width-limited lockups fill the brand
       // area and center within its symmetric insets, including subpixel slack.
       const totalWidth = height * (ratio + suffixRatio);
-      el.style.justifyContent = totalWidth >= el.clientWidth - 1 ? "center" : "flex-start";
+      const centered = totalWidth >= el.clientWidth - compactInset - 1;
+      el.style.justifyContent = centered ? "center" : "flex-start";
+      el.style.transform = centered ? "none" : `translateX(${compactInset}px)`;
       image.style.height = `${height}px`;
       image.style.width = `${height * ratio}px`;
       image.style.maxWidth = "none";
@@ -73,8 +75,8 @@ export function BrandLogoLockup({ children, showAIIcon, maxHeight = 32, classNam
     el.addEventListener("load", resize, true);
     resize();
     return () => { observer.disconnect(); el.removeEventListener("load", resize, true); };
-  }, [children, showAIIcon, maxHeight]);
-  return <span ref={ref} className={className} style={{display:"inline-flex",alignItems:"center",width:"100%",minWidth:0,lineHeight:1}}>
+  }, [children, showAIIcon, maxHeight, compactInset]);
+  return <span ref={ref} className={className} style={{display:"inline-flex",alignItems:"center",width:"100%",minWidth:0,lineHeight:1,transform:`translateX(${compactInset}px)`}}>
     {children}<BrandAISuffix visible={showAIIcon} height="var(--brand-lockup-height,1em)" />
   </span>;
 }

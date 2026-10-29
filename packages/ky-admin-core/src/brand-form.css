@@ -32,7 +32,7 @@
 .agency-brand-preview.dark{--preview-base:var(--admin-shell-dark-base);--preview-nav:var(--admin-shell-dark-nav);--preview-right:var(--admin-shell-dark-right);--preview-divider:var(--admin-shell-dark-divider);--preview-toolbar:var(--admin-shell-dark-toolbar);--preview-toolbar-text:var(--admin-shell-dark-toolbar-text);--preview-toolbar-border:var(--admin-shell-dark-toolbar-border);--preview-selected:var(--admin-shell-dark-selected);--preview-selected-text:var(--admin-shell-dark-selected-text);background:#f2f3f5}
 .agency-brand-preview-header{box-sizing:border-box;position:relative;width:100%;min-width:520px;height:var(--admin-header-height,76px);overflow:hidden;background:linear-gradient(var(--preview-nav),var(--preview-nav)),var(--preview-base);border-bottom:1px solid var(--preview-divider);isolation:isolate}
 .agency-brand-preview-header::before{content:"";position:absolute;inset:0 0 0 calc(var(--admin-sidebar-width,177px) - 1px);background:var(--preview-right);border-top-left-radius:var(--admin-header-curve,40px);pointer-events:none;z-index:-1}
-.agency-brand-preview-header .agency-brand-lockup{position:absolute;left:22px;top:19px;height:38px;z-index:1}
+.agency-brand-preview-header .agency-brand-lockup{position:absolute;left:16px;top:19px;height:38px;z-index:1}
 .agency-brand-preview-header .agency-brand-wordmark{max-width:144px;height:32px;flex-shrink:0}
 .agency-brand-preview-modes{box-sizing:border-box;position:absolute;left:calc(var(--admin-sidebar-width,177px) + 18px);top:20px;height:36px;display:flex;align-items:center;border:1px solid var(--preview-toolbar-border);border-radius:999px;background:var(--preview-toolbar);color:var(--preview-toolbar-text);font-size:13px;line-height:1;white-space:nowrap;z-index:2}
 .agency-brand-preview-modes>span{padding:10px 16px}
@@ -45,7 +45,7 @@
 .agency-brand-upload .agency-brand-upload-button.ant-btn-dangerous{color:#c43c3c}
 
 /* Reserve room for the optional suffix inside the real sidebar brand area. */
-.agency-brand-preview-header .agency-brand-lockup{max-width:calc(var(--admin-sidebar-width,177px) - 44px)}
+.agency-brand-preview-header .agency-brand-lockup{max-width:calc(var(--admin-sidebar-width,177px) - 32px)}
 .agency-brand-preview-header .agency-brand-wordmark{min-width:0;max-width:100%;flex-shrink:1}
 
-.agency-brand-preview-header .agency-brand-lockup{width:calc(var(--admin-sidebar-width,177px) - 44px);gap:0}
+.agency-brand-preview-header .agency-brand-lockup{width:calc(var(--admin-sidebar-width,177px) - 32px);gap:0}
