@@ -7,13 +7,16 @@ import (
 )
 
 type Config struct {
-	ServiceName     string
-	HTTPAddr        string
-	RuntimeEnvFile  string
-	DatabaseURL     string
-	RedisURL        string
-	NATSURL         string
-	AuthTokenSecret string
+	ServiceName          string
+	HTTPAddr             string
+	RuntimeEnvFile       string
+	DatabaseURL          string
+	RedisURL             string
+	NATSURL              string
+	AuthTokenSecret      string
+	InternalToken        string
+	MembershipServiceURL string
+	OrgServiceURL        string
 }
 
 func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
@@ -28,13 +31,16 @@ func Load(serviceName, defaultHTTPAddr, httpAddrEnv string) Config {
 	}
 
 	return Config{
-		ServiceName:     serviceName,
-		HTTPAddr:        addr,
-		RuntimeEnvFile:  runtimeEnvFile,
-		DatabaseURL:     os.Getenv("KY_TENANT_DATABASE_URL"),
-		RedisURL:        os.Getenv("KY_REDIS_URL"),
-		NATSURL:         os.Getenv("KY_NATS_URL"),
-		AuthTokenSecret: os.Getenv("KY_AUTH_TOKEN_SECRET"),
+		ServiceName:          serviceName,
+		HTTPAddr:             addr,
+		RuntimeEnvFile:       runtimeEnvFile,
+		DatabaseURL:          os.Getenv("KY_TENANT_DATABASE_URL"),
+		RedisURL:             os.Getenv("KY_REDIS_URL"),
+		NATSURL:              os.Getenv("KY_NATS_URL"),
+		InternalToken:        os.Getenv("KY_INTERNAL_SERVICE_TOKEN"),
+		MembershipServiceURL: os.Getenv("KY_MEMBERSHIP_SERVICE_URL"),
+		OrgServiceURL:        os.Getenv("KY_ORG_SERVICE_URL"),
+		AuthTokenSecret:      os.Getenv("KY_AUTH_TOKEN_SECRET"),
 	}
 }
 

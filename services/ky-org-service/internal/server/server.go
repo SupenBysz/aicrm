@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/Kysion/KyaiCRM/services/ky-org-service/internal/config"
@@ -36,6 +38,14 @@ type wsContext struct {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if err := domainentry.Validate(); err != nil {
+		return err
+	}
+	if os.Getenv("KY_DOMAIN_ENTRY_ENABLED") == "1" {
+		if err := domainentry.LoopbackListen(s.cfg.HTTPAddr); err != nil {
+			return err
+		}
+	}
 	if s.cfg.DatabaseURL != "" {
 		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
 		if err != nil {
@@ -55,6 +65,8 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
+	s.domainRoutes(mux)
+	mux.HandleFunc("POST /internal/v1/agencies/{id}/branding", s.internalAgencyBrand)
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /healthz", s.healthz)
 
@@ -185,7 +197,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("PATCH /api/v1/teams/{id}", s.ws(orgWs, perms("agency.teams.update", "enterprise.teams.update"), s.updateTeam))
 	mux.HandleFunc("POST /api/v1/teams/{id}/members", s.ws(orgWs, perms("agency.teams.manage_members", "enterprise.teams.manage_members"), s.setTeamMembers))
 
-	server := &http.Server{Addr: s.cfg.HTTPAddr, Handler: mux}
+	server := &http.Server{Addr: s.cfg.HTTPAddr, Handler: domainentry.Wrap(mux, false, "ky-org-service")}
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()

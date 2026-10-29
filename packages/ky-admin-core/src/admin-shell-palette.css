@@ -1,5 +1,7 @@
 /* Shared palette for the real admin shell and its light/dark brand previews. */
 :root {
+ --admin-brand-font-size:16px;
+ --admin-brand-font-weight:600;
  --admin-header-height:76px;
  --admin-sidebar-width:177px;
  --admin-header-curve:40px;

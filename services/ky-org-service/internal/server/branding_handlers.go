@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"github.com/Kysion/KyaiCRM/services/ky-org-service/internal/store"
 	d "github.com/Kysion/KyaiCRM/shared/branding"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"net/http"
 	"os"
 	"strings"
@@ -181,4 +182,31 @@ func (s *Server) brandHistory(w http.ResponseWriter, r *http.Request, wc wsConte
 		return
 	}
 	writeData(w, r, v)
+}
+
+func (s *Server) internalAgencyBrand(w http.ResponseWriter, r *http.Request) {
+	if !domainentry.Internal(r, s.cfg.InternalServiceToken) {
+		domainentry.Fail(w, 403)
+		return
+	}
+	if s.store == nil {
+		domainentry.Fail(w, 503)
+		return
+	}
+	a, err := s.store.GetAgency(r.Context(), r.PathValue("id"))
+	if err != nil || a.Status != "normal" {
+		domainentry.Fail(w, 403)
+		return
+	}
+	b, err := s.store.AgencyBranding(r.Context(), a.ID)
+	if err != nil {
+		domainentry.Fail(w, 503)
+		return
+	}
+	effective, err := s.store.EffectiveBrand(r.Context(), b.Published)
+	if err != nil {
+		domainentry.Fail(w, 503)
+		return
+	}
+	writeData(w, r, map[string]any{"effectiveBrand": effective})
 }

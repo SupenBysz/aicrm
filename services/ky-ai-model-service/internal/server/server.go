@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
 	"os"
@@ -35,6 +36,14 @@ type wsContext struct {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if err := domainentry.Validate(); err != nil {
+		return err
+	}
+	if os.Getenv("KY_DOMAIN_ENTRY_ENABLED") == "1" {
+		if err := domainentry.LoopbackListen(s.cfg.HTTPAddr); err != nil {
+			return err
+		}
+	}
 	if s.cfg.DatabaseURL != "" {
 		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
 		if err != nil {
@@ -49,7 +58,7 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 
-	server := &http.Server{Addr: s.cfg.HTTPAddr, Handler: s.buildMux()}
+	server := &http.Server{Addr: s.cfg.HTTPAddr, Handler: domainentry.Wrap(s.buildMux(), false, "ky-ai-model-service")}
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ListenAndServe() }()
