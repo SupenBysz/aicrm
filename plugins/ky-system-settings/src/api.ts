@@ -3,6 +3,8 @@ import type { RequestClient } from "@ky/admin-core";
 export type SettingsMap = Record<string, unknown>;
 
 export interface PlatformProfile {
+  copyrightStyle: "standard" | "full" | "chinese";
+  revision: string;
   companyName: string;
   brandLogoTextLong: string;
   brandLogoTextShort: string;
@@ -21,7 +23,8 @@ export function getPlatformProfile(client: RequestClient): Promise<PlatformProfi
 }
 
 export function updatePlatformProfile(client: RequestClient, input: PlatformProfile): Promise<PlatformProfile> {
-  return client.request<PlatformProfile>("/api/v1/platform/platform-profile", { method: "PATCH", body: input });
+  const { revision, updatedAt: _updatedAt, ...fields } = input;
+  return client.request<PlatformProfile>("/api/v1/platform/platform-profile/edit", { method: "PATCH", body: { expectedRevision: revision, fields } });
 }
 
 export interface NotificationTemplate {

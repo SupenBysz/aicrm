@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
+import type { CopyrightStyle } from "@ky/admin-core";
 import { isDesktopClientMode } from "./desktop-client";
 
 export interface PlatformProfile {
   companyName: string;
+  copyrightStyle: CopyrightStyle;
   brandLogoTextLong: string;
   brandLogoTextShort: string;
   longLogoFontSize: number;
@@ -54,6 +56,7 @@ function compactLogoText(value: string): string {
 function normalizeProfile(value: Partial<PlatformProfile> | null | undefined): PlatformProfile {
   return {
     companyName: value?.companyName ?? "",
+    copyrightStyle: value?.copyrightStyle === "full" || value?.copyrightStyle === "chinese" ? value.copyrightStyle : "standard",
     brandLogoTextLong: value?.brandLogoTextLong ?? "",
     brandLogoTextShort: value?.brandLogoTextShort ?? "",
     longLogoFontSize: value?.longLogoFontSize && value.longLogoFontSize >= 8 && value.longLogoFontSize <= 72 ? value.longLogoFontSize : 16,

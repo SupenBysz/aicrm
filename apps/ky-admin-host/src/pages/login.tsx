@@ -6,13 +6,14 @@ import { bootstrap, login, pickRecommendedWorkspace } from "../remote-api";
 import { saveSession, setBootstrap, selectWorkspace, workspaceWorkbenchPath } from "../app-store";
 import { usePlatformProfile } from "../platform-profile";
 
+import { formatCopyright } from "@ky/admin-core";
+
 const PASSWORD_MIN_LENGTH = 6;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { icpRecord, logoTextLong, name: companyName } = usePlatformProfile();
+  const { icpRecord, logoTextLong, copyrightStyle, name: companyName } = usePlatformProfile();
   const [submitting, setSubmitting] = useState(false);
-  const currentYear = new Date().getFullYear();
 
   async function handleFinish(values: { username: string; password: string }) {
     setSubmitting(true);
@@ -152,7 +153,7 @@ export function LoginPage() {
 
         <Space className="login-footer" direction="vertical" size={2}>
           <Typography.Text type="secondary">
-            © {currentYear} {companyName}
+            {formatCopyright(companyName, copyrightStyle)}
           </Typography.Text>
           {icpRecord ? <Typography.Text type="secondary">{icpRecord}</Typography.Text> : null}
         </Space>
