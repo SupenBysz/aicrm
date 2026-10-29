@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Kysion/KyaiCRM/shared/domainentry"
 	"github.com/Kysion/KyaiCRM/shared/startup"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -31,6 +33,14 @@ func New(cfg config.Config) *Server {
 }
 
 func (s *Server) Run(ctx context.Context) error {
+	if err := domainentry.Validate(); err != nil {
+		return err
+	}
+	if os.Getenv("KY_DOMAIN_ENTRY_ENABLED") == "1" {
+		if err := domainentry.LoopbackListen(s.cfg.HTTPAddr); err != nil {
+			return err
+		}
+	}
 	if s.cfg.DatabaseURL != "" {
 		opened, err := startup.OpenDatabase(ctx, s.cfg.DatabaseURL, store.Open)
 		if err != nil {
@@ -43,6 +53,9 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /internal/v1/domains/actor-status", s.domainActorStatus)
+	mux.HandleFunc("POST /internal/v1/domains/session-access", s.domainSessionAccess)
+	mux.HandleFunc("GET /api/v1/public/entry", s.publicDomainEntry)
 	mux.HandleFunc("POST /internal/v1/statistics/online-users", s.agencyStatistics)
 	mux.HandleFunc("POST /api/v1/auth/presence", s.presence)
 	mux.HandleFunc("GET /readyz", s.readyz)
@@ -60,7 +73,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	server := &http.Server{
 		Addr:    s.cfg.HTTPAddr,
-		Handler: mux,
+		Handler: domainentry.Wrap(mux, true, "ky-auth-service"),
 	}
 
 	errCh := make(chan error, 1)
@@ -188,7 +201,20 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	credential, err := s.store.FindPasswordCredential(r.Context(), req.Account)
 	if err != nil || credential.Status != "normal" || credential.User.Status != "normal" || !auth.VerifyPassword(credential.PasswordHash, req.Password) {
 		_ = s.store.WriteLoginLog(r.Context(), newID("login"), nil, req.Account, "failed", "invalid credential", clientIP(r), userAgent)
+		if domainentry.From(r.Context()).BindingID != "" {
+			domainentry.Fail(w, 403)
+			return
+		}
 		writeError(w, r, http.StatusUnauthorized, "unauthorized", "账号或密码错误")
+		return
+	}
+	allowed, scopeErr := s.domainSubjectDecision(r.Context(), credential.UserID, domainentry.From(r.Context()), "", "")
+	if scopeErr != nil {
+		domainentry.Fail(w, 503)
+		return
+	}
+	if !allowed {
+		domainentry.Fail(w, 403)
 		return
 	}
 	if err := s.store.UpdateLastLogin(r.Context(), credential.UserID); err != nil {
@@ -261,8 +287,16 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "后台身份查询失败")
 		return
 	}
+	allowedEntries, scopeErr := s.domainWorkspaceSet(r.Context(), payload.UserID, domainentry.From(r.Context()))
+	if scopeErr != nil {
+		domainentry.Fail(w, 503)
+		return
+	}
 	workspaces := make([]store.WorkspaceIdentity, 0, len(memberships))
 	for _, membership := range memberships {
+		if allowedEntries != nil && !allowedEntries[membership.WorkspaceType+":"+membership.WorkspaceID] {
+			continue
+		}
 		name, err := s.store.WorkspaceName(r.Context(), membership.WorkspaceType, membership.WorkspaceID)
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError, "internal_error", "工作区名称查询失败")

@@ -1,0 +1,15 @@
+[Unit]
+Description=KyCRM managed domain worker
+After=network-online.target
+[Service]
+User=ky-domain-worker
+Group=ky-domain-worker
+EnvironmentFile=/etc/kycrm/domain-worker.env
+ExecStart=/opt/kycrm/bin/domain-worker
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target

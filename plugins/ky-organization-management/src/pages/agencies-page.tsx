@@ -1,3 +1,5 @@
+import {AgencyDomainDrawer,domainStates} from "../components/agency-domain-drawer";
+import {useCurrentWorkspace,useCurrentUser} from "@ky/admin-core";
 import {AgencyBrandingDrawer} from "../components/agency-branding-drawer";
 import { AgencyStatisticsCell, useAgencyStatistics } from "../components/agency-statistics";
 import { useEffect, useMemo, useState } from "react";
@@ -67,6 +69,8 @@ export function AgenciesPage() {
     status: queryState.status
   });
   const [branding,setBranding]=useState<Agency|null>(null);
+  const domainWorkspace=useCurrentWorkspace(),domainUser=useCurrentUser();
+ const [domainAgency,setDomainAgency]=useState<Agency|null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Agency | null>(null);
   const [detail, setDetail] = useState<Agency | null>(null);
@@ -95,6 +99,7 @@ export function AgenciesPage() {
       })
   });
 
+  const domainSummaries=useQuery({queryKey:["agency-domain-summaries",domainWorkspace?.type,domainWorkspace?.id,domainUser?.id,(data?.items??[]).map(x=>x.id)],refetchInterval:30000,enabled:permissions.can("platform.agency_domains.view")&&!!data?.items.length,queryFn:()=>client.request<Record<string,{hostname:string;state:string}>>("/api/v1/platform/agencies/domain-summaries",{method:"POST",body:{ids:data!.items.map(x=>x.id)}})});
   function applyState(next: Partial<ListQueryState>) {
     setSelectedRowKeys([]);
     setSearchParams(writeListQueryState({ ...queryState, ...next }));
@@ -195,6 +200,9 @@ export function AgenciesPage() {
         title: "动态统计", key: "statistics", width: 220, render: (_,record) => <AgencyStatisticsCell id={record.id} summary={statistics.data?.[record.id]} loading={statistics.isFetching} scope="agencies" retry={()=>void statistics.refetch()} />
       },
       {
+        title:"域名",key:"domain",width:220,render:(_,record)=>{const d=domainSummaries.data?.[record.id];return !permissions.can("platform.agency_domains.view")?"—":domainSummaries.error?"读取失败":domainSummaries.isFetching&&!domainSummaries.data?"加载中…":d?<Space direction="vertical" size={0}><Typography.Link href={`https://${d.hostname}/login`} target="_blank" rel="noopener noreferrer" title={d.hostname} ellipsis style={{maxWidth:200}}>{d.hostname}</Typography.Link><Typography.Text type="secondary">{domainStates[d.state]||d.state}</Typography.Text></Space>:"未绑定"}
+      },
+      {
         title: "联系人",
         key: "contact",
         render: (_, record) =>
@@ -260,6 +268,7 @@ export function AgenciesPage() {
               详情
             </Button>
             {permissions.can("platform.agency_branding.view")&&<Button size="small" type="link" onClick={()=>setBranding(record)}>品牌</Button>}
+            {permissions.can("platform.agency_domains.view")&&<Button size="small" type="link" onClick={()=>setDomainAgency(record)}>域名</Button>}
             {canUpdate ? (
               <Button size="small" type="link" onClick={() => openEdit(record)}>
                 编辑
@@ -291,11 +300,12 @@ export function AgenciesPage() {
         )
       }
     ],
-    [canUpdate, canDisable, statusMutation, permissions, statistics.data, statistics.isFetching]
+    [canUpdate, canDisable, statusMutation, permissions,domainSummaries.data,domainSummaries.error,domainSummaries.isFetching,statistics.data,statistics.isFetching]
   );
 
   return (
     <>
+ <AgencyDomainDrawer agency={domainAgency} onClose={()=>setDomainAgency(null)}/>
  <AgencyBrandingDrawer agency={branding} onClose={()=>setBranding(null)}/>
       <ListPageCard
         title="机构管理"
