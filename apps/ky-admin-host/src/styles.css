@@ -3733,4 +3733,5 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 }
 
 @media(prefers-color-scheme:dark){:root{--brand-generated-filter:brightness(0) invert(1)}}
-[data-theme="dark"]{--brand-generated-filter:brightness(0) invert(1)}
+:root[data-admin-theme="light"]{--brand-generated-filter:none}
+:root[data-admin-theme="dark"]{--brand-generated-filter:brightness(0) invert(1)}
