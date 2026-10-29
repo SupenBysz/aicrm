@@ -1,21 +1,9 @@
+import { PlatformBrandForm, preparePlatformBrand, platformBrandFormValues } from "../components/platform-brand-form";
 import { useEffect, useRef, useState } from "react";
-import { App as AntdApp, Alert, Button, Divider, Modal, Form, Input, InputNumber, Select, Space, Tabs, Typography } from "antd";
+import { App as AntdApp, Alert, Button, Divider, Modal, Form, Input, Space, Tabs, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { copyrightStyleOptions, formatCopyright, ListPageCard, useRequestClient, usePermissions } from "@ky/admin-core";
+import { ListPageCard, useRequestClient, usePermissions } from "@ky/admin-core";
 import { getPlatformProfile, updatePlatformProfile, type PlatformProfile } from "../api";
-
-const logoFontFamilyOptions = [
-  { label: "系统无衬线", value: "system" },
-  { label: "无衬线", value: "sans" },
-  { label: "衬线", value: "serif" },
-  { label: "等宽", value: "mono" }
-];
-const logoFontWeightOptions = [
-  { label: "常规 400", value: 400 },
-  { label: "中等 500", value: 500 },
-  { label: "半粗 600", value: 600 },
-  { label: "粗体 700", value: 700 }
-];
 
 export function BasicInfoPage() {
   const { message } = AntdApp.useApp();
@@ -25,12 +13,11 @@ export function BasicInfoPage() {
   const dirty = useRef(false);
   const [revision, setRevision] = useState("");
   const [conflict, setConflict] = useState(false);
+ const [uploadBusy,setUploadBusy]=useState(false);
   const [form] = Form.useForm<PlatformProfile>();
   const [compactTabs, setCompactTabs] = useState(false);
   const [activeInfoTab, setActiveInfoTab] = useState("brand");
 
-  const holder = Form.useWatch("companyName", form);
-  const copyrightStyle = Form.useWatch("copyrightStyle", form);
   const canUpdate = permissions.can("platform.basic_info.update");
 
   const { data, isFetching } = useQuery({
@@ -39,7 +26,7 @@ export function BasicInfoPage() {
   });
 
   useEffect(() => {
-    if (data && !dirty.current) { form.setFieldsValue(data); setRevision(data.revision); }
+    if (data && !dirty.current) { form.setFieldsValue(platformBrandFormValues(data)); setRevision(data.revision); }
   }, [data, form]);
 
   useEffect(() => {
@@ -51,9 +38,9 @@ export function BasicInfoPage() {
   }, []);
 
   const saveMutation = useMutation({
-    mutationFn: (values: PlatformProfile) => updatePlatformProfile(client, { ...values, revision }),
+    mutationFn: async (values: PlatformProfile) => updatePlatformProfile(client, { ...await preparePlatformBrand(client, values, data), revision }),
     onSuccess: (saved) => {
-      dirty.current = false; setConflict(false); setRevision(saved.revision); form.setFieldsValue(saved);
+      dirty.current = false; setConflict(false); setRevision(saved.revision); form.setFieldsValue(platformBrandFormValues(saved));
       queryClient.setQueryData(["platform-profile"], saved);
       void message.success("基础信息已保存。");
       queryClient.invalidateQueries({ queryKey: ["platform-profile"] });
@@ -66,7 +53,7 @@ export function BasicInfoPage() {
   const saveButton = canUpdate ? (
     <Form.Item style={{ margin: "16px 0 0" }}>
       <Space>
-        <Button type="primary" htmlType="button" loading={saveMutation.isPending} onClick={() => form.submit()}>
+        <Button type="primary" htmlType="button" loading={saveMutation.isPending} disabled={uploadBusy} onClick={() => form.submit()}>
           保存
         </Button>
       </Space>
@@ -74,6 +61,10 @@ export function BasicInfoPage() {
   ) : null;
 
   const fieldLabels: Record<string, string> = {
+    name: "品牌名称",
+    applicationName: "应用显示名称",
+    iconText: "图标文字",
+    copyrightHolder: "版权署名",
     brandLogoTextLong: "长文字 LOGO",
     brandLogoTextShort: "短文字 LOGO",
     companyName: "公司 / 平台主体名称",
@@ -83,13 +74,13 @@ export function BasicInfoPage() {
   return (
     <ListPageCard title="基础信息" subtitle="维护平台品牌信息、公司主体信息与备案展示。">
       <div style={{ padding: 16 }}>
-        {conflict && <Alert type="warning" showIcon title="配置已被其他管理员修改，当前输入已保留。" action={<Button onClick={() => Modal.confirm({ title: "加载最新配置？", content: "此操作会替换当前未保存的输入。", onOk: async () => { const result = await queryClient.fetchQuery({ queryKey: ["platform-profile"], queryFn: () => getPlatformProfile(client), staleTime: 0 }); dirty.current = false; setConflict(false); setRevision(result.revision); form.setFieldsValue(result); } })}>加载最新配置</Button>} />}
+        {conflict && <Alert type="warning" showIcon title="配置已被其他管理员修改，当前输入已保留。" action={<Button onClick={() => Modal.confirm({ title: "加载最新配置？", content: "此操作会替换当前未保存的输入。", onOk: async () => { const result = await queryClient.fetchQuery({ queryKey: ["platform-profile"], queryFn: () => getPlatformProfile(client), staleTime: 0 }); dirty.current = false; setConflict(false); setRevision(result.revision); form.setFieldsValue(platformBrandFormValues(result)); } })}>加载最新配置</Button>} />}
         <Form<PlatformProfile>
           form={form}
           layout="vertical"
           preserve
           onValuesChange={() => { dirty.current = true; }}
-          disabled={isFetching || saveMutation.isPending}
+          disabled={!canUpdate || isFetching || saveMutation.isPending || uploadBusy}
           onFinish={(v) => { if (!saveMutation.isPending) saveMutation.mutate(v); }}
           onFinishFailed={({ errorFields }) => {
             const first = errorFields[0];
@@ -98,12 +89,13 @@ export function BasicInfoPage() {
               return;
             }
             const fieldName = String(first.name[first.name.length - 1]);
-            if (fieldName === "companyName" || fieldName === "icpRecord") setActiveInfoTab("subject");
+            if (fieldName === "companyName" || fieldName === "icpRecord") setActiveInfoTab("subject"); else setActiveInfoTab("brand");
             void form.scrollToField(first.name, { block: "center" });
             const reason = first.errors.join("、") || "值不符合要求";
             void message.error(`${fieldLabels[fieldName] ?? fieldName}：${reason}`);
           }}
         >
+          {["longLogoFontSize","longLogoFontFamily","longLogoFontWeight","shortLogoFontSize","shortLogoFontFamily","shortLogoFontWeight","brandLogoTextLong","brandLogoTextShort"].map(field=><Form.Item name={field} key={field} hidden><Input/></Form.Item>)}
           <Tabs
             className="system-settings-tabs"
             activeKey={activeInfoTab}
@@ -118,54 +110,13 @@ export function BasicInfoPage() {
                 label: (
                   <span className="system-settings-dictionary-tab-label">
                     <Typography.Text>品牌信息</Typography.Text>
-                    <Typography.Text type="secondary" className="system-settings-dictionary-tab-code">
-                      brand_info
-                    </Typography.Text>
+
                   </span>
                 ),
                 forceRender: true,
                 children: (
                   <div style={{ width: "100%", maxWidth: 720, padding: "0 16px" }}>
-                    <Form.Item
-                      extra="用于导航展开态、登录页主品牌与浏览器标题。为空时使用公司 / 平台主体名称。"
-                      label="长文字 LOGO"
-                      name="brandLogoTextLong"
-                      rules={[{ max: 20, message: "长文字 LOGO 最多 20 个字符" }]}
-                    >
-                      <Input maxLength={20} placeholder="如 AI 智能 CRM / AiCRM" showCount />
-                    </Form.Item>
-                    <Typography.Text type="secondary">字体设置仅作用于左上角的 Logo。</Typography.Text>
-                    <Space wrap size={12} style={{ width: "100%" }}>
-                      <Form.Item label="字体大小" name="longLogoFontSize" rules={[{ required: true, type: "number", min: 8, max: 72, message: "请输入 8—72 的字号" }]}>
-                        <InputNumber addonAfter="px" min={8} max={72} precision={0} />
-                      </Form.Item>
-                      <Form.Item label="字体" name="longLogoFontFamily" rules={[{ required: true, message: "请选择字体" }]}>
-                        <Select options={logoFontFamilyOptions} style={{ minWidth: 150 }} />
-                      </Form.Item>
-                      <Form.Item label="粗细" name="longLogoFontWeight" rules={[{ required: true, message: "请选择字重" }]}>
-                        <Select options={logoFontWeightOptions} style={{ minWidth: 130 }} />
-                      </Form.Item>
-                    </Space>
-                    <Form.Item
-                      extra="用于导航收起态，建议中文 1-2 个字或英文 2-6 个字符。为空时自动从长文字 LOGO 生成。"
-                      label="短文字 LOGO"
-                      name="brandLogoTextShort"
-                      rules={[{ max: 6, message: "短文字 LOGO 最多 6 个字符" }]}
-                    >
-                      <Input maxLength={6} placeholder="如 AI / CRM / AiCRM" showCount />
-                    </Form.Item>
-                    <Typography.Text type="secondary">字体设置仅作用于左上角的 Logo。</Typography.Text>
-                    <Space wrap size={12} style={{ width: "100%" }}>
-                      <Form.Item label="字体大小" name="shortLogoFontSize" rules={[{ required: true, type: "number", min: 8, max: 72, message: "请输入 8—72 的字号" }]}>
-                        <InputNumber addonAfter="px" min={8} max={72} precision={0} />
-                      </Form.Item>
-                      <Form.Item label="字体" name="shortLogoFontFamily" rules={[{ required: true, message: "请选择字体" }]}>
-                        <Select options={logoFontFamilyOptions} style={{ minWidth: 150 }} />
-                      </Form.Item>
-                      <Form.Item label="粗细" name="shortLogoFontWeight" rules={[{ required: true, message: "请选择字重" }]}>
-                        <Select options={logoFontWeightOptions} style={{ minWidth: 130 }} />
-                      </Form.Item>
-                    </Space>
+                    <PlatformBrandForm onDirty={()=>{dirty.current=true}} form={form} disabled={!canUpdate || isFetching || saveMutation.isPending || uploadBusy} onBusyChange={busy=>{setUploadBusy(busy);if(!busy)dirty.current=true}} />
                     <Divider />
                     {saveButton}
                   </div>
@@ -176,9 +127,7 @@ export function BasicInfoPage() {
                 label: (
                   <span className="system-settings-dictionary-tab-label">
                     <Typography.Text>主体信息</Typography.Text>
-                    <Typography.Text type="secondary" className="system-settings-dictionary-tab-code">
-                      subject_info
-                    </Typography.Text>
+
                   </span>
                 ),
                 forceRender: true,
@@ -190,8 +139,6 @@ export function BasicInfoPage() {
                     <Form.Item label="ICP 备案号" name="icpRecord">
                       <Input placeholder="如 京ICP备2026000001号" />
                     </Form.Item>
-                    <Form.Item label="版权显示风格" name="copyrightStyle"><Select options={copyrightStyleOptions} /></Form.Item>
-                    <Typography.Paragraph type="secondary">预览：{formatCopyright(holder || "平台名称", copyrightStyle || "standard")}</Typography.Paragraph>
                     {data?.updatedAt ? (
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         最后更新:{new Date(data.updatedAt).toLocaleString("zh-CN")}

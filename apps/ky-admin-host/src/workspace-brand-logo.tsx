@@ -59,7 +59,13 @@ export function WorkspaceBrandLogo({
       active = false;
     };
   }, [key, retry, workspace.type]);
-  const brand = resolved?.key === key ? resolved.brand : undefined;
+  const brand = workspace.type === "platform" ? {
+ name: p.logoTextLong, applicationName:p.brand?.applicationName || p.logoTextLong,
+ iconText:p.brand?.iconText, showAiIcon:p.brand?.showAiIcon,
+ wordmarkGenerated:p.brand?.wordmarkGenerated,
+ wordmark:p.brand?.wordmarkId ? {url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(p.brand.wordmarkId)} : undefined,
+ effectiveFingerprint:"platform"
+ } : resolved?.key === key ? resolved.brand : undefined;
   const name =
     workspace.type === "platform"
       ? p.ready

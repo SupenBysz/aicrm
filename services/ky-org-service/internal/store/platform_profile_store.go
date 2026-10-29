@@ -3,25 +3,27 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strconv"
 	"time"
 )
 
 // PlatformProfile is the platform-level basic info (singleton).
 type PlatformProfile struct {
-	CopyrightStyle      string `json:"copyrightStyle"`
-	Revision            string `json:"revision"`
-	CompanyName         string `json:"companyName"`
-	BrandLogoTextLong   string `json:"brandLogoTextLong"`
-	BrandLogoTextShort  string `json:"brandLogoTextShort"`
-	LongLogoFontSize    int    `json:"longLogoFontSize"`
-	LongLogoFontFamily  string `json:"longLogoFontFamily"`
-	LongLogoFontWeight  int    `json:"longLogoFontWeight"`
-	ShortLogoFontSize   int    `json:"shortLogoFontSize"`
-	ShortLogoFontFamily string `json:"shortLogoFontFamily"`
-	ShortLogoFontWeight int    `json:"shortLogoFontWeight"`
-	ICPRecord           string `json:"icpRecord"`
-	UpdatedAt           string `json:"updatedAt,omitempty"`
+	Brand               BrandDraft `json:"brand"`
+	CopyrightStyle      string     `json:"copyrightStyle"`
+	Revision            string     `json:"revision"`
+	CompanyName         string     `json:"companyName"`
+	BrandLogoTextLong   string     `json:"brandLogoTextLong"`
+	BrandLogoTextShort  string     `json:"brandLogoTextShort"`
+	LongLogoFontSize    int        `json:"longLogoFontSize"`
+	LongLogoFontFamily  string     `json:"longLogoFontFamily"`
+	LongLogoFontWeight  int        `json:"longLogoFontWeight"`
+	ShortLogoFontSize   int        `json:"shortLogoFontSize"`
+	ShortLogoFontFamily string     `json:"shortLogoFontFamily"`
+	ShortLogoFontWeight int        `json:"shortLogoFontWeight"`
+	ICPRecord           string     `json:"icpRecord"`
+	UpdatedAt           string     `json:"updatedAt,omitempty"`
 }
 
 func normalizePlatformProfile(p *PlatformProfile) {
@@ -54,7 +56,7 @@ func normalizePlatformProfile(p *PlatformProfile) {
 const platformProfileSelect = `SELECT company_name, brand_logo_text_long, brand_logo_text_short,
 			long_logo_font_size, long_logo_font_family, long_logo_font_weight,
 			short_logo_font_size, short_logo_font_family, short_logo_font_weight,
-			icp_record, updated_at, copyright_style, revision FROM ky_platform_profile WHERE id='default'`
+			icp_record, updated_at, copyright_style, revision, brand_config FROM ky_platform_profile WHERE id='default'`
 
 func (s *Store) GetPlatformProfile(ctx context.Context) (PlatformProfile, error) {
 	return readPlatformProfile(s.db.QueryRowContext(ctx, platformProfileSelect))
@@ -63,16 +65,20 @@ func readPlatformProfile(row *sql.Row) (PlatformProfile, error) {
 	var p PlatformProfile
 	var updatedAt sql.NullTime
 	var revision int64
+	var brandRaw []byte
 	err := row.Scan(&p.CompanyName, &p.BrandLogoTextLong, &p.BrandLogoTextShort,
 		&p.LongLogoFontSize, &p.LongLogoFontFamily, &p.LongLogoFontWeight,
 		&p.ShortLogoFontSize, &p.ShortLogoFontFamily, &p.ShortLogoFontWeight,
-		&p.ICPRecord, &updatedAt, &p.CopyrightStyle, &revision)
+		&p.ICPRecord, &updatedAt, &p.CopyrightStyle, &revision, &brandRaw)
 	if err == sql.ErrNoRows {
 		p = PlatformProfile{}
 		normalizePlatformProfile(&p)
 		return p, nil
 	}
 	if err != nil {
+		return PlatformProfile{}, err
+	}
+	if err = json.Unmarshal(brandRaw, &p.Brand); err != nil {
 		return PlatformProfile{}, err
 	}
 	p.Revision = strconv.FormatInt(revision, 10)

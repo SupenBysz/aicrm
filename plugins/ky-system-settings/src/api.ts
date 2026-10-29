@@ -2,7 +2,15 @@ import type { RequestClient } from "@ky/admin-core";
 
 export type SettingsMap = Record<string, unknown>;
 
+export interface PlatformBrand {
+ name: string; applicationName: string; iconText: string;
+ iconId: string; wordmarkId: string; showAiIcon: boolean;
+ copyrightHolder: string; copyrightStyle?: string;
+ iconGenerated?: boolean; wordmarkGenerated?: boolean;
+ iconGeneratorVersion?: number; wordmarkGeneratorVersion?: number;
+}
 export interface PlatformProfile {
+ brand?: PlatformBrand;
   copyrightStyle: "standard" | "full" | "chinese";
   revision: string;
   companyName: string;

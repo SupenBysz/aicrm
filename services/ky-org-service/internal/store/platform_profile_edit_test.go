@@ -48,7 +48,7 @@ func TestProfileConditionalDatabase(t *testing.T) {
 	if _, err = s.db.Exec(`CREATE TABLE ky_user(id text PRIMARY KEY);INSERT INTO ky_user VALUES('actor')`); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range []string{"015_platform_profile.sql", "023_platform_brand_profile.sql", "078_platform_logo_typography.sql", "100_platform_copyright_revision.sql"} {
+	for _, file := range []string{"015_platform_profile.sql", "023_platform_brand_profile.sql", "078_platform_logo_typography.sql", "100_platform_copyright_revision.sql", "105_platform_brand_assets.sql"} {
 		b, e := os.ReadFile("../../../../ops/db/" + file)
 		if e != nil {
 			t.Fatal(e)
@@ -96,6 +96,37 @@ func TestProfileConditionalDatabase(t *testing.T) {
 	after, _ := s.GetPlatformProfile(ctx)
 	if after.CopyrightStyle != "full" || after.Revision == current.Revision {
 		t.Fatal("legacy write did not invalidate new editor", after)
+	}
+	// Unreferenced uploads are private until a revision-checked profile save.
+	assetID, e := s.SavePlatformBrandAsset(ctx, []byte("platform-png-fixture"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.PlatformBrandAsset(ctx, assetID, true); !errors.Is(e, ErrNotFound) {
+		t.Fatal("unpublished asset exposed", e)
+	}
+	if _, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "bad-brand", map[string]json.RawMessage{"brand": json.RawMessage(`{"name":"Platform","wordmarkId":"missing"}`)}); !errors.Is(e, ErrValidation) {
+		t.Fatal("missing asset accepted", e)
+	}
+	brand := BrandDraft{Name: "Platform", ApplicationName: "Platform App", IconText: "PL", ShowAIIcon: true, WordmarkID: assetID, CopyrightHolder: "Brand Owner"}
+	rawBrand, _ := json.Marshal(brand)
+	after, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "brand-save", map[string]json.RawMessage{"brand": rawBrand})
+	if e != nil || !after.Brand.ShowAIIcon || after.Brand.WordmarkID != assetID {
+		t.Fatal(after, e)
+	}
+	effective := resolveBrand(nil, after)
+	if effective.Name != "Platform" || !effective.ShowAIIcon || effective.CopyrightHolder != "Brand Owner" || !strings.HasSuffix(effective.Wordmark.URL, assetID) {
+		t.Fatal(effective)
+	}
+	if raw, e := s.PlatformBrandAsset(ctx, assetID, true); e != nil || string(raw) != "platform-png-fixture" {
+		t.Fatal("active asset unavailable", e)
+	}
+	after, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "brand-clear", map[string]json.RawMessage{"brand": json.RawMessage(`{}`)})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.PlatformBrandAsset(ctx, assetID, true); !errors.Is(e, ErrNotFound) {
+		t.Fatal("removed asset remains public", e)
 	}
 	if _, err = s.db.Exec(`DROP TABLE ky_platform_profile_change`); err != nil {
 		t.Fatal(err)

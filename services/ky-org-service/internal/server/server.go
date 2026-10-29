@@ -132,6 +132,9 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("PATCH /api/v1/platform/system-settings", s.ws("platform", perms("platform.settings.update"), s.updatePlatformSettings))
 
 	// 基础信息 (platform identity) — public read + platform manage.
+	mux.HandleFunc("GET /api/v1/public/platform-brand-assets/{assetId}", s.publicPlatformBrandAsset)
+	mux.HandleFunc("POST /api/v1/platform/platform-profile/assets", s.ws("platform", perms("platform.basic_info.update"), s.uploadPlatformBrandAsset))
+	mux.HandleFunc("GET /api/v1/platform/platform-profile/assets/{assetId}", s.ws("platform", perms("platform.basic_info.view"), s.previewPlatformBrandAsset))
 	mux.HandleFunc("GET /api/v1/public/platform-profile", s.getPublicPlatformProfile)
 	mux.HandleFunc("GET /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.view"), s.getPlatformProfile))
 	mux.HandleFunc("PATCH /api/v1/platform/platform-profile", s.ws("platform", perms("platform.basic_info.update"), s.updatePlatformProfile))

@@ -136,3 +136,5 @@ export * from "./plugin-inventory-context";
 export * from "./brand-presentation";
 
 export { BrandAISuffix, BrandLogoLockup } from "./brand-ai-suffix";
+
+export { generatedBrandImage } from "./brand-image";
