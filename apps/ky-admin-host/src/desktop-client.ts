@@ -20,6 +20,7 @@ export interface DesktopBridgeLike {
   app?: {
     getVersion?: () => Promise<string>;
     getConfig?: () => Promise<{ debugMode?: boolean }>;
+    openVersionDialog?: () => Promise<boolean>;
   };
   window?: {
     setAppearance?: (value: {themeId: string; dark: boolean}) => Promise<boolean>;

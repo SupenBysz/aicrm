@@ -9,7 +9,7 @@ export default defineConfig({
   preload: {
     build: {
       rollupOptions: {
-        input: { index: "src/preload/index.ts", "desktop-plugin": "src/preload/desktop-plugin.ts", "desktop-offline": "src/preload/desktop-offline.ts" },
+        input: { index: "src/preload/index.ts", "desktop-plugin": "src/preload/desktop-plugin.ts", "desktop-offline": "src/preload/desktop-offline.ts", "version-info-dialog": "src/preload/version-info-dialog.ts" },
         external: ["electron"],
         output: {
           format: "cjs",

@@ -9,6 +9,7 @@ import {
   LEGACY_DESKTOP_USER_DATA_DIRECTORY
 } from "../shared/constants";
 import { createMainWindow, retryMainWindowConnection } from "./app-window";
+import { registerVersionDialogIpc } from "./version-info-dialog";
 import { installApplicationMenu } from "./app-menu";
 import { registerApiIpc } from "./ipc/api-ipc";
 import { registerAiExecutorWindowIpc } from "./ipc/ai-executor-window-ipc";
@@ -69,6 +70,7 @@ registerDesktopExecutorDeviceBindingIpc(
 registerMatrixAccountIpc();
 registerNetworkIpc();
 registerWindowIpc();
+registerVersionDialogIpc();
 
 app.whenReady().then(async () => {
   void startPluginHost().catch(() => console.info("客户端插件已降级，主窗口继续启动"));

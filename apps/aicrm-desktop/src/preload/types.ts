@@ -68,6 +68,7 @@ export interface AiCrmDesktopBridge {
   app: {
     getConfig: () => Promise<DesktopConfig>;
     getVersion: () => Promise<string>;
+    openVersionDialog: () => Promise<boolean>;
   };
   session: {
     load: () => Promise<DesktopSession | null>;

@@ -2578,6 +2578,19 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   white-space: nowrap;
 }
 
+button.client-version {
+  border: 0;
+  padding: 0 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+button.client-version:hover,
+button.client-version:focus-visible {
+  color: inherit;
+  background: rgba(127, 127, 127, 0.12);
+}
+
 .desktop-plugin-item { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button.desktop-plugin-item { cursor: pointer; }
 button.desktop-plugin-item:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }

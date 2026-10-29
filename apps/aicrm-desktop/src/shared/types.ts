@@ -820,6 +820,13 @@ export interface DesktopNetworkLogSnapshot {
   entries: DesktopNetworkLogEntry[];
 }
 
+export interface VersionDialogInfo {
+  clientVersion: string;
+  pluginVersion: string;
+  runtimePhase: string;
+  theme: "light" | "dark";
+}
+
 /** 客户端宿主插件的安全 UI 投影，不携带业务上下文。 */
 export interface DesktopPluginSnapshot {
   id: string;

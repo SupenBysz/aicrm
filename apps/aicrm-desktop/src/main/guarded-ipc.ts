@@ -1,6 +1,6 @@
 import { ipcMain, type WebContents, type IpcMainInvokeEvent, type IpcMainEvent } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-export type WindowRole = 'main' | 'terminal' | 'controlled' | 'offline' | 'plugin';
+export type WindowRole = 'main' | 'terminal' | 'controlled' | 'offline' | 'plugin' | 'version-dialog';
 type Registration = {role:WindowRole; generation:number; ready:boolean; origin:(url:string)=>boolean};
 const senders=new Map<WebContents,Registration>();
 const cleanups=new Set<(wc:WebContents)=>void>();

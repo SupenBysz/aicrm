@@ -5,6 +5,7 @@ import { BrowserWindow,  type IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../../shared/constants";
 import type { DesktopOpenDevToolsResult, DesktopWindowState } from "../../shared/types";
 import { isDesktopProductionMode } from "../runtime-mode";
+import { setVersionDialogTheme } from "../version-info-dialog";
 
 function fallbackWindowState(): DesktopWindowState {
   return {
@@ -40,7 +41,7 @@ export function emitWindowState(window: BrowserWindow): void {
 export function registerWindowIpc(): void {
   scopedIpc(["main", "terminal"], args => args.length===1 && !!args[0] && Object.keys(args[0]).length===2 && ["classic-gold","business-blue","jade-green"].includes(args[0].themeId) && typeof args[0].dark==="boolean").handle(IPC_CHANNELS.windowSetAppearance, (event,value) => {
     const window=getSenderWindow(event); if(!window||window.isDestroyed())return false;
-    applyNativeAppearance(window,value);return true;
+    applyNativeAppearance(window,value);setVersionDialogTheme(value.dark ? "dark" : "light");return true;
   });
   ipcMain.handle(IPC_CHANNELS.windowGetState, (event) => {
     const window = getSenderWindow(event);

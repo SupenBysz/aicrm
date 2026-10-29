@@ -11,7 +11,8 @@ const bridge: AiCrmDesktopBridge = {
   },
   app: {
     getConfig: () => ipcRenderer.invoke(IPC_CHANNELS.appGetConfig),
-    getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion)
+    getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion),
+    openVersionDialog: () => ipcRenderer.invoke(IPC_CHANNELS.versionDialogOpen).then((result: {ok:boolean;data?:boolean}) => result.ok && result.data === true)
   },
   session: {
     load: () => ipcRenderer.invoke(IPC_CHANNELS.sessionLoad),
