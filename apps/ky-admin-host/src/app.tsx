@@ -41,8 +41,10 @@ import {
   IconBell,
   IconBug,
   IconLock,
+  IconMoon,
   IconPinned,
   IconPinnedOff,
+  IconSun,
 } from "@tabler/icons-react";
 import {
   App as AntdApp,
@@ -351,7 +353,9 @@ function WorkspaceLayout() {
   const { message } = AntdApp.useApp();
   const screens = Grid.useBreakpoint();
   const isDesktop = Boolean(screens.md);
-  const colorScheme = useAppearance().dark ? "dark" : "light";
+  const appearance = useAppearance();
+  const colorScheme = appearance.dark ? "dark" : "light";
+  const appearanceToggleLabel = appearance.dark ? "切换亮色" : "切换暗色";
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
@@ -1004,6 +1008,16 @@ function WorkspaceLayout() {
                       type="text"
                     />
                   </Badge>
+                </Tooltip>
+                <Tooltip title={appearanceToggleLabel}>
+                  <Button
+                    aria-label={appearanceToggleLabel}
+                    className="desktop-quick-action desktop-quick-action--theme"
+                    disabled={!appearance.enabled || appearance.loading || appearance.syncState === "reading"}
+                    icon={appearance.dark ? <IconSun size={25} stroke={1.35} /> : <IconMoon size={25} stroke={1.35} />}
+                    onClick={() => appearance.choose(appearance.themeId, appearance.dark ? "light" : "dark")}
+                    type="text"
+                  />
                 </Tooltip>
                 {showFullscreenAction ? (
                   <Tooltip title={fullscreenActive ? "退出全屏" : isDesktopClient ? "全屏显示" : "浏览器全屏"}>
