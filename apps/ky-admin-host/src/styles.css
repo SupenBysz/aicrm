@@ -1,18 +1,19 @@
+@import "../../../packages/ky-admin-core/src/admin-shell-palette.css";
 :root {
   color: #34281a;
   background: #f7efe4;
   font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-  --admin-header-height: 76px;
-  --admin-sidebar-width: 177px;
+
+
   --admin-accent: #d49a3d;
   --admin-accent-soft: rgba(212, 154, 61, 0.14);
   --admin-divider: rgba(210, 168, 95, 0.18);
   --admin-stroke: rgba(221, 182, 113, 0.24);
   --admin-header-bg: linear-gradient(180deg, #f7efe4 0%, #f1e6d8 100%);
-  --admin-nav-bg: rgba(255, 252, 247, 0.98);
-  --admin-right-shell-bg: rgba(247, 239, 228, 0.92);
+  --admin-nav-bg: var(--admin-shell-light-nav);
+  --admin-right-shell-bg: var(--admin-shell-light-right);
   --admin-surface: rgba(255, 250, 243, 0.96);
-  --admin-surface-solid: rgba(255, 252, 247, 0.98);
+  --admin-surface-solid: var(--admin-shell-light-nav);
   --admin-surface-soft: rgba(252, 246, 237, 0.96);
   --admin-content-bg: #f7efe4;
   --admin-text: #34281a;
@@ -28,7 +29,7 @@
   --admin-segmented-bg: var(--admin-toolbar-bg);
   --admin-segmented-border: var(--admin-toolbar-border);
   --admin-segmented-text: var(--admin-toolbar-fg);
-  --admin-segmented-selected-bg: rgba(255, 252, 247, 0.98);
+  --admin-segmented-selected-bg: var(--admin-shell-light-nav);
   --admin-segmented-selected-text: #7a541b;
   --admin-segmented-hover-bg: rgba(212, 154, 61, 0.14);
 }
@@ -76,10 +77,10 @@
   --admin-divider: rgba(210, 168, 95, 0.18);
   --admin-stroke: rgba(221, 182, 113, 0.24);
   --admin-header-bg: linear-gradient(180deg, #f7efe4 0%, #f1e6d8 100%);
-  --admin-nav-bg: rgba(255, 252, 247, 0.98);
-  --admin-right-shell-bg: rgba(247, 239, 228, 0.92);
+  --admin-nav-bg: var(--admin-shell-light-nav);
+  --admin-right-shell-bg: var(--admin-shell-light-right);
   --admin-surface: rgba(255, 250, 243, 0.96);
-  --admin-surface-solid: rgba(255, 252, 247, 0.98);
+  --admin-surface-solid: var(--admin-shell-light-nav);
   --admin-surface-soft: rgba(252, 246, 237, 0.96);
   --admin-content-bg: #f7efe4;
   --admin-text: #34281a;
@@ -95,7 +96,7 @@
   --admin-segmented-bg: var(--admin-toolbar-bg);
   --admin-segmented-border: var(--admin-toolbar-border);
   --admin-segmented-text: var(--admin-toolbar-fg);
-  --admin-segmented-selected-bg: rgba(255, 252, 247, 0.98);
+  --admin-segmented-selected-bg: var(--admin-shell-light-nav);
   --admin-segmented-selected-text: #7a541b;
   --admin-segmented-hover-bg: rgba(212, 154, 61, 0.14);
 }
@@ -202,7 +203,7 @@ a {
 
 .app-header::before {
   background: var(--admin-right-shell-bg);
-  border-top-left-radius: 40px;
+  border-top-left-radius: var(--admin-header-curve);
   bottom: 0;
   content: "";
   left: calc(var(--admin-sidebar-width) - 1px);
@@ -1245,7 +1246,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-hero {
-  background: linear-gradient(145deg, rgba(255, 252, 247, 0.98), rgba(241, 230, 216, 0.96));
+  background: linear-gradient(145deg, var(--admin-shell-light-nav), rgba(241, 230, 216, 0.96));
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -3730,3 +3731,7 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
     white-space: nowrap;
   }
 }
+
+@media(prefers-color-scheme:dark){:root{--brand-generated-filter:brightness(0) invert(1)}}
+:root[data-admin-theme="light"]{--brand-generated-filter:none}
+:root[data-admin-theme="dark"]{--brand-generated-filter:brightness(0) invert(1)}

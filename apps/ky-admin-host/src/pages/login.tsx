@@ -1,6 +1,6 @@
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from "antd";
-import { useState } from "react";
+import { useState,useLayoutEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { bootstrap, login, pickRecommendedWorkspace } from "../remote-api";
 import { saveSession, setBootstrap, selectWorkspace, workspaceWorkbenchPath } from "../app-store";
@@ -12,8 +12,10 @@ const PASSWORD_MIN_LENGTH = 6;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { icpRecord, logoTextLong, copyrightStyle, name: companyName } = usePlatformProfile();
+  const { icpRecord, logoTextLong, copyrightStyle, name: companyName,ready,error,refresh } = usePlatformProfile();
   const [submitting, setSubmitting] = useState(false);
+ useLayoutEffect(()=>{document.title=ready?`${logoTextLong} 后台`:"管理后台";return()=>{document.title="管理后台"}},[ready,logoTextLong]);
+ if(!ready)return <div role="status" className="auth-page">{error?<Button onClick={refresh}>品牌加载失败，重试</Button>:"正在加载…"}</div>;
 
   async function handleFinish(values: { username: string; password: string }) {
     setSubmitting(true);

@@ -595,7 +595,8 @@ updatePackage(path.join(root, "apps", desktopDir, "package.json"), {
   description: desktopDescription
 });
 
-setHtmlTitle(path.join(root, "apps", adminDir, "index.html"), adminName);
+// Keep the pre-bootstrap title neutral on institutional hostnames.
+setHtmlTitle(path.join(root, "apps", adminDir, "index.html"), "管理后台");
 setHtmlTitle(path.join(root, "apps", desktopDir, "index.html"), desktopAppName);
 NODE
 
