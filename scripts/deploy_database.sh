@@ -9,6 +9,13 @@ MIGRATION_LOCK_KEY=4701196508681632081
 LEGACY_WRAPPED_FILENAME="052_plugin_management_permissions.sql"
 LEGACY_WRAPPED_SHA256="cfbedcddfa4e7a9b5721d5e542dae4548c586a8d9da85be2fb17f3499d8348d4"
 
+# PR107 already carries its own transaction. Preserve its original checksum,
+# but inline its exact reviewed body inside the ledger-owned transaction.
+is_wrapped_migration() {
+  [[ "$1" == "$LEGACY_WRAPPED_FILENAME" && "$2" == "$LEGACY_WRAPPED_SHA256" ]] ||
+  [[ "$1" == "107_menu_directory_and_webview_config.sql" && "$2" == "5f1b16bb939040ff8c7b2301470796f5b1847bbf9ceb7566c65a5db606433c42" ]]
+}
+
 shopt -s nullglob
 sql_paths=("$ROOT_DIR"/ops/db/[0-9][0-9][0-9]_*.sql)
 shopt -u nullglob
@@ -56,7 +63,7 @@ for path in "${sql_paths[@]}"; do
   fi
   if ((version > BASELINE_MAX_VERSION)); then
     if grep -Eq '^[[:space:]]*(BEGIN|COMMIT|ROLLBACK)[[:space:]]*;' "$path"; then
-      if [[ "$file" != "$LEGACY_WRAPPED_FILENAME" || "$checksum" != "$LEGACY_WRAPPED_SHA256" ]]; then
+      if ! is_wrapped_migration "$file" "$checksum"; then
         echo "Migration $file contains transaction control; the ledger runner owns the transaction." >&2
         exit 1
       fi
@@ -118,7 +125,7 @@ emit_missing_baseline_failure() {
 
 emit_migration_include() {
   local path="$1"
-  if [[ "$(basename "$path")" == "$LEGACY_WRAPPED_FILENAME" ]]; then
+  if is_wrapped_migration "$(basename "$path")" "$(sha256_file "$path")"; then
     sed '/^BEGIN;$/d; /^COMMIT;$/d' "$path"
     printf '\n'
   else

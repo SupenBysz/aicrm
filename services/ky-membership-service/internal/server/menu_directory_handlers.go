@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/Kysion/KyaiCRM/shared/menucatalog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -32,12 +33,31 @@ func (s *Server) listMenuDirectory(w http.ResponseWriter, r *http.Request, wc ws
 			return
 		}
 	}
-	items, err := s.store.ListMenuDirectory(r.Context(), directory, wc.WorkspaceType, includeDisabled)
+	listWorkspace := wc.WorkspaceType
+	if includeDisabled && wc.WorkspaceType == "platform" {
+		listWorkspace = "all"
+	}
+	items, err := s.store.ListMenuDirectory(r.Context(), directory, listWorkspace, includeDisabled)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	writeData(w, r, map[string]any{"items": items})
+	menuPermissions := []store.Permission{}
+	seenPermissions := map[string]bool{}
+	for _, kind := range []string{"platform", "agency", "enterprise"} {
+		permissions, readErr := s.store.ListPermissions(r.Context(), kind, "menu")
+		if readErr != nil {
+			writeStoreError(w, r, readErr)
+			return
+		}
+		for _, permission := range permissions {
+			if !seenPermissions[permission.ID] {
+				seenPermissions[permission.ID] = true
+				menuPermissions = append(menuPermissions, permission)
+			}
+		}
+	}
+	writeData(w, r, map[string]any{"items": items, "registeredRoutes": menucatalog.Entries(), "menuPermissions": menuPermissions})
 }
 
 func (s *Server) listVisibleMenuDirectory(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -53,7 +73,7 @@ func (s *Server) listVisibleMenuDirectory(w http.ResponseWriter, r *http.Request
 		return
 	}
 	allowed := map[string]bool{}
-	for _, code := range permissions.MenuKeys {
+	for _, code := range append(append(permissions.MenuKeys, permissions.Permissions...), permissions.ActionPermissions...) {
 		allowed[code] = true
 	}
 	byKey := map[string]store.MenuEntry{}
@@ -63,7 +83,7 @@ func (s *Server) listVisibleMenuDirectory(w http.ResponseWriter, r *http.Request
 	leaves := []store.MenuEntry{}
 	ancestors := map[string]store.MenuEntry{}
 	for _, entry := range entries {
-		if entry.NodeType != "leaf" || !allowed[entry.PermissionCode] || !menuAncestorsEnabled(entry, byKey) {
+		if entry.NodeType != "leaf" || !store.MenuEntryAllowed(entry, wc.WorkspaceType, allowed) || !menuAncestorsEnabled(entry, byKey) {
 			continue
 		}
 		leaves = append(leaves, entry)
@@ -73,11 +93,16 @@ func (s *Server) listVisibleMenuDirectory(w http.ResponseWriter, r *http.Request
 			parent = byKey[*parent].ParentKey
 		}
 	}
-	writeData(w, r, map[string]any{"items": menuNavigationProjection(leaves), "ancestors": menuNavigationProjection(mapMenuEntries(ancestors))})
+	ready, err := s.store.MenuCatalogReady(r.Context())
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	writeData(w, r, map[string]any{"items": menuNavigationProjection(leaves), "ancestors": menuNavigationProjection(mapMenuEntries(ancestors)), "catalogReady": ready, "catalogVersion": 1})
 }
 
 func (s *Server) listAssignableMenuDirectory(w http.ResponseWriter, r *http.Request, wc wsContext) {
-	entries, err := s.store.ListMenuDirectory(r.Context(), r.PathValue("directoryType"), wc.WorkspaceType, false)
+	entries, err := s.store.ListMenuDirectory(r.Context(), r.PathValue("directoryType"), wc.WorkspaceType, true)
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
@@ -114,6 +139,7 @@ func menuAncestorsFor(leaves, entries []store.MenuEntry) []store.MenuEntry {
 }
 
 type menuNavItem struct {
+	UsageScope    string  `json:"usageScope"`
 	DirectoryType string  `json:"directoryType"`
 	MenuKey       string  `json:"menuKey"`
 	NodeType      string  `json:"nodeType"`
@@ -134,7 +160,7 @@ func menuNavigationProjection(entries []store.MenuEntry) []menuNavItem {
 	})
 	out := make([]menuNavItem, 0, len(entries))
 	for _, entry := range entries {
-		out = append(out, menuNavItem{DirectoryType: entry.DirectoryType, MenuKey: entry.MenuKey, NodeType: entry.NodeType, ParentKey: entry.ParentKey, Name: entry.Name, Icon: entry.Icon, RouteKey: entry.RouteKey, PageType: entry.PageType, SortOrder: entry.SortOrder})
+		out = append(out, menuNavItem{UsageScope: entry.UsageScope, DirectoryType: entry.DirectoryType, MenuKey: entry.MenuKey, NodeType: entry.NodeType, ParentKey: entry.ParentKey, Name: entry.Name, Icon: entry.Icon, RouteKey: entry.RouteKey, PageType: entry.PageType, SortOrder: entry.SortOrder})
 	}
 	return out
 }
@@ -233,6 +259,10 @@ func (s *Server) saveMenuWebViewConfig(w http.ResponseWriter, r *http.Request, w
 		writeError(w, r, 403, "permission_denied", "只有平台工作区可维护通用配置")
 		return
 	}
+	if in.ExpectedScopeRevision == nil || *in.ExpectedScopeRevision < 0 {
+		writeError(w, r, 428, "revision_required", "需要配置作用域修订号，请刷新配置后重试")
+		return
+	}
 	revision, ok := requestExpectedRevision(r)
 	if in.ExpectedRevision != nil && *in.ExpectedRevision > 0 && (!ok || revision != *in.ExpectedRevision) {
 		writeError(w, r, 428, "revision_required", "更新配置需要匹配的 X-KY-Expected-Revision")
@@ -275,7 +305,11 @@ func (s *Server) resolveMenuWebView(w http.ResponseWriter, r *http.Request, wc w
 		writeError(w, r, 503, "authorization_unavailable", "菜单授权暂不可用")
 		return
 	}
-	if !containsCode(permissions.MenuKeys, entry.PermissionCode) {
+	allowedMenuCodes := map[string]bool{}
+	for _, code := range permissions.MenuKeys {
+		allowedMenuCodes[code] = true
+	}
+	if !store.MenuEntryAllowed(entry, wc.WorkspaceType, allowedMenuCodes) {
 		writeError(w, r, 404, "not_found", "菜单不存在或不可访问")
 		return
 	}
@@ -310,4 +344,45 @@ func menuAncestorsEnabled(entry store.MenuEntry, entries map[string]store.MenuEn
 		parent = p.ParentKey
 	}
 	return true
+}
+
+func (s *Server) getMenuConfigEditor(w http.ResponseWriter, r *http.Request, wc wsContext) {
+	directory, key := r.PathValue("directoryType"), r.PathValue("menuKey")
+	entry, err := s.store.GetMenuEntry(r.Context(), directory, key)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	if entry.NodeType != "leaf" || entry.PageType != "webview" {
+		writeError(w, r, 404, "not_found", "WebView 菜单不存在")
+		return
+	}
+	scope := r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "workspace"
+	}
+	editor, err := s.store.GetMenuConfigEditor(r.Context(), directory, key, wc.WorkspaceType, wc.WorkspaceID, scope)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	writeData(w, r, editor)
+}
+func (s *Server) resetMenuWorkspaceConfig(w http.ResponseWriter, r *http.Request, wc wsContext) {
+	var in struct {
+		ExpectedScopeRevision *int64 `json:"expectedScopeRevision"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.ExpectedScopeRevision == nil || *in.ExpectedScopeRevision < 0 {
+		writeError(w, r, 428, "revision_required", "恢复继承需要作用域修订号")
+		return
+	}
+	err := s.store.ResetMenuWorkspaceConfig(r.Context(), r.PathValue("directoryType"), r.PathValue("menuKey"), wc.WorkspaceType, wc.WorkspaceID, wc.UserID, *in.ExpectedScopeRevision)
+	if err != nil {
+		writeStoreError(w, r, err)
+		return
+	}
+	writeData(w, r, map[string]any{"reset": true, "scopeRevision": *in.ExpectedScopeRevision + 1})
 }

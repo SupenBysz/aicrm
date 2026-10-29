@@ -96,6 +96,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("PATCH /api/v1/menu-directory/{directoryType}/{menuKey}/status", s.ws("platform", perms("platform.menu_catalog.manage"), s.setMenuDirectoryStatus))
 	mux.HandleFunc("GET /api/v1/menu-webviews/{directoryType}/{menuKey}/resolve", s.ws(allWs, nil, s.resolveMenuWebView))
 	mux.HandleFunc("GET /api/v1/menu-webviews/{directoryType}/{menuKey}/config", s.ws(allWs, perms("platform.menu_catalog.view", "platform.menu_catalog.manage"), s.getMenuWebViewConfig))
+	mux.HandleFunc("GET /api/v1/menu-webviews/{directoryType}/{menuKey}/editor", s.ws(allWs, perms("platform.menu_catalog.view", "platform.menu_catalog.manage"), s.getMenuConfigEditor))
+	mux.HandleFunc("DELETE /api/v1/menu-webviews/{directoryType}/{menuKey}/override", s.ws(allWs, perms("platform.menu_catalog.manage"), s.resetMenuWorkspaceConfig))
 	mux.HandleFunc("PUT /api/v1/menu-webviews/{directoryType}/{menuKey}/config", s.ws(allWs, perms("platform.menu_catalog.manage"), s.saveMenuWebViewConfig))
 
 	// Access API — memberships authorization

@@ -1,0 +1,968 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-access-management",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "权限中心",
+      "icon": "SafetyCertificateOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 30,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-access-management.roles",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-access-management",
+      "name": "角色管理",
+      "icon": "SafetyCertificateOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-access-management.roles",
+      "routePath": "/roles",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.roles.view"
+        ],
+        "agency": [
+          "agency.roles.view"
+        ],
+        "enterprise": [
+          "enterprise.roles.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-access-management.permissions",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-access-management",
+      "name": "权限目录",
+      "icon": "KeyOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-access-management.permissions",
+      "routePath": "/permissions",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.permissions.view"
+        ],
+        "agency": [
+          "agency.permissions.view"
+        ],
+        "enterprise": [
+          "enterprise.permissions.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-access-management.menu-directory",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-access-management",
+      "name": "菜单管理",
+      "icon": "PartitionOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-access-management.menu-directory",
+      "routePath": "/menu-directory",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 2,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.menu_catalog.view",
+          "platform.menu_catalog.manage"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-ai-configuration",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "AI 配置",
+      "icon": "ApiOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 50,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-ai-configuration.providers",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-ai-configuration",
+      "name": "AI 供应商",
+      "icon": "ApiOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-ai-configuration.providers",
+      "routePath": "/ai-providers",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.ai_providers.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-ai-configuration.models",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-ai-configuration",
+      "name": "AI 模型",
+      "icon": "RobotOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-ai-configuration.models",
+      "routePath": "/ai-models",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.ai_models.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-ai-configuration.default-models",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-ai-configuration",
+      "name": "默认模型",
+      "icon": "StarOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-ai-configuration.default-models",
+      "routePath": "/ai-default-models",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 2,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.ai_model_settings.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-ai-configuration.executors",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-ai-configuration",
+      "name": "AI 执行器",
+      "icon": "RobotOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-ai-configuration.executors",
+      "routePath": "/ai-executors",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 3,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.ai_executors.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-ai-configuration.executor-tasks",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-ai-configuration",
+      "name": "执行器任务",
+      "icon": "FileSearchOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-ai-configuration.executor-tasks",
+      "routePath": "/ai-executor-tasks",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 4,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.ai_executor_tasks.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-audit-management",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "审计中心",
+      "icon": "FileSearchOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 70,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-audit-management.audit-logs",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-audit-management",
+      "name": "审计日志",
+      "icon": "FileSearchOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-audit-management.audit-logs",
+      "routePath": "/audit-logs",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.audit.view"
+        ],
+        "agency": [
+          "agency.audit.view"
+        ],
+        "enterprise": [
+          "enterprise.audit.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-audit-management.login-logs",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-audit-management",
+      "name": "登录日志",
+      "icon": "LoginOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-audit-management.login-logs",
+      "routePath": "/login-logs",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.login_logs.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-identity-management",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "身份管理",
+      "icon": "TeamOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 20,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-identity-management.members",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-identity-management",
+      "name": "用户管理",
+      "icon": "TeamOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-identity-management.members",
+      "routePath": "/members",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.members.view"
+        ],
+        "agency": [
+          "agency.members.view"
+        ],
+        "enterprise": [
+          "enterprise.members.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-identity-management.invitations",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-identity-management",
+      "name": "邀请管理",
+      "icon": "UsergroupAddOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-identity-management.invitations",
+      "routePath": "/invitations",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.invitations.view"
+        ],
+        "agency": [
+          "agency.invitations.view"
+        ],
+        "enterprise": [
+          "enterprise.invitations.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "ky-matrix-account.root",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "矩阵账号",
+      "icon": "AppstoreOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 10,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "ky-matrix-account.douyin",
+      "nodeType": "leaf",
+      "parentKey": "ky-matrix-account.root",
+      "name": "抖音账号",
+      "icon": "AppstoreOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-matrix-account.douyin",
+      "routePath": "/workbench/matrix-accounts/douyin",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.matrix_accounts.view"
+        ],
+        "agency": [
+          "agency.matrix_accounts.view"
+        ],
+        "enterprise": [
+          "enterprise.matrix_accounts.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "ky-matrix-account.kuaishou",
+      "nodeType": "leaf",
+      "parentKey": "ky-matrix-account.root",
+      "name": "快手账号",
+      "icon": "AppstoreOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-matrix-account.kuaishou",
+      "routePath": "/workbench/matrix-accounts/kuaishou",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.matrix_accounts.view"
+        ],
+        "agency": [
+          "agency.matrix_accounts.view"
+        ],
+        "enterprise": [
+          "enterprise.matrix_accounts.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "ky-matrix-account.xiaohongshu",
+      "nodeType": "leaf",
+      "parentKey": "ky-matrix-account.root",
+      "name": "小红书账号",
+      "icon": "AppstoreOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-matrix-account.xiaohongshu",
+      "routePath": "/workbench/matrix-accounts/xiaohongshu",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 2,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.matrix_accounts.view"
+        ],
+        "agency": [
+          "agency.matrix_accounts.view"
+        ],
+        "enterprise": [
+          "enterprise.matrix_accounts.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-notification",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "通知中心",
+      "icon": "BellOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 40,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-notification.notifications",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-notification",
+      "name": "通知",
+      "icon": "BellOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-notification.notifications",
+      "routePath": "/notifications",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.notifications.view"
+        ],
+        "agency": [
+          "agency.notifications.view"
+        ],
+        "enterprise": [
+          "enterprise.notifications.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-notification.announcements",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-notification",
+      "name": "公告管理",
+      "icon": "NotificationOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-notification.announcements",
+      "routePath": "/announcements",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.announcements.view"
+        ],
+        "agency": [
+          "agency.announcements.view"
+        ],
+        "enterprise": [
+          "enterprise.announcements.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-organization-management",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "组织管理",
+      "icon": "BankOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 10,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.agencies",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "机构管理",
+      "icon": "BankOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-organization-management.agencies",
+      "routePath": "/agencies",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.agencies.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.enterprises",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "企业管理",
+      "icon": "ShopOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-organization-management.enterprises",
+      "routePath": "/enterprises",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.enterprises.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.qualifications",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "资质审核",
+      "icon": "SafetyCertificateOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-organization-management.qualifications",
+      "routePath": "/qualifications",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 2,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.qualifications.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.qualification-submit",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "资质提交",
+      "icon": "SafetyCertificateOutlined",
+      "workspaceTypes": [
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-organization-management.qualification-submit",
+      "routePath": "/qualification-submit",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 3,
+      "permissionCode": "",
+      "permissionBindings": {
+        "agency": [
+          "agency.qualification.view"
+        ],
+        "enterprise": [
+          "enterprise.qualification.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.current-organization",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "当前组织",
+      "icon": "IdcardOutlined",
+      "workspaceTypes": [
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-organization-management.current-organization",
+      "routePath": "/current-organization",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 4,
+      "permissionCode": "",
+      "permissionBindings": {
+        "agency": [
+          "agency.profile.view"
+        ],
+        "enterprise": [
+          "enterprise.profile.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.departments",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "部门管理",
+      "icon": "ApartmentOutlined",
+      "workspaceTypes": [
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-organization-management.departments",
+      "routePath": "/departments",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 5,
+      "permissionCode": "",
+      "permissionBindings": {
+        "agency": [
+          "agency.departments.view"
+        ],
+        "enterprise": [
+          "enterprise.departments.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-organization-management.teams",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-organization-management",
+      "name": "团队管理",
+      "icon": "TeamOutlined",
+      "workspaceTypes": [
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-organization-management.teams",
+      "routePath": "/teams",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 6,
+      "permissionCode": "",
+      "permissionBindings": {
+        "agency": [
+          "agency.teams.view"
+        ],
+        "enterprise": [
+          "enterprise.teams.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-script-management",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "脚本管理",
+      "icon": "CodeOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 82,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-script-management.douyin",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-script-management",
+      "name": "抖店脚本",
+      "icon": "CodeOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-script-management.douyin",
+      "routePath": "/script-management/douyin-scripts",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.matrix_account_douyin_scripts.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "group.ky-system-settings",
+      "nodeType": "group",
+      "parentKey": null,
+      "name": "系统设置",
+      "icon": "ApiOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": null,
+      "routePath": null,
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 60,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-system-settings.plugins",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-system-settings",
+      "name": "插件管理",
+      "icon": "ApiOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-system-settings.plugins",
+      "routePath": "/system/plugins",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.plugin_management.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "management",
+      "menuKey": "ky-system-settings.hub",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-system-settings",
+      "name": "系统配置",
+      "icon": "SettingOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "ky-system-settings.hub",
+      "routePath": "/system",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.settings.view",
+          "platform.appearance.view",
+          "platform.dictionaries.view",
+          "platform.basic_info.view",
+          "platform.notification_templates.view",
+          "platform.storage.view",
+          "platform.sms.view",
+          "platform.email.view",
+          "platform.app_version.view"
+        ],
+        "agency": [
+          "agency.settings.view"
+        ],
+        "enterprise": [
+          "enterprise.settings.view"
+        ]
+      }
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "workbench.overview",
+      "nodeType": "leaf",
+      "parentKey": null,
+      "name": "概览",
+      "icon": "AppstoreOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "workbench.overview",
+      "routePath": "/workbench",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 0,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "workbench.todos",
+      "nodeType": "leaf",
+      "parentKey": null,
+      "name": "待办事项",
+      "icon": "BookOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "workbench.todos",
+      "routePath": "/workbench/todos",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 1,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "workbench.messages",
+      "nodeType": "leaf",
+      "parentKey": null,
+      "name": "我的消息",
+      "icon": "BellOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "workbench.messages",
+      "routePath": "/workbench/messages",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 2,
+      "permissionCode": "",
+      "permissionBindings": {}
+    },
+    {
+      "directoryType": "workbench",
+      "menuKey": "workbench.shortcuts",
+      "nodeType": "leaf",
+      "parentKey": null,
+      "name": "快捷入口",
+      "icon": "StarOutlined",
+      "workspaceTypes": [
+        "platform",
+        "agency",
+        "enterprise"
+      ],
+      "routeKey": "workbench.shortcuts",
+      "routePath": "/workbench/shortcuts",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 3,
+      "permissionCode": "",
+      "permissionBindings": {}
+    }
+  ]
+}

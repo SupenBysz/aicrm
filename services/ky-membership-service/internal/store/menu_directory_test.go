@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidateMenuEntryInput(t *testing.T) {
-	route := "access.roles"
+	route := "ky-access-management.roles"
 	base := MenuEntryInput{MenuEntry: MenuEntry{DirectoryType: "management", MenuKey: "access.roles", NodeType: "leaf", Name: "Roles", PermissionCode: "platform.roles.view", WorkspaceTypes: []string{"platform"}, RouteKey: &route, PageType: "internal", Status: "active"}}
 	if err := ValidateMenuEntryInput(base); err != nil {
 		t.Fatalf("valid internal menu rejected: %v", err)
@@ -36,6 +36,13 @@ func TestValidateMenuEntryInput(t *testing.T) {
 	bad.ExpectedRevision = int64Pointer(-1)
 	if ValidateMenuEntryInput(bad) == nil {
 		t.Fatal("negative revision must be rejected")
+	}
+}
+
+func TestRegisteredMenuPermissionCodeSyntax(t *testing.T) {
+	in := MenuEntryInput{MenuEntry: MenuEntry{DirectoryType: "workbench", MenuKey: "test.web", NodeType: "leaf", Name: "Web", PermissionCode: "menu.platform.matrix_accounts", WorkspaceTypes: []string{"platform"}, PageType: "webview", Status: "active"}}
+	if err := ValidateMenuEntryInput(in); err != nil {
+		t.Fatalf("existing menu.* permission rejected: %v", err)
 	}
 }
 

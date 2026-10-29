@@ -78,6 +78,25 @@ func TestMenuWebViewRuntimeAuthorizationPostgresIntegration(t *testing.T) {
 	if _, err := store.ResolveMenuWebViewRuntimeConfig(ctx, "membership_authorized", "platform", "other_workspace", "management", "test.web"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("workspace mismatch returned config: %v", err)
 	}
+	for _, statement := range []string{
+		`ALTER TABLE ky_menu_directory ADD COLUMN permission_bindings jsonb NOT NULL DEFAULT '{}'::jsonb`,
+		`INSERT INTO ky_permission VALUES('p_bound','menu.platform.bound','menu','normal')`,
+		`UPDATE ky_menu_directory SET permission_bindings='{"platform":["menu.platform.bound"]}'::jsonb WHERE menu_key='test.web'`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.ResolveMenuWebViewRuntimeConfig(ctx, "membership_authorized", "platform", "platform_root", "management", "test.web"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("legacy permission bypassed explicit binding: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO ky_role_permission VALUES('role_menu','p_bound')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ResolveMenuWebViewRuntimeConfig(ctx, "membership_authorized", "platform", "platform_root", "management", "test.web"); err != nil {
+		t.Fatalf("explicit workspace binding rejected: %v", err)
+	}
+
 	if _, err := db.ExecContext(ctx, `UPDATE ky_menu_directory SET status='disabled' WHERE menu_key='test.web'`); err != nil {
 		t.Fatal(err)
 	}

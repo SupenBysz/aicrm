@@ -40,7 +40,7 @@ func (s *Store) ResolveMenuWebViewRuntimeConfig(ctx context.Context, membershipI
 		), authorized AS (
 			SELECT 1
 			FROM ky_menu_directory d
-			JOIN ky_permission p ON p.code=d.permission_code AND p.category='menu' AND p.status='normal'
+			JOIN ky_permission p ON p.category='menu' AND p.status='normal' AND (CASE WHEN COALESCE(to_jsonb(d)->'permission_bindings','{}'::jsonb) ? $3::text THEN COALESCE(to_jsonb(d)->'permission_bindings'->$3::text,'[]'::jsonb) ? p.code ELSE p.code=d.permission_code END)
 			JOIN ky_role_permission rp ON rp.permission_id=p.id
 			JOIN ky_role r ON r.id=rp.role_id AND r.status='normal' AND r.deleted_at IS NULL
 			JOIN ky_membership_role mr ON mr.role_id=r.id

@@ -105,6 +105,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/matrix-account-login-attempts/{id}/step-results", s.ws("login", s.submitLoginAttemptStepResult))
 
 	mux.HandleFunc("GET /api/v1/matrix-account-douyin-scripts", s.wsAny([]string{"platform.matrix_account_douyin_scripts.view"}, s.listDouyinScripts))
+	mux.HandleFunc("GET /api/v1/matrix-account-douyin-scripts/menu-resource-options", s.wsAny([]string{"platform.menu_catalog.view", "platform.menu_catalog.manage"}, s.listMenuResourceOptions))
 	mux.HandleFunc("GET /api/v1/matrix-account-douyin-scripts/runtime-candidates", s.wsAny([]string{"platform.matrix_account_douyin_scripts.content_view"}, s.listDouyinRuntimeCandidates))
 	mux.HandleFunc("POST /api/v1/script-runtime/resolve", s.wsAny([]string{"matrix_account_scripts.content_view", "platform.matrix_account_douyin_scripts.content_view"}, s.resolveScriptRuntime))
 	mux.HandleFunc("POST /api/v1/menu-webviews/{directoryType}/{menuKey}/runtime-resolve", s.wsAny(nil, s.resolveMenuWebViewRuntime))

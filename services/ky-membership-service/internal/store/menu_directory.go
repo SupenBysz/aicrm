@@ -4,26 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/Kysion/KyaiCRM/shared/menucatalog"
 	"net/url"
 	"regexp"
 	"strings"
 )
 
 type MenuEntry struct {
-	DirectoryType  string   `json:"directoryType"`
-	MenuKey        string   `json:"menuKey"`
-	NodeType       string   `json:"nodeType"`
-	ParentKey      *string  `json:"parentKey,omitempty"`
-	Name           string   `json:"name"`
-	Icon           string   `json:"icon"`
-	PermissionCode string   `json:"permissionCode"`
-	WorkspaceTypes []string `json:"workspaceTypes"`
-	RouteKey       *string  `json:"routeKey,omitempty"`
-	RoutePath      *string  `json:"routePath,omitempty"`
-	PageType       string   `json:"pageType"`
-	Status         string   `json:"status"`
-	SortOrder      int      `json:"sortOrder"`
-	Revision       int64    `json:"revision"`
+	UsageScope         string              `json:"usageScope"`
+	PermissionBindings map[string][]string `json:"permissionBindings"`
+	SourceVersion      int                 `json:"sourceVersion"`
+	DirectoryType      string              `json:"directoryType"`
+	MenuKey            string              `json:"menuKey"`
+	NodeType           string              `json:"nodeType"`
+	ParentKey          *string             `json:"parentKey,omitempty"`
+	Name               string              `json:"name"`
+	Icon               string              `json:"icon"`
+	PermissionCode     string              `json:"permissionCode"`
+	WorkspaceTypes     []string            `json:"workspaceTypes"`
+	RouteKey           *string             `json:"routeKey,omitempty"`
+	RoutePath          *string             `json:"routePath,omitempty"`
+	PageType           string              `json:"pageType"`
+	Status             string              `json:"status"`
+	SortOrder          int                 `json:"sortOrder"`
+	Revision           int64               `json:"revision"`
 }
 
 type MenuEntryInput struct {
@@ -56,18 +60,19 @@ type MenuResourceRef struct {
 }
 
 type MenuWebViewConfigInput struct {
-	Platform         string            `json:"platform"`
-	DefaultURL       string            `json:"defaultUrl"`
-	OpenMode         string            `json:"openMode"`
-	Protocols        []string          `json:"navigationProtocols"`
-	Scripts          []MenuResourceRef `json:"scripts"`
-	Styles           []MenuResourceRef `json:"styles"`
-	ScheduleMode     string            `json:"scheduleMode"`
-	ExpectedRevision *int64            `json:"expectedRevision"`
+	ExpectedScopeRevision *int64            `json:"expectedScopeRevision"`
+	Platform              string            `json:"platform"`
+	DefaultURL            string            `json:"defaultUrl"`
+	OpenMode              string            `json:"openMode"`
+	Protocols             []string          `json:"navigationProtocols"`
+	Scripts               []MenuResourceRef `json:"scripts"`
+	Styles                []MenuResourceRef `json:"styles"`
+	ScheduleMode          string            `json:"scheduleMode"`
+	ExpectedRevision      *int64            `json:"expectedRevision"`
 }
 
 var menuKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
-var menuPermissionPattern = regexp.MustCompile(`^(platform|agency|enterprise)\.[a-z][a-z0-9_.-]{0,127}$`)
+var menuPermissionPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,191}$`)
 var menuIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`)
 var menuVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 var menuRoutePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
@@ -77,7 +82,7 @@ var menuPlatformPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 func ValidMenuDirectoryType(value string) bool { return value == "management" || value == "workbench" }
 
 func ValidateMenuEntryInput(in MenuEntryInput) error {
-	if !ValidMenuDirectoryType(in.DirectoryType) || !menuKeyPattern.MatchString(in.MenuKey) || (in.NodeType != "group" && in.NodeType != "leaf") || strings.TrimSpace(in.Name) == "" || len([]rune(in.Name)) > 80 || !menuPermissionPattern.MatchString(in.PermissionCode) {
+	if !ValidMenuDirectoryType(in.DirectoryType) || !menuKeyPattern.MatchString(in.MenuKey) || (in.NodeType != "group" && in.NodeType != "leaf") || strings.TrimSpace(in.Name) == "" || len([]rune(in.Name)) > 80 || (in.PermissionCode != "" && !menuPermissionPattern.MatchString(in.PermissionCode)) {
 		return ErrValidation
 	}
 	if in.PageType != "internal" && in.PageType != "webview" || in.Status != "active" && in.Status != "disabled" || in.SortOrder < -100000 || in.SortOrder > 100000 {
@@ -95,7 +100,7 @@ func ValidateMenuEntryInput(in MenuEntryInput) error {
 	if in.NodeType == "leaf" && in.PageType == "internal" && (in.RouteKey == nil || strings.TrimSpace(*in.RouteKey) == "") {
 		return ErrValidation
 	}
-	if in.RouteKey != nil && !menuRoutePattern.MatchString(*in.RouteKey) {
+	if in.RouteKey != nil && (!menuRoutePattern.MatchString(*in.RouteKey) || (in.PageType == "internal" && !menucatalog.InternalRouteAllowed(in.DirectoryType, *in.RouteKey))) {
 		return ErrValidation
 	}
 	if in.RoutePath != nil && (!strings.HasPrefix(*in.RoutePath, "/") || strings.HasPrefix(*in.RoutePath, "//") || strings.ContainsAny(*in.RoutePath, "?#\\\\") || strings.Contains(*in.RoutePath, "..")) {
@@ -166,13 +171,18 @@ func ValidateMenuWebViewConfig(in MenuWebViewConfigInput) error {
 	return nil
 }
 
-const menuEntryColumns = `directory_type,menu_key,node_type,parent_key,name,icon,permission_code,workspace_types,route_key,route_path,page_type,status,sort_order,revision`
+const menuEntryColumns = `directory_type,menu_key,node_type,parent_key,name,icon,permission_code,workspace_types,route_key,route_path,page_type,status,sort_order,revision,permission_bindings,source_version`
 
 func scanMenuEntry(row interface{ Scan(...any) error }) (MenuEntry, error) {
 	var m MenuEntry
-	var workspaceJSON []byte
-	err := row.Scan(&m.DirectoryType, &m.MenuKey, &m.NodeType, &m.ParentKey, &m.Name, &m.Icon, &m.PermissionCode, &workspaceJSON, &m.RouteKey, &m.RoutePath, &m.PageType, &m.Status, &m.SortOrder, &m.Revision)
+	var workspaceJSON, bindingJSON []byte
+	err := row.Scan(&m.DirectoryType, &m.MenuKey, &m.NodeType, &m.ParentKey, &m.Name, &m.Icon, &m.PermissionCode, &workspaceJSON, &m.RouteKey, &m.RoutePath, &m.PageType, &m.Status, &m.SortOrder, &m.Revision, &bindingJSON, &m.SourceVersion)
 	if err == nil {
+		m.UsageScope = "browser_and_client"
+		if m.PageType == "webview" {
+			m.UsageScope = "client_only"
+		}
+		_ = json.Unmarshal(bindingJSON, &m.PermissionBindings)
 		if json.Unmarshal(workspaceJSON, &m.WorkspaceTypes) != nil || m.WorkspaceTypes == nil {
 			m.WorkspaceTypes = []string{}
 		}
@@ -188,7 +198,11 @@ func (s *Store) ListMenuDirectory(ctx context.Context, directory, workspaceType 
 	if includeDisabled {
 		status = "status IN ('active','disabled')"
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+menuEntryColumns+` FROM ky_menu_directory WHERE directory_type=$1 AND `+status+` AND workspace_types @> $2::jsonb ORDER BY sort_order,menu_key`, directory, `["`+workspaceType+`"]`)
+	workspaceFilter := `["` + workspaceType + `"]`
+	if workspaceType == "all" {
+		workspaceFilter = "[]"
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+menuEntryColumns+` FROM ky_menu_directory WHERE directory_type=$1 AND `+status+` AND workspace_types @> $2::jsonb ORDER BY sort_order,menu_key`, directory, workspaceFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -227,13 +241,57 @@ func (s *Store) SaveMenuEntry(ctx context.Context, in MenuEntryInput, actor stri
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('ky_menu_directory'),hashtext($1))`, in.DirectoryType); err != nil {
 		return MenuEntry{}, err
 	}
-	var permissionCount int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_permission WHERE code=$1 AND category='menu' AND status='normal' AND workspace_types @> $2::jsonb`, in.PermissionCode, workspaceJSON).Scan(&permissionCount); err != nil {
-		return MenuEntry{}, err
-	}
-	if permissionCount != 1 {
+	if in.NodeType == "leaf" && in.PageType == "webview" && in.PermissionCode == "" && len(in.PermissionBindings) == 0 {
 		return MenuEntry{}, ErrValidation
 	}
+	if in.PermissionCode != "" && len(in.PermissionBindings) == 0 {
+		var permissionCount int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_permission WHERE code=$1 AND category='menu' AND status='normal' AND workspace_types @> $2::jsonb`, in.PermissionCode, workspaceJSON).Scan(&permissionCount); err != nil {
+			return MenuEntry{}, err
+		}
+		if permissionCount != 1 {
+			return MenuEntry{}, ErrValidation
+		}
+	}
+	// Internal bindings are supplied by the trusted route manifest, not by the renderer.
+	bindings := map[string][]string{}
+	if in.NodeType == "leaf" && in.PageType == "internal" {
+		for _, entry := range menucatalog.Entries() {
+			if entry.DirectoryType == in.DirectoryType && entry.RouteKey != nil && in.RouteKey != nil && *entry.RouteKey == *in.RouteKey {
+				bindings = entry.PermissionBindings
+				in.RoutePath = entry.RoutePath
+				break
+			}
+		}
+	}
+	if in.NodeType == "leaf" && in.PageType == "webview" && len(in.PermissionBindings) > 0 {
+		if len(in.PermissionBindings) != len(in.WorkspaceTypes) {
+			return MenuEntry{}, ErrValidation
+		}
+		for _, workspace := range in.WorkspaceTypes {
+			codes := in.PermissionBindings[workspace]
+			if len(codes) == 0 || len(codes) > 8 {
+				return MenuEntry{}, ErrValidation
+			}
+			seen := map[string]bool{}
+			for _, code := range codes {
+				if !menuPermissionPattern.MatchString(code) || seen[code] {
+					return MenuEntry{}, ErrValidation
+				}
+				seen[code] = true
+				var count int
+				if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_permission WHERE code=$1 AND category='menu' AND status='normal' AND workspace_types @> jsonb_build_array($2::text)`, code, workspace).Scan(&count); err != nil {
+					return MenuEntry{}, err
+				}
+				if count != 1 {
+					return MenuEntry{}, ErrValidation
+				}
+			}
+			bindings[workspace] = append([]string{}, codes...)
+		}
+		in.PermissionCode = ""
+	}
+	bindingJSON, _ := json.Marshal(bindings)
 	workspaceSet := map[string]bool{}
 	for _, value := range in.WorkspaceTypes {
 		workspaceSet[value] = true
@@ -317,10 +375,10 @@ func (s *Store) SaveMenuEntry(ctx context.Context, in MenuEntryInput, actor stri
 		}
 	}
 	if in.ExpectedRevision == nil || *in.ExpectedRevision == 0 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO ky_menu_directory (`+menuEntryColumns+`,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,$14)`, in.DirectoryType, in.MenuKey, in.NodeType, in.ParentKey, strings.TrimSpace(in.Name), in.Icon, in.PermissionCode, workspaceJSON, in.RouteKey, in.RoutePath, in.PageType, in.Status, in.SortOrder, actor)
+		_, err = tx.ExecContext(ctx, `INSERT INTO ky_menu_directory (`+menuEntryColumns+`,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1,$14,0,$15,$15)`, in.DirectoryType, in.MenuKey, in.NodeType, in.ParentKey, strings.TrimSpace(in.Name), in.Icon, in.PermissionCode, workspaceJSON, in.RouteKey, in.RoutePath, in.PageType, in.Status, in.SortOrder, bindingJSON, actor)
 	} else {
 		var result sql.Result
-		result, err = tx.ExecContext(ctx, `UPDATE ky_menu_directory SET node_type=$3,parent_key=$4,name=$5,icon=$6,permission_code=$7,workspace_types=$8,route_key=$9,route_path=$10,page_type=$11,status=$12,sort_order=$13,revision=revision+1,updated_by=$14,updated_at=now() WHERE directory_type=$1 AND menu_key=$2 AND revision=$15`, in.DirectoryType, in.MenuKey, in.NodeType, in.ParentKey, strings.TrimSpace(in.Name), in.Icon, in.PermissionCode, workspaceJSON, in.RouteKey, in.RoutePath, in.PageType, in.Status, in.SortOrder, actor, *in.ExpectedRevision)
+		result, err = tx.ExecContext(ctx, `UPDATE ky_menu_directory SET node_type=$3,parent_key=$4,name=$5,icon=$6,permission_code=$7,workspace_types=$8,route_key=$9,route_path=$10,page_type=$11,status=$12,sort_order=$13,revision=revision+1,updated_by=$14,updated_at=now(),permission_bindings=$16 WHERE directory_type=$1 AND menu_key=$2 AND revision=$15`, in.DirectoryType, in.MenuKey, in.NodeType, in.ParentKey, strings.TrimSpace(in.Name), in.Icon, in.PermissionCode, workspaceJSON, in.RouteKey, in.RoutePath, in.PageType, in.Status, in.SortOrder, actor, *in.ExpectedRevision, bindingJSON)
 		if err == nil {
 			var affected int64
 			affected, err = result.RowsAffected()
@@ -379,16 +437,25 @@ func (s *Store) SaveMenuWebViewConfig(ctx context.Context, directory, key, works
 		workspaceType = "platform"
 		workspaceID = "*"
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return MenuWebViewConfig{}, err
+	}
+	defer tx.Rollback()
+	next, err := lockMenuScope(ctx, tx, directory, key, workspaceType, workspaceID, scope, in.ExpectedScopeRevision)
+	if err != nil {
+		return MenuWebViewConfig{}, err
+	}
 	protocolJSON, _ := json.Marshal(in.Protocols)
 	scriptsJSON, _ := json.Marshal(in.Scripts)
 	stylesJSON, _ := json.Marshal(in.Styles)
 	if in.ExpectedRevision == nil || *in.ExpectedRevision == 0 {
-		_, err := s.db.ExecContext(ctx, `INSERT INTO ky_menu_webview_config(directory_type,menu_key,config_scope,workspace_type,workspace_id,platform,default_url,open_mode,navigation_protocols,script_bindings,style_bindings,schedule_mode,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)`, directory, key, scope, workspaceType, workspaceID, in.Platform, in.DefaultURL, in.OpenMode, protocolJSON, scriptsJSON, stylesJSON, in.ScheduleMode, actor)
+		_, err := tx.ExecContext(ctx, `INSERT INTO ky_menu_webview_config(directory_type,menu_key,config_scope,workspace_type,workspace_id,platform,default_url,open_mode,navigation_protocols,script_bindings,style_bindings,schedule_mode,revision,created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$14,$13,$13)`, directory, key, scope, workspaceType, workspaceID, in.Platform, in.DefaultURL, in.OpenMode, protocolJSON, scriptsJSON, stylesJSON, in.ScheduleMode, actor, next)
 		if err != nil {
 			return MenuWebViewConfig{}, classifyWriteErr(err)
 		}
 	} else {
-		res, err := s.db.ExecContext(ctx, `UPDATE ky_menu_webview_config SET platform=$6,default_url=$7,open_mode=$8,navigation_protocols=$9,script_bindings=$10,style_bindings=$11,schedule_mode=$12,revision=revision+1,updated_by=$13,updated_at=now() WHERE directory_type=$1 AND menu_key=$2 AND config_scope=$3 AND workspace_type=$4 AND workspace_id=$5 AND revision=$14`, directory, key, scope, workspaceType, workspaceID, in.Platform, in.DefaultURL, in.OpenMode, protocolJSON, scriptsJSON, stylesJSON, in.ScheduleMode, actor, *in.ExpectedRevision)
+		res, err := tx.ExecContext(ctx, `UPDATE ky_menu_webview_config SET platform=$6,default_url=$7,open_mode=$8,navigation_protocols=$9,script_bindings=$10,style_bindings=$11,schedule_mode=$12,revision=revision+1,updated_by=$13,updated_at=now() WHERE directory_type=$1 AND menu_key=$2 AND config_scope=$3 AND workspace_type=$4 AND workspace_id=$5 AND revision=$14`, directory, key, scope, workspaceType, workspaceID, in.Platform, in.DefaultURL, in.OpenMode, protocolJSON, scriptsJSON, stylesJSON, in.ScheduleMode, actor, *in.ExpectedRevision)
 		if err != nil {
 			return MenuWebViewConfig{}, classifyWriteErr(err)
 		}
@@ -396,6 +463,12 @@ func (s *Store) SaveMenuWebViewConfig(ctx context.Context, directory, key, works
 		if n == 0 {
 			return MenuWebViewConfig{}, ErrConflict
 		}
+	}
+	if err = advanceMenuScope(ctx, tx, directory, key, workspaceType, workspaceID, scope, actor, "saved", next); err != nil {
+		return MenuWebViewConfig{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return MenuWebViewConfig{}, err
 	}
 	return s.getMenuWebViewConfigAtScope(ctx, directory, key, scope, workspaceType, workspaceID)
 }
@@ -443,4 +516,26 @@ func (s *Store) GetMenuWebViewConfig(ctx context.Context, directory, key, worksp
 	_ = json.Unmarshal(scripts, &m.Scripts)
 	_ = json.Unmarshal(styles, &m.Styles)
 	return m, nil
+}
+
+// MenuEntryAllowed evaluates explicit workspace bindings without guessing code prefixes.
+// Empty trusted bindings mean a signed-in built-in utility page, never a custom WebView.
+func MenuEntryAllowed(entry MenuEntry, workspaceType string, allowed map[string]bool) bool {
+	if codes, ok := entry.PermissionBindings[workspaceType]; ok {
+		for _, code := range codes {
+			if allowed[code] {
+				return true
+			}
+		}
+		return false
+	}
+	if entry.SourceVersion > 0 && entry.NodeType == "leaf" && entry.PageType == "internal" && len(entry.PermissionBindings) == 0 {
+		return true
+	}
+	return entry.PermissionCode != "" && allowed[entry.PermissionCode]
+}
+func (s *Store) MenuCatalogReady(ctx context.Context) (bool, error) {
+	var ready bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ky_menu_catalog_baseline WHERE version=1)`).Scan(&ready)
+	return ready, err
 }

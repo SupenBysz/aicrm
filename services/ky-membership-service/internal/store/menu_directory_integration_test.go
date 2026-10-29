@@ -67,6 +67,18 @@ func TestMenuDirectoryPostgresIntegration(t *testing.T) {
 			t.Fatalf("apply migration 107 run %d: %v", run+1, err)
 		}
 	}
+	for _, version := range []string{"108_menu_catalog_baseline.sql", "109_menu_webview_scope_revision.sql"} {
+		migration, err := os.ReadFile(filepath.Join("../../../../ops/db", version))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for run := 0; run < 2; run++ {
+			if _, err = db.ExecContext(ctx, string(migration)); err != nil {
+				t.Fatal("apply", version, err)
+			}
+		}
+	}
+
 	store := &Store{db: db}
 	var revisionDefault int64
 	if err := db.QueryRowContext(ctx, `SELECT permission_revision FROM ky_role WHERE id='role_platform_owner'`).Scan(&revisionDefault); err != nil || revisionDefault != 1 {
@@ -163,7 +175,22 @@ func TestMenuDirectoryPostgresIntegration(t *testing.T) {
 		t.Fatalf("concurrent cycle result accepted=%d rejected=%d", accepted, rejected)
 	}
 
-	config := MenuWebViewConfigInput{Platform: "web", DefaultURL: "https://example.test/start", OpenMode: "embedded", Protocols: []string{"https"}, Scripts: []MenuResourceRef{}, Styles: []MenuResourceRef{}, ScheduleMode: "page_first"}
+	boundEntry := MenuEntryInput{MenuEntry: MenuEntry{DirectoryType: "workbench", MenuKey: "bound.web", NodeType: "leaf", Name: "多工作区网页", WorkspaceTypes: []string{"platform", "agency"}, PageType: "webview", Status: "active", PermissionBindings: map[string][]string{"platform": {"platform.test.menu.view"}, "agency": {"platform.test.menu.view"}}}}
+	savedBound, err := store.SaveMenuEntry(ctx, boundEntry, "actor")
+	if err != nil || len(savedBound.PermissionBindings) != 2 || savedBound.PermissionCode != "" {
+		t.Fatalf("workspace bindings not persisted: %#v %v", savedBound, err)
+	}
+	if !MenuEntryAllowed(savedBound, "platform", map[string]bool{"platform.test.menu.view": true}) || MenuEntryAllowed(savedBound, "agency", map[string]bool{}) {
+		t.Fatal("explicit bindings widened authorization")
+	}
+	badBound := boundEntry
+	badBound.MenuKey = "invalid.bound"
+	badBound.PermissionBindings = map[string][]string{"platform": {"platform.test.menu.view"}}
+	if _, err := store.SaveMenuEntry(ctx, badBound, "actor"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("partial workspace binding accepted: %v", err)
+	}
+
+	config := MenuWebViewConfigInput{ExpectedScopeRevision: int64Pointer(0), Platform: "web", DefaultURL: "https://example.test/start", OpenMode: "embedded", Protocols: []string{"https"}, Scripts: []MenuResourceRef{}, Styles: []MenuResourceRef{}, ScheduleMode: "page_first"}
 	common, err := store.SaveMenuWebViewConfig(ctx, "management", webEntry.MenuKey, "platform", "platform_root", "common", config, "actor")
 	if err != nil {
 		t.Fatal("create common config:", err)
@@ -174,12 +201,14 @@ func TestMenuDirectoryPostgresIntegration(t *testing.T) {
 	}
 	workspaceConfig := config
 	workspaceConfig.DefaultURL = "https://example.test/workspace"
+	workspaceConfig.ExpectedScopeRevision = int64Pointer(1)
 	workspaceConfig.ExpectedRevision = int64Pointer(workspace.Revision)
 	workspace, err = store.SaveMenuWebViewConfig(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "workspace", workspaceConfig, "actor")
 	if err != nil || workspace.Revision != 2 {
 		t.Fatalf("workspace config CAS: revision=%d err=%v", workspace.Revision, err)
 	}
 	config.DefaultURL = "https://example.test/common-v2"
+	config.ExpectedScopeRevision = int64Pointer(1)
 	config.ExpectedRevision = int64Pointer(common.Revision)
 	common, err = store.SaveMenuWebViewConfig(ctx, "management", webEntry.MenuKey, "platform", "platform_root", "common", config, "actor")
 	if err != nil || common.Revision != 2 {
@@ -193,6 +222,49 @@ func TestMenuDirectoryPostgresIntegration(t *testing.T) {
 	if err != nil || !inherited.Inherited || inherited.Revision != 2 || inherited.DefaultURL != "https://example.test/common-v2" {
 		t.Fatalf("common inheritance/revision: %#v err=%v", inherited, err)
 	}
+	editor, err := store.GetMenuConfigEditor(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "workspace")
+	if err != nil || !editor.HasOverride || editor.ScopeRevision != 2 {
+		t.Fatalf("editor snapshot: %#v %v", editor, err)
+	}
+	if err = store.ResetMenuWorkspaceConfig(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "actor", editor.ScopeRevision); err != nil {
+		t.Fatal(err)
+	}
+	resetEditor, err := store.GetMenuConfigEditor(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "workspace")
+	if err != nil || resetEditor.HasOverride || resetEditor.ScopeRevision != 3 || resetEditor.Config == nil || !resetEditor.Config.Inherited {
+		t.Fatalf("reset inheritance: %#v %v", resetEditor, err)
+	}
+	if _, err = store.SaveMenuWebViewConfig(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "workspace", workspaceConfig, "actor"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("late write after reset: %v", err)
+	}
+	recreated := workspaceConfig
+	recreated.ExpectedRevision = nil
+	recreated.ExpectedScopeRevision = int64Pointer(3)
+	if _, err = store.SaveMenuWebViewConfig(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "workspace", recreated, "actor"); err != nil {
+		t.Fatal("recreate", err)
+	}
+	if err = store.ResetMenuWorkspaceConfig(ctx, "management", webEntry.MenuKey, "agency", "agency_one", "actor", 2); !errors.Is(err, ErrConflict) {
+		t.Fatalf("ABA reset accepted: %v", err)
+	}
+	var eventCount int
+	if err = db.QueryRowContext(ctx, `SELECT count(*) FROM ky_menu_webview_scope_event WHERE menu_key=$1 AND workspace_id='agency_one'`, webEntry.MenuKey).Scan(&eventCount); err != nil || eventCount != 4 {
+		t.Fatalf("atomic audit count=%d err=%v", eventCount, err)
+	}
+	// Repeating a baseline never overwrites administrator metadata.
+	if _, err = db.ExecContext(ctx, `UPDATE ky_menu_directory SET name='自定义名称',status='disabled' WHERE menu_key='ky-access-management.roles'`); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := os.ReadFile(filepath.Join("../../../../ops/db", "108_menu_catalog_baseline.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, string(seed)); err != nil {
+		t.Fatal(err)
+	}
+	preserved, err := store.GetMenuEntry(ctx, "management", "ky-access-management.roles")
+	if err != nil || preserved.Name != "自定义名称" || preserved.Status != "disabled" {
+		t.Fatalf("baseline overwrote administrator: %#v %v", preserved, err)
+	}
+
 	withoutRole, err := store.EffectivePermissions(ctx, "membership_without_menu_role")
 	if err != nil || len(withoutRole.MenuKeys) != 0 {
 		t.Fatalf("menu key leaked without role: %#v err=%v", withoutRole, err)
