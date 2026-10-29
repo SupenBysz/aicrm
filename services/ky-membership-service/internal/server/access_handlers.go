@@ -194,7 +194,13 @@ func (s *Server) updateRoleStatus(w http.ResponseWriter, r *http.Request, wc wsC
 }
 
 type rolePermissionsInput struct {
-	PermissionIDs []string `json:"permissionIds"`
+	PermissionIDs    []string `json:"permissionIds"`
+	ExpectedRevision int64    `json:"expectedRevision"`
+}
+
+func rolePermissionsRevision(r *http.Request, in rolePermissionsInput) (int64, bool) {
+	headerRevision, ok := requestExpectedRevision(r)
+	return in.ExpectedRevision, ok && in.ExpectedRevision == headerRevision
 }
 
 func (s *Server) setRolePermissions(w http.ResponseWriter, r *http.Request, wc wsContext) {
@@ -213,7 +219,13 @@ func (s *Server) setRolePermissions(w http.ResponseWriter, r *http.Request, wc w
 			return
 		}
 	}
-	if err := s.store.SetRolePermissions(r.Context(), r.PathValue("id"), wc.WorkspaceType, wc.WorkspaceID, in.PermissionIDs, wc.UserID); err != nil {
+	expectedRevision, ok := rolePermissionsRevision(r, in)
+	if !ok {
+		writeError(w, r, http.StatusPreconditionRequired, "revision_required", "更新角色权限需要匹配的版本号")
+		return
+	}
+	nextRevision, err := s.store.SetRolePermissions(r.Context(), r.PathValue("id"), wc.WorkspaceType, wc.WorkspaceID, in.PermissionIDs, wc.UserID, expectedRevision)
+	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
@@ -221,7 +233,7 @@ func (s *Server) setRolePermissions(w http.ResponseWriter, r *http.Request, wc w
 	if userIDs, err := s.store.UserIDsByRole(r.Context(), r.PathValue("id")); err == nil {
 		s.notifyUsers(r.Context(), wc, userIDs, "权限变更", "您在『{ws}』的角色权限已更新", "permission")
 	}
-	writeData(w, r, map[string]any{"id": r.PathValue("id"), "permissionCount": len(in.PermissionIDs)})
+	writeData(w, r, map[string]any{"id": r.PathValue("id"), "permissionCount": len(in.PermissionIDs), "permissionRevision": nextRevision})
 }
 
 // --- permissions catalog ---

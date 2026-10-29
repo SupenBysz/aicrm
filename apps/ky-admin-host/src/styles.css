@@ -478,6 +478,39 @@ body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.i
   transition: margin-left 0.2s ease;
 }
 
+.workspace-area-route-pane {
+  display: contents;
+}
+
+.workspace-area-route-pane[hidden] {
+  display: none;
+}
+
+.workspace-area-route-overlay-root {
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 1000;
+}
+
+.workspace-area-route-overlay-root > * {
+  pointer-events: auto;
+}
+
+.app-content:has(> .workspace-area-route-pane:not([hidden]) .menu-webview-page) {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+  padding-bottom: 12px;
+  scrollbar-gutter: auto;
+}
+
+.app-content:has(> .workspace-area-route-pane:not([hidden]) .menu-webview-page) .menu-webview-page {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}
+
 .app-content::-webkit-scrollbar {
   width: 8px;
 }
@@ -2576,6 +2609,19 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+button.client-version {
+  border: 0;
+  padding: 0 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+button.client-version:hover,
+button.client-version:focus-visible {
+  color: inherit;
+  background: rgba(127, 127, 127, 0.12);
 }
 
 .desktop-plugin-item { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

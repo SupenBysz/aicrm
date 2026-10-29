@@ -107,6 +107,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/matrix-account-douyin-scripts", s.wsAny([]string{"platform.matrix_account_douyin_scripts.view"}, s.listDouyinScripts))
 	mux.HandleFunc("GET /api/v1/matrix-account-douyin-scripts/runtime-candidates", s.wsAny([]string{"platform.matrix_account_douyin_scripts.content_view"}, s.listDouyinRuntimeCandidates))
 	mux.HandleFunc("POST /api/v1/script-runtime/resolve", s.wsAny([]string{"matrix_account_scripts.content_view", "platform.matrix_account_douyin_scripts.content_view"}, s.resolveScriptRuntime))
+	mux.HandleFunc("POST /api/v1/menu-webviews/{directoryType}/{menuKey}/runtime-resolve", s.wsAny(nil, s.resolveMenuWebViewRuntime))
 	mux.HandleFunc("POST /api/v1/script-runtime/manifest", s.wsAny([]string{"matrix_account_scripts.content_view", "platform.matrix_account_douyin_scripts.content_view"}, s.scriptRuntimeManifest))
 	mux.HandleFunc("POST /api/v1/matrix-account-douyin-scripts", s.wsAny([]string{"platform.matrix_account_douyin_scripts.create"}, s.createDouyinScript))
 	mux.HandleFunc("GET /api/v1/matrix-account-douyin-scripts/{id}", s.wsAny([]string{"platform.matrix_account_douyin_scripts.view"}, s.getDouyinScript))

@@ -188,7 +188,11 @@ func (s *Store) resolveRuntimeAsset(ctx context.Context, req ScriptRuntimeResolv
 	}
 	args := []any{req.WorkspaceType, req.WorkspaceID, req.Platform, selector.Identifier}
 	conditions := []string{"v.script_id=s.id", fmt.Sprintf("v.asset_type='%s'", assetType)}
-	if req.VersionPolicy == "active_only" {
+	versionPolicy := selector.VersionPolicy
+	if versionPolicy == "" {
+		versionPolicy = req.VersionPolicy
+	}
+	if versionPolicy == "active_only" {
 		pointer := "effective_script_asset_version_id"
 		if assetType == "style" {
 			pointer = "effective_style_asset_version_id"
@@ -197,6 +201,10 @@ func (s *Store) resolveRuntimeAsset(ctx context.Context, req ScriptRuntimeResolv
 	} else {
 		// active 是已发布版本的最终状态，latest_released 必须同时读取两种发布态。
 		conditions = append(conditions, "v.status IN ('released','active')")
+	}
+	if selector.VersionID != "" {
+		args = append(args, selector.VersionID)
+		conditions = append(conditions, fmt.Sprintf("v.id=$%d", len(args)))
 	}
 	if selector.Version != "" {
 		args = append(args, selector.Version)

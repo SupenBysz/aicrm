@@ -79,6 +79,9 @@ func validateScriptRuntimeRequest(in store.ScriptRuntimeResolveRequest, wc wsCon
 		if selector.Version != "" && !runtimeVersionPattern.MatchString(selector.Version) {
 			return in, "INVALID_SELECTOR", "脚本或样式版本号无效"
 		}
+		if !validRuntimeSelectorVersion(selector) {
+			return in, "INVALID_SELECTOR", "脚本或样式版本引用无效"
+		}
 	}
 	for _, selector := range selectors {
 		if selector == nil || !runtimeIdentifierPattern.MatchString(selector.Identifier) {
@@ -86,6 +89,9 @@ func validateScriptRuntimeRequest(in store.ScriptRuntimeResolveRequest, wc wsCon
 		}
 		if selector.Version != "" && !runtimeVersionPattern.MatchString(selector.Version) {
 			return in, "INVALID_SELECTOR", "脚本或样式版本号无效"
+		}
+		if !validRuntimeSelectorVersion(selector) {
+			return in, "INVALID_SELECTOR", "脚本或样式版本引用无效"
 		}
 	}
 	selectors = append(selectors, in.Script, in.Style)
@@ -130,11 +136,29 @@ func validateScriptRuntimeRequest(in store.ScriptRuntimeResolveRequest, wc wsCon
 	return in, "", ""
 }
 
+func validRuntimeSelectorVersion(selector *store.RuntimeAssetSelector) bool {
+	if selector == nil || selector.VersionPolicy == "" {
+		return true
+	}
+	switch selector.VersionPolicy {
+	case "pinned":
+		return selector.VersionID != "" && runtimeVersionPattern.MatchString(selector.Version)
+	case "latest_released":
+		return selector.VersionID == "" && selector.Version == ""
+	default:
+		return false
+	}
+}
+
 func (s *Server) resolveScriptRuntime(w http.ResponseWriter, r *http.Request, wc wsContext) {
 	var in store.ScriptRuntimeResolveRequest
 	if !decodeScriptRuntimeJSON(w, r, &in) {
 		return
 	}
+	s.resolveScriptRuntimeRequest(w, r, wc, in, nil)
+}
+
+func (s *Server) resolveScriptRuntimeRequest(w http.ResponseWriter, r *http.Request, wc wsContext, in store.ScriptRuntimeResolveRequest, extra map[string]any) {
 	var code, message string
 	in, code, message = validateScriptRuntimeRequest(in, wc)
 	if code != "" {
@@ -206,7 +230,7 @@ func (s *Server) resolveScriptRuntime(w http.ResponseWriter, r *http.Request, wc
 			return
 		}
 	}
-	if len(items) == 0 && len(publicItems) == 0 && len(publicStyles) == 0 {
+	if len(items) == 0 && len(publicItems) == 0 && len(publicStyles) == 0 && !in.AllowEmptyResult {
 		code, message := scriptRuntimeEmptyResultError(in)
 		writeError(w, r, http.StatusNotFound, code, message)
 		return
@@ -239,11 +263,15 @@ func (s *Server) resolveScriptRuntime(w http.ResponseWriter, r *http.Request, wc
 		}
 		publicItems[index].NetworkCapabilities = capabilities
 	}
-	writeScriptRuntimeData(w, r, scriptRuntimeResponseData(items, publicItems, publicStyles, store.ScriptRuntimeManifestRevision(in, items, publicItems, publicStyles), time.Now().UTC().Format(time.RFC3339Nano)))
+	data := scriptRuntimeResponseData(items, publicItems, publicStyles, store.ScriptRuntimeManifestRevision(in, items, publicItems, publicStyles), time.Now().UTC().Format(time.RFC3339Nano))
+	for key, value := range extra {
+		data[key] = value
+	}
+	writeScriptRuntimeData(w, r, data)
 }
 
 func shouldResolvePublicStyles(in store.ScriptRuntimeResolveRequest) bool {
-	return len(in.PublicStyleIdentifiers) > 0 || (!in.PreloadBoundAssets && in.Style == nil && len(in.PublicIdentifiers) == 0)
+	return len(in.PublicStyleIdentifiers) > 0 || (!in.SkipUnselectedPublicStyles && !in.PreloadBoundAssets && in.Style == nil && len(in.PublicIdentifiers) == 0)
 }
 
 func scriptRuntimeEmptyResultError(in store.ScriptRuntimeResolveRequest) (string, string) {

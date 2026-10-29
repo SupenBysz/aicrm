@@ -20,6 +20,7 @@ export interface DesktopBridgeLike {
   app?: {
     getVersion?: () => Promise<string>;
     getConfig?: () => Promise<{ debugMode?: boolean }>;
+    openVersionDialog?: () => Promise<boolean>;
   };
   window?: {
     setAppearance?: (value: {themeId: string; dark: boolean}) => Promise<boolean>;
@@ -34,6 +35,7 @@ export interface DesktopBridgeLike {
     clear?: () => Promise<DesktopNetworkLogSnapshot>;
   };
   matrixAccount?: MatrixAccountDesktopBridgeContract;
+  menuWebView?: import("../../aicrm-desktop/src/shared/types").MenuWebViewDesktopBridge;
   desktopDevice?: {
     ensureRegistration?: () => Promise<
       DesktopCommandResult<AiExecutorDesktopRegistrationProjection>

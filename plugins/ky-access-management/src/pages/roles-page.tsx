@@ -10,11 +10,13 @@ import {
   runBatchRequests,
   useRequestClient,
   usePermissions,
+  useCurrentWorkspace,
   writeListQueryState,
   type ListQueryState
 } from "@ky/admin-core";
 import {
   createRole,
+  listAssignableMenuDirectory,
   listPermissions,
   listRoles,
   setRolePermissions,
@@ -23,6 +25,7 @@ import {
   type Role,
   type RoleInput
 } from "../api";
+import { buildMenuPermissionTree } from "../menu-permission-tree";
 import {
   DOMAIN_LABELS,
   DOMAIN_ORDER,
@@ -46,6 +49,7 @@ const STATUS_OPTIONS = [
 
 export function RolesPage() {
   const client = useRequestClient();
+  const workspace = useCurrentWorkspace();
   const permissions = usePermissions();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -70,10 +74,13 @@ export function RolesPage() {
     queryKey: ["roles", queryState.page, queryState.pageSize, queryState.status],
     queryFn: () => listRoles(client, { page: queryState.page, pageSize: queryState.pageSize, status: queryState.status })
   });
-  const permissionsQuery = useQuery({ queryKey: ["permissions", "catalog"], queryFn: () => listPermissions(client) });
+  const permissionsQuery = useQuery({ queryKey: ["permissions", "catalog", workspace?.type, workspace?.id], enabled:!!workspace, queryFn: () => listPermissions(client) });
+  const managementMenusQuery = useQuery({queryKey:["menu-directory","management","assignable",workspace?.type,workspace?.id],enabled:!!workspace,queryFn:()=>listAssignableMenuDirectory(client,"management")});
+  const workbenchMenusQuery = useQuery({queryKey:["menu-directory","workbench","assignable",workspace?.type,workspace?.id],enabled:!!workspace,queryFn:()=>listAssignableMenuDirectory(client,"workbench")});
+  const assignableMenuCodes = useMemo(()=>new Set([...(managementMenusQuery.data?.items??[]),...(workbenchMenusQuery.data?.items??[])].map(item=>item.permissionCode)),[managementMenusQuery.data,workbenchMenusQuery.data]);
   const visiblePermissions = useMemo(
-    () => (permissionsQuery.data ?? []).filter((perm) => isPermissionResourceVisible(perm.resource)),
-    [permissionsQuery.data]
+    () => (permissionsQuery.data ?? []).filter((perm) => isPermissionResourceVisible(perm.resource) && (perm.category!=="menu"||assignableMenuCodes.has(perm.code))),
+    [assignableMenuCodes,permissionsQuery.data]
   );
   const visiblePermissionIds = useMemo(() => new Set(visiblePermissions.map((perm) => perm.id)), [visiblePermissions]);
 
@@ -125,7 +132,8 @@ export function RolesPage() {
   const permMutation = useMutation({
     mutationFn: (ids: string[]) => {
       const hiddenExistingIds = (permRole?.permissionIds ?? []).filter((id) => !visiblePermissionIds.has(id));
-      return setRolePermissions(client, permRole!.id, [...hiddenExistingIds, ...ids]);
+      if(!Number.isSafeInteger(permRole?.permissionRevision)||!permRole?.permissionRevision)throw new Error("角色授权版本无效，请重新打开授权。");
+      return setRolePermissions(client, permRole!.id, [...hiddenExistingIds, ...ids],permRole.permissionRevision);
     },
     onSuccess: () => {
       void message.success("角色权限已更新。");
@@ -154,7 +162,7 @@ export function RolesPage() {
   // domain or resource node selects all descendants for quick bulk assignment.
   const permTreeData = useMemo(() => {
     const domains = new Map<DomainKey, Map<string, { title: string; key: string }[]>>();
-    visiblePermissions.forEach((perm) => {
+    visiblePermissions.filter((perm)=>perm.category!=="menu").forEach((perm) => {
       const dom = resourceDomain(perm.resource);
       if (!domains.has(dom)) domains.set(dom, new Map());
       const byResource = domains.get(dom)!;
@@ -184,6 +192,12 @@ export function RolesPage() {
       };
     });
   }, [visiblePermissions]);
+  const menuTreeData=useMemo(()=>[
+    ...buildMenuPermissionTree(visiblePermissions,managementMenusQuery.data?.items??[],managementMenusQuery.data?.ancestors??[],"management").nodes,
+    ...buildMenuPermissionTree(visiblePermissions,workbenchMenusQuery.data?.items??[],workbenchMenusQuery.data?.ancestors??[],"workbench").nodes
+  ],[managementMenusQuery.data,visiblePermissions,workbenchMenusQuery.data]);
+  const permissionTreeLoading=permissionsQuery.isFetching||managementMenusQuery.isFetching||workbenchMenusQuery.isFetching;
+  const permissionTreeUnavailable=permissionsQuery.isError||managementMenusQuery.isError||workbenchMenusQuery.isError||!permissionsQuery.data||!managementMenusQuery.data||!workbenchMenusQuery.data;
 
   const columns: ColumnsType<Role> = useMemo(
     () => [
@@ -384,24 +398,26 @@ export function RolesPage() {
         extra={
           <Space>
             <Button onClick={() => setPermRole(null)}>取消</Button>
-            <Button type="primary" loading={permMutation.isPending} onClick={() => permMutation.mutate(checkedPerms)}>
+            <Button type="primary" loading={permMutation.isPending} disabled={permissionTreeUnavailable||permissionTreeLoading} onClick={() => permMutation.mutate(checkedPerms)}>
               保存授权
             </Button>
           </Space>
         }
       >
+        {permissionTreeUnavailable?<Typography.Text type="danger">菜单或权限目录未完整载入，保存已停用以保护现有授权。</Typography.Text>:null}
         <Tree
           checkable
           blockNode
+          disabled={permissionTreeUnavailable||permissionTreeLoading}
           checkedKeys={checkedPerms}
           onCheck={(checked) => {
             const keys = Array.isArray(checked) ? checked : checked.checked;
             setCheckedPerms(
-              keys.map(String).filter((key) => !key.startsWith("dom:") && !key.startsWith("res:"))
+              keys.map(String).filter((key) => visiblePermissionIds.has(key))
             );
           }}
-          treeData={permTreeData}
-          defaultExpandedKeys={DOMAIN_ORDER.map((dom) => `dom:${dom}`)}
+          treeData={[...permTreeData,...menuTreeData]}
+          defaultExpandedKeys={[...DOMAIN_ORDER.map((dom) => `dom:${dom}`),...buildMenuPermissionTree(visiblePermissions,managementMenusQuery.data?.items??[],managementMenusQuery.data?.ancestors??[],"management").expandedKeys,...buildMenuPermissionTree(visiblePermissions,workbenchMenusQuery.data?.items??[],workbenchMenusQuery.data?.ancestors??[],"workbench").expandedKeys]}
         />
       </Drawer>
     </>

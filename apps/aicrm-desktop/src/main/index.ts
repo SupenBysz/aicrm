@@ -8,7 +8,8 @@ import {
   DESKTOP_APPLICATION_NAME,
   LEGACY_DESKTOP_USER_DATA_DIRECTORY
 } from "../shared/constants";
-import { createMainWindow } from "./app-window";
+import { createMainWindow, retryMainWindowConnection } from "./app-window";
+import { registerVersionDialogIpc } from "./version-info-dialog";
 import { installApplicationMenu } from "./app-menu";
 import { registerApiIpc } from "./ipc/api-ipc";
 import { registerAiExecutorWindowIpc } from "./ipc/ai-executor-window-ipc";
@@ -18,6 +19,7 @@ import { registerCodexExecutorIpc } from "./ipc/codex-executor-ipc";
 import { registerDesktopDeviceIpc } from "./ipc/desktop-device-ipc";
 import { registerDesktopExecutorDeviceBindingIpc } from "./ipc/desktop-executor-device-binding-ipc";
 import { registerMatrixAccountIpc } from "./ipc/matrix-account-ipc";
+import { registerMenuWebViewIpc } from "./ipc/menu-webview-ipc";
 import { registerNetworkIpc } from "./ipc/network-ipc";
 import { registerWindowIpc } from "./ipc/window-ipc";
 import { installNetworkLogCapture } from "./network-log";
@@ -67,8 +69,10 @@ registerDesktopExecutorDeviceBindingIpc(
   ipcMain
 );
 registerMatrixAccountIpc();
+registerMenuWebViewIpc();
 registerNetworkIpc();
 registerWindowIpc();
+registerVersionDialogIpc();
 
 app.whenReady().then(async () => {
   void startPluginHost().catch(() => console.info("客户端插件已降级，主窗口继续启动"));
@@ -90,7 +94,7 @@ app.whenReady().then(async () => {
     applicationVersion: app.getVersion()
   });
   installNetworkLogCapture();
-  installApplicationMenu();
+  installApplicationMenu(retryMainWindowConnection);
   void desktopDeviceTrustRuntime.resumeAfterStartup();
   let mainWindow = createMainWindow();
 
