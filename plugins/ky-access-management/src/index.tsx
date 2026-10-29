@@ -21,6 +21,14 @@ export const accessManagementPlugin: AdminPlugin = {
       icon: "KeyOutlined",
       menuKey: "access.permissions.view",
       requiredAnyPermissions: ["platform.permissions.view", "agency.permissions.view", "enterprise.permissions.view"]
+    },
+    {
+      key: "ky-access-management.menu-directory",
+      label: "菜单目录",
+      path: "/menu-directory",
+      icon: "PartitionOutlined",
+      menuKey: "platform.menu_catalog.view",
+      requiredAnyPermissions: ["platform.menu_catalog.view", "platform.menu_catalog.manage"]
     }
   ],
   routes

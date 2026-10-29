@@ -1,6 +1,35 @@
 package server
 
-import "testing"
+import (
+	"net/http/httptest"
+	"testing"
+)
+
+func TestRolePermissionsRequireMatchingBodyAndHeaderRevision(t *testing.T) {
+	for _, tc := range []struct {
+		name, header string
+		body         int64
+		want         bool
+	}{
+		{name: "matching revision", header: "7", body: 7, want: true},
+		{name: "missing header", body: 7},
+		{name: "missing body", header: "7"},
+		{name: "mismatch", header: "8", body: 7},
+		{name: "invalid header", header: "x", body: 7},
+		{name: "zero", header: "0", body: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/roles/r1/permissions", nil)
+			if tc.header != "" {
+				req.Header.Set("X-KY-Expected-Revision", tc.header)
+			}
+			_, ok := rolePermissionsRevision(req, rolePermissionsInput{ExpectedRevision: tc.body})
+			if ok != tc.want {
+				t.Fatalf("revision validity=%v, want %v", ok, tc.want)
+			}
+		})
+	}
+}
 
 func TestValidateDataScope(t *testing.T) {
 	cases := []struct {

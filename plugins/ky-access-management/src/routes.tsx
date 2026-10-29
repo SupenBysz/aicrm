@@ -1,6 +1,7 @@
 import type { PluginRoute } from "@ky/admin-core";
 import { RolesPage } from "./pages/roles-page";
 import { PermissionsPage } from "./pages/permissions-page";
+import { MenuDirectoryPage } from "./pages/menu-directory-page";
 
 export const routes: PluginRoute[] = [
   {
@@ -12,5 +13,10 @@ export const routes: PluginRoute[] = [
     path: "/permissions",
     requiredAnyPermissions: ["platform.permissions.view", "agency.permissions.view", "enterprise.permissions.view"],
     element: <PermissionsPage />
+  },
+  {
+    path: "/menu-directory",
+    requiredAnyPermissions: ["platform.menu_catalog.view", "platform.menu_catalog.manage"],
+    element: <MenuDirectoryPage />
   }
 ];

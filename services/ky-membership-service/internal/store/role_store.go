@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-const roleColumns = `id, workspace_type, workspace_id, name, code, description, is_system, status`
+const roleColumns = `id, workspace_type, workspace_id, name, code, description, is_system, status, permission_revision`
 
 func scanRoleRow(row interface{ Scan(...any) error }) (Role, error) {
 	var r Role
-	err := row.Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status)
+	err := row.Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status, &r.PermissionRevision)
 	return r, err
 }
 
@@ -172,8 +172,8 @@ func (s *Store) roleDataScopes(ctx context.Context, roleID string) ([]DataScope,
 // template) and is not a system role; otherwise an error.
 func (s *Store) roleEditable(ctx context.Context, tx *sql.Tx, id, wsType, wsID string) (Role, error) {
 	var r Role
-	err := tx.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM ky_role WHERE id=$1 AND deleted_at IS NULL`, id).
-		Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status)
+	err := tx.QueryRowContext(ctx, `SELECT `+roleColumns+` FROM ky_role WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).
+		Scan(&r.ID, &r.WorkspaceType, &r.WorkspaceID, &r.Name, &r.Code, &r.Description, &r.IsSystem, &r.Status, &r.PermissionRevision)
 	if err == sql.ErrNoRows {
 		return Role{}, ErrNotFound
 	}
@@ -252,22 +252,43 @@ func (s *Store) UpdateRoleStatus(ctx context.Context, id, wsType, wsID, status, 
 	return tx.Commit()
 }
 
-func (s *Store) SetRolePermissions(ctx context.Context, id, wsType, wsID string, permissionIDs []string, updatedBy string) error {
+func (s *Store) SetRolePermissions(ctx context.Context, id, wsType, wsID string, permissionIDs []string, updatedBy string, expectedRevision int64) (int64, error) {
+	if expectedRevision < 1 {
+		return 0, ErrValidation
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := s.roleEditable(ctx, tx, id, wsType, wsID); err != nil {
-		return err
+		return 0, err
+	}
+	var currentRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT permission_revision FROM ky_role WHERE id=$1`, id).Scan(&currentRevision); err != nil {
+		return 0, err
+	}
+	if currentRevision != expectedRevision {
+		return 0, ErrConflict
 	}
 	if err := setRolePermissionsTx(ctx, tx, id, permissionIDs); err != nil {
-		return classifyWriteErr(err)
+		return 0, classifyWriteErr(err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE ky_role SET updated_by=$2, updated_at=now() WHERE id=$1`, id, updatedBy); err != nil {
-		return err
+	res, err := tx.ExecContext(ctx, `UPDATE ky_role SET permission_revision=permission_revision+1,updated_by=$2, updated_at=now() WHERE id=$1 AND permission_revision=$3`, id, updatedBy, expectedRevision)
+	if err != nil {
+		return 0, err
 	}
-	return tx.Commit()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if rows == 0 {
+		return 0, ErrConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return expectedRevision + 1, nil
 }
 
 func setRolePermissionsTx(ctx context.Context, tx *sql.Tx, roleID string, permissionIDs []string) error {
