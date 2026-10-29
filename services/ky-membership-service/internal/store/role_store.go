@@ -45,7 +45,81 @@ func (s *Store) ListRoles(ctx context.Context, wsType, wsID, status string, page
 		r.DataScopes = []DataScope{}
 		items = append(items, r)
 	}
-	return items, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if len(items) == 0 {
+		return items, total, nil
+	}
+	roleIDs := make([]string, len(items))
+	for i := range items {
+		roleIDs[i] = items[i].ID
+	}
+	permissionRows, err := s.db.QueryContext(ctx, `SELECT role_id, permission_id FROM ky_role_permission WHERE role_id IN (`+rolePermissionPlaceholders(1, len(roleIDs))+`) ORDER BY role_id, permission_id`, roleIDsAsQueryArgs(roleIDs)...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer permissionRows.Close()
+	pairs := make([]rolePermissionPair, 0)
+	for permissionRows.Next() {
+		var pair rolePermissionPair
+		if err := permissionRows.Scan(&pair.roleID, &pair.permissionID); err != nil {
+			_ = permissionRows.Close()
+			return nil, 0, err
+		}
+		pairs = append(pairs, pair)
+	}
+	if err := permissionRows.Err(); err != nil {
+		_ = permissionRows.Close()
+		return nil, 0, err
+	}
+	if err := permissionRows.Close(); err != nil {
+		return nil, 0, err
+	}
+	permissionsByRole := groupRolePermissionIDs(roleIDs, pairs)
+	for i := range items {
+		items[i].PermissionIDs = permissionsByRole[items[i].ID]
+	}
+	return items, total, nil
+}
+
+type rolePermissionPair struct {
+	roleID       string
+	permissionID string
+}
+
+func groupRolePermissionIDs(roleIDs []string, pairs []rolePermissionPair) map[string][]string {
+	out := make(map[string][]string, len(roleIDs))
+	for _, roleID := range roleIDs {
+		out[roleID] = []string{}
+	}
+	for _, pair := range pairs {
+		if _, ok := out[pair.roleID]; !ok {
+			continue
+		}
+		out[pair.roleID] = append(out[pair.roleID], pair.permissionID)
+	}
+	return out
+}
+
+func rolePermissionPlaceholders(start, count int) string {
+	values := make([]string, count)
+	for i := range values {
+		values[i] = "$" + itoa(start+i)
+	}
+	return strings.Join(values, ",")
+}
+
+func roleIDsAsQueryArgs(values []string) []any {
+	args := make([]any, len(values))
+	for i := range values {
+		args[i] = values[i]
+	}
+	return args
 }
 
 func (s *Store) GetRole(ctx context.Context, id, wsType, wsID string) (Role, error) {
