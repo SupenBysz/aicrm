@@ -58,7 +58,7 @@ func (s *Server) statisticsAllowed(r *http.Request, wc wsContext, agencies bool)
 	if err != nil {
 		return 503
 	}
-	if err != nil || !d.Allowed || d.ActorID != wc.UserID || d.MembershipID != wc.MembershipID || d.WorkspaceType != "platform" || d.WorkspaceID != wc.WorkspaceID || len(d.DataScopes) == 0 {
+	if !d.Allowed || d.ActorID != wc.UserID || d.MembershipID != wc.MembershipID || d.WorkspaceType != "platform" || d.WorkspaceID != wc.WorkspaceID || len(d.DataScopes) == 0 {
 		return 403
 	}
 	for _, p := range perms {
@@ -66,12 +66,14 @@ func (s *Server) statisticsAllowed(r *http.Request, wc wsContext, agencies bool)
 			return 403
 		}
 	}
+	// Data scopes from active roles form a union, as in Membership scope resolution.
+	// This endpoint needs full scope; a restricted role cannot narrow an all grant.
 	for _, sc := range d.DataScopes {
-		if sc.ScopeType != "all" {
-			return 403
+		if sc.ScopeType == "all" {
+			return 200
 		}
 	}
-	return 200
+	return 403
 }
 func (s *Server) agencyStatistics(w http.ResponseWriter, r *http.Request, wc wsContext) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -88,7 +90,11 @@ func (s *Server) agencyStatistics(w http.ResponseWriter, r *http.Request, wc wsC
 	}
 	agencies := strings.Contains(r.URL.Path, "/agencies/")
 	if status := s.statisticsAllowed(r, wc, agencies); status != 200 {
-		writeError(w, r, status, "statistics_scope_required", "统计需要相应列表权限及完整数据范围")
+		if status == http.StatusServiceUnavailable {
+			writeError(w, r, status, "statistics_unavailable", "统计权限服务暂不可用，请稍后重试")
+		} else {
+			writeError(w, r, status, "statistics_scope_required", "统计需要相应列表权限及完整数据范围")
+		}
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)

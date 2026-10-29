@@ -85,9 +85,28 @@ func TestGatewayCandidateProbeAndBusinessBoundary(t *testing.T) {
 	if w.Code != 200 || w.Body.String() != expected || proxied {
 		t.Fatal("candidate proof failed", w.Code, w.Body.String())
 	}
+	// A missing Executor or duplicated service cannot satisfy the six-service contract.
+	for _, invalid := range []string{strings.Join(endpoints[:5], ","), strings.Join(append(append([]string{}, endpoints[:5]...), endpoints[0]), ",")} {
+		t.Setenv("KY_DOMAIN_GATE_ENDPOINTS", invalid)
+		if w := run("/.well-known/kycrm-entry", proof); w.Code != 503 {
+			t.Fatal("incomplete service contract accepted", w.Code)
+		}
+	}
+	t.Setenv("KY_DOMAIN_GATE_ENDPOINTS", strings.Join(endpoints, ","))
 	active = true
 	if w = run("/internal/v1/domains/resolve", ""); w.Code != 404 || proxied {
 		t.Fatal("internal route exposed", w.Code)
+	}
+	for _, headers := range []map[string]string{{"Origin": "https://other.example.com"}, {"Upgrade": "websocket"}} {
+		r := httptest.NewRequest("GET", "https://work.example.com/login", nil)
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 403 {
+			t.Fatal("cross origin/upgrade opened", w.Code)
+		}
 	}
 	if w = run("/login", ""); w.Code != 200 || !proxied {
 		t.Fatal("active entry failed", w.Code)

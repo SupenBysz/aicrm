@@ -84,3 +84,30 @@ func TestTunnelListener(t *testing.T) {
 		}
 	}
 }
+
+func TestDisabledEntryPreservesExistingRoutes(t *testing.T) {
+	for _, setting := range []string{"", "0"} {
+		t.Run("disabled_"+setting, func(t *testing.T) {
+			t.Setenv("KY_DOMAIN_ENTRY_ENABLED", setting)
+			t.Setenv("KY_DOMAIN_PROXY_SECRET", "")
+			t.Setenv("KY_DOMAIN_GATEWAY_TOKEN", "")
+			if err := Validate(); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			h := Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(http.StatusNoContent) }), false, "ky-org-service")
+			for _, path := range []string{"/api/v1/public/platform-profile", "/api/v1/platform/agencies", "/api/v1/organizations/current/branding", "/healthz", "/readyz"} {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest("GET", "http://existing.example"+path, nil))
+				if w.Code != 204 {
+					t.Fatalf("%s: status=%d", path, w.Code)
+				}
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("POST", "http://existing.example/internal/v1/domains/capabilities", nil))
+			if w.Code != 503 || calls != 5 {
+				t.Fatalf("disabled gate advertised readiness: status=%d downstream calls=%d", w.Code, calls)
+			}
+		})
+	}
+}
