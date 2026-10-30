@@ -13,7 +13,9 @@
 | 选择 Select | 选择器及下拉浮层。 | antd / Select | [源码](../../plugins/ky-component-center/src/examples/select/usage.tsx) |
 | 开关 Switch | 布尔选择与加载。 | antd / Switch | [源码](../../plugins/ky-component-center/src/examples/switch/usage.tsx) |
 | 状态标签 Tag | 语义色用于状态，不只依靠颜色解释含义。 | antd / Tag | [源码](../../plugins/ky-component-center/src/examples/tag/usage.tsx) |
+| 时间轴 Timeline | 按时间顺序展示记录，包含处理中与空状态。 | antd / Timeline | [源码](../../plugins/ky-component-center/src/examples/timeline/usage.tsx) |
 | 表格 Table | 稳定rowKey、分页及窄屏横向滚动。 | antd / Table | [源码](../../plugins/ky-component-center/src/examples/table/usage.tsx) |
+| 分段切换 Segmented | 展示顶部胶囊与列表工具栏两种真实分段切换样式。 | antd / Segmented | [源码](../../plugins/ky-component-center/src/examples/segmented/usage.tsx) |
 | 标签页 Tabs | 分组切换和禁用。 | antd / Tabs | [源码](../../plugins/ky-component-center/src/examples/tabs/usage.tsx) |
 | 表单 Form | 保存通过原表单校验，模拟结果只留在预览。 | antd / Form | [源码](../../plugins/ky-component-center/src/examples/form/usage.tsx) |
 | 抽屉布局 Drawer | 固定Header，标题左侧，保存右侧，正文独立滚动，避让主Header。 | antd / Drawer | [源码](../../plugins/ky-component-center/src/examples/drawer/usage.tsx) |

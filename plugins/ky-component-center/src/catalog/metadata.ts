@@ -461,6 +461,88 @@ export const catalog = [
     "upstreamUrl": "https://ant.design/components/tag/"
   },
   {
+    "id": "timeline",
+    "title": "时间轴 Timeline",
+    "aliases": [
+      "timeline",
+      "时间线"
+    ],
+    "category": "data",
+    "kind": "component",
+    "summary": "按时间顺序展示记录，包含处理中与空状态。",
+    "keywords": [
+      "时间轴 Timeline",
+      "流程记录"
+    ],
+    "status": "experimental",
+    "environment": "web_and_client",
+    "owner": "Ant Design / 项目用法",
+    "sourcePaths": [],
+    "dependencies": [
+      "react",
+      "antd"
+    ],
+    "controls": [
+      "label"
+    ],
+    "defaults": {
+      "label": "时间轴 Timeline",
+      "count": 12,
+      "disabled": false,
+      "showAI": true
+    },
+    "examples": [
+      {
+        "id": "default",
+        "title": "完成记录"
+      },
+      {
+        "id": "processing",
+        "title": "处理中"
+      },
+      {
+        "id": "empty",
+        "title": "空记录"
+      }
+    ],
+    "files": [
+      "plugins/ky-component-center/src/examples/timeline/usage.tsx"
+    ],
+    "guidelines": [
+      "优先复用公开导出；业务请求由Host注入。",
+      "示例数据为虚构，操作不保存真实配置。"
+    ],
+    "replacementId": null,
+    "package": "antd",
+    "exportName": "Timeline",
+    "importPath": "antd",
+    "api": [
+      {
+        "name": "items",
+        "type": "TimelineItemType[]",
+        "default": "无",
+        "description": "稳定key、title、content及状态"
+      },
+      {
+        "name": "items[].loading",
+        "type": "boolean",
+        "default": "false",
+        "description": "当前节点处理中"
+      },
+      {
+        "name": "orientation",
+        "type": "vertical | horizontal",
+        "default": "vertical",
+        "description": "本例为纵向时间轴"
+      }
+    ],
+    "relatedComponents": [
+      "tag",
+      "empty"
+    ],
+    "upstreamUrl": "https://ant.design/components/timeline/"
+  },
+  {
     "id": "table",
     "title": "表格 Table",
     "aliases": [
@@ -543,6 +625,91 @@ export const catalog = [
     ],
     "relatedComponents": [],
     "upstreamUrl": "https://ant.design/components/table/"
+  },
+  {
+    "id": "segmented",
+    "title": "分段切换 Segmented",
+    "aliases": [
+      "segmented",
+      "滑块"
+    ],
+    "category": "basic",
+    "kind": "component",
+    "summary": "展示顶部胶囊与列表工具栏两种真实分段切换样式。",
+    "keywords": [
+      "分段切换 Segmented",
+      "分段选择"
+    ],
+    "status": "experimental",
+    "environment": "web_and_client",
+    "owner": "Ant Design / 项目用法",
+    "sourcePaths": [
+      "apps/ky-admin-host/src/app.tsx",
+      "apps/ky-admin-host/src/styles.css",
+      "plugins/ky-access-management/src/pages/menu-directory-page.tsx"
+    ],
+    "dependencies": [
+      "react",
+      "antd"
+    ],
+    "controls": [
+      "disabled"
+    ],
+    "defaults": {
+      "label": "分段切换 Segmented",
+      "count": 12,
+      "disabled": false,
+      "showAI": true
+    },
+    "examples": [
+      {
+        "id": "default",
+        "title": "列表工具栏"
+      },
+      {
+        "id": "header",
+        "title": "顶部胶囊"
+      },
+      {
+        "id": "disabled",
+        "title": "禁用"
+      }
+    ],
+    "files": [
+      "plugins/ky-component-center/src/examples/segmented/usage.tsx"
+    ],
+    "guidelines": [
+      "优先复用公开导出；业务请求由Host注入。",
+      "示例数据为虚构，操作不保存真实配置。"
+    ],
+    "replacementId": null,
+    "package": "antd",
+    "exportName": "Segmented",
+    "importPath": "antd",
+    "api": [
+      {
+        "name": "value / onChange",
+        "type": "SegmentedProps",
+        "default": "受控值",
+        "description": "选中值及切换回调"
+      },
+      {
+        "name": "options",
+        "type": "SegmentedProps[\"options\"]",
+        "default": "必填",
+        "description": "标签与稳定value"
+      },
+      {
+        "name": "className",
+        "type": "string",
+        "default": "默认样式",
+        "description": "顶部胶囊复用app-mode-segmented样式"
+      }
+    ],
+    "relatedComponents": [
+      "tabs"
+    ],
+    "upstreamUrl": "https://ant.design/components/segmented/"
   },
   {
     "id": "tabs",
