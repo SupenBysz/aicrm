@@ -425,8 +425,14 @@ body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.i
 
 .app-menu .ant-menu-item:not(.ant-menu-item-selected):not(.ant-menu-item-disabled):hover,
 .app-menu .ant-menu-submenu:not(.ant-menu-submenu-disabled) > .ant-menu-submenu-title:hover {
-  background: color-mix(in srgb, var(--admin-accent-soft) 65%, transparent);
+  background: color-mix(in srgb, var(--admin-accent-soft) 65%, transparent) !important;
   color: var(--admin-accent);
+}
+
+/* A neutral lift stays visible on dark navigation; selected items keep their accent fill. */
+:root[data-admin-theme="dark"] .app-menu .ant-menu-item:not(.ant-menu-item-selected):not(.ant-menu-item-disabled):hover,
+:root[data-admin-theme="dark"] .app-menu .ant-menu-submenu:not(.ant-menu-submenu-disabled) > .ant-menu-submenu-title:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 .app-menu .ant-menu-item,
