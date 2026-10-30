@@ -47,11 +47,11 @@ export function LoginLogsPage(){
   <label>结束（不含，北京时间）<Input aria-label="结束时间（不含，北京时间）" type="datetime-local" step={1} value={draft.end} onChange={e=>setDraft({...draft,end:e.target.value})}/></label>
   <Select aria-label="登录结果" style={{width:100}} value={result??"total"} options={[{value:"total",label:"全部结果"},{value:"success",label:"成功"},{value:"failed",label:"失败"}]} onChange={key=>{if(key!==result)changeResult(key)}}/>
   <Button type="primary" onClick={submit}>查询</Button><Button onClick={reset}>重置</Button>
- </Space>}>
-  {(!valid||formError)&&<Alert type="warning" title={formError||"URL中的查询条件无效，请重置；时间范围最多31天。"}/>}
-  <ListOverview title="登录概览" data={valid?overview.data:undefined} loading={overview.isFetching} error={overview.error} onRetry={refresh}
+ </Space>} overview={<ListOverview title="登录概览" data={valid?overview.data:undefined} loading={overview.isFetching} error={overview.error} onRetry={refresh}
    metrics={[{key:"total",label:"登录记录数"},{key:"success",label:"成功记录数"},{key:"failed",label:"失败记录数",tone:"danger"},{key:"failedAccounts",label:"失败账号数",interactive:false,description:"非空账号精确去重，保留大小写"}]}
-   selectedKey={result??"total"} onSelect={changeResult} description={`当前时间范围：${shanghaiInput(startAt)} 至 ${shanghaiInput(endBefore)}（不含结束，北京时间）。成功/失败按日志记录计数，失败账号是只读去重指标；状态分布不随结果筛选变化。`}/>
+   selectedKey={result??"total"} onSelect={changeResult} description={`当前时间范围：${shanghaiInput(startAt)} 至 ${shanghaiInput(endBefore)}（不含结束，北京时间）。成功/失败按日志记录计数，失败账号是只读去重指标；状态分布不随结果筛选变化。`}/>}>
+  {(!valid||formError)&&<Alert type="warning" title={formError||"URL中的查询条件无效，请重置；时间范围最多31天。"}/>}
+
   {list.error&&<Alert type="error" showIcon title={(list.error as Error).message} action={<Button onClick={()=>void list.refetch()}>重试</Button>}/>}
   <Table<LoginLog> rowKey="id" columns={columns} dataSource={valid?list.data?.items??[]:[]} loading={list.isFetching} pagination={{current:state.page,pageSize:state.pageSize,total:list.data?.pagination.total??0,showSizeChanger:true,showTotal:total=>`共 ${total} 条`,onChange:(page,pageSize)=>applyState({page,pageSize})}}/>
  </ListPageCard>
