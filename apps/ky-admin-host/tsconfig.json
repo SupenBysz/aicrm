@@ -7,17 +7,40 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client"],
+    "types": [
+      "vite/client"
+    ],
     "paths": {
-      "@ky/admin-core": ["../../packages/ky-admin-core/src/index.ts"],
-      "@ky/plugin-access-management": ["../../plugins/ky-access-management/src/index.tsx"],
-      "@ky/plugin-ai-configuration": ["../../plugins/ky-ai-configuration/src/index.tsx"],
-      "@ky/plugin-audit-management": ["../../plugins/ky-audit-management/src/index.tsx"],
-      "@ky/plugin-identity-management": ["../../plugins/ky-identity-management/src/index.tsx"],
-      "@ky/plugin-matrix-account": ["../../plugins/ky-matrix-account/src/index.tsx"],
-      "@ky/plugin-notification": ["../../plugins/ky-notification/src/index.tsx"],
-      "@ky/plugin-organization-management": ["../../plugins/ky-organization-management/src/index.tsx"],
-      "@ky/plugin-system-settings": ["../../plugins/ky-system-settings/src/index.tsx"]
+      "@ky/admin-core": [
+        "../../packages/ky-admin-core/src/index.ts"
+      ],
+      "@ky/plugin-access-management": [
+        "../../plugins/ky-access-management/src/index.tsx"
+      ],
+      "@ky/plugin-ai-configuration": [
+        "../../plugins/ky-ai-configuration/src/index.tsx"
+      ],
+      "@ky/plugin-audit-management": [
+        "../../plugins/ky-audit-management/src/index.tsx"
+      ],
+      "@ky/plugin-identity-management": [
+        "../../plugins/ky-identity-management/src/index.tsx"
+      ],
+      "@ky/plugin-matrix-account": [
+        "../../plugins/ky-matrix-account/src/index.tsx"
+      ],
+      "@ky/plugin-notification": [
+        "../../plugins/ky-notification/src/index.tsx"
+      ],
+      "@ky/plugin-organization-management": [
+        "../../plugins/ky-organization-management/src/index.tsx"
+      ],
+      "@ky/plugin-system-settings": [
+        "../../plugins/ky-system-settings/src/index.tsx"
+      ],
+      "@ky/plugin-component-center": [
+        "../../plugins/ky-component-center/src/index.tsx"
+      ]
     }
   },
   "include": [

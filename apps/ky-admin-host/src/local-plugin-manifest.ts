@@ -8,6 +8,7 @@ import { matrixAccountPlugin } from "@ky/plugin-matrix-account";
 import { notificationPlugin } from "@ky/plugin-notification";
 import { organizationManagementPlugin } from "@ky/plugin-organization-management";
 import { systemSettingsPlugin } from "@ky/plugin-system-settings";
+import { componentCenterPlugin } from "@ky/plugin-component-center";
 
 export const localPlugins: AdminPlugin[] = [
   scriptManagementPlugin,
@@ -18,5 +19,6 @@ export const localPlugins: AdminPlugin[] = [
   auditManagementPlugin,
   notificationPlugin,
   systemSettingsPlugin,
-  aiConfigurationPlugin
+  aiConfigurationPlugin,
+  componentCenterPlugin
 ];
