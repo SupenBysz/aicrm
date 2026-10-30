@@ -1105,6 +1105,12 @@ export const catalog = [
         "description": "页面级操作"
       },
       {
+        "name": "overview",
+        "type": "ReactNode",
+        "default": "无",
+        "description": "页面级概览，位于标题下、筛选和表格卡片外"
+      },
+      {
         "name": "toolbar",
         "type": "ReactNode",
         "default": "无",

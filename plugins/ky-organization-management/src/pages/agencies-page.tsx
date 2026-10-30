@@ -382,8 +382,8 @@ export function AgenciesPage() {
             ) : null}
           </Space>
         }
-      >
-        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"total",label:"机构总数",description:`另有 ${overview.data?.metrics.find(m=>m.key==="pending")?.count??"—"} 条待处理记录`},{key:"normal",label:"正常"},{key:"disabled",label:"已停用"},{key:"frozen",label:"已冻结"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} />
+       overview={<ListOverview title="机构概览" data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"total",label:"机构总数",description:`另有 ${overview.data?.metrics.find(m=>m.key==="pending")?.count??"—"} 条待处理记录`},{key:"normal",label:"正常"},{key:"disabled",label:"已停用"},{key:"frozen",label:"已冻结"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} />}>
+
         <Table<Agency>
           rowKey="id"
           columns={columns}

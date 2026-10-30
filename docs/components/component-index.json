@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "contentHash": "d093b4edf74d259c618f38189214ee84e901e8aacfb065f82dce1e88a4e22297",
+  "contentHash": "4796114fafe8df0b43132be377c3d9ea277125c14e61f26169f1a6f88814c507",
   "sourceHashes": {
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
     "packages/ky-admin-core/src/brand-ai-suffix.tsx": "95c9e6a48c42371da00f3c6f0f6ba2fb4d2e52a07660b70d779a83c086d35643",
-    "packages/ky-admin-core/src/list-overview.tsx": "a962b96bec51afaeca095201504de94419b94eedf866d485a6ef78c3033cbec9",
-    "packages/ky-admin-core/src/page-shell.tsx": "826b3bcb03aa8f8d0eb0dab750c564a3e8cdb593774f7731fa258ea9e6bdd4ee",
+    "packages/ky-admin-core/src/list-overview.tsx": "fa96300489709e0e8285e6f985b501f2538a7667cf93cfe317459de23fbc4fd0",
+    "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
     "packages/ky-admin-core/src/theme/controls.tsx": "f11fde8517314e19cb9de260e8c203fd904360a8915bb7e47766b1c1dacbd834",
     "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379"
   },
@@ -1122,6 +1122,12 @@
           "type": "ReactNode",
           "default": "无",
           "description": "页面级操作"
+        },
+        {
+          "name": "overview",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "页面级概览，位于标题下、筛选和表格卡片外"
         },
         {
           "name": "toolbar",
