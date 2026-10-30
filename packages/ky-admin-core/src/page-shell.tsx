@@ -14,6 +14,8 @@ interface ListPageCardProps {
   extra?: ReactNode;
   subtitle?: ReactNode;
   toolbar?: ReactNode;
+  /** Page-level summary, outside and before the list/filter card. */
+  overview?: ReactNode;
   /** @deprecated use toolbar for list-level filters/actions. */
   titleCenter?: ReactNode;
   children: ReactNode;
@@ -36,7 +38,7 @@ function ListTitleBlock({ subtitle, title }: { title: string; subtitle?: ReactNo
   );
 }
 
-export function ListPageCard({ title, extra, subtitle, toolbar, titleCenter, children }: ListPageCardProps) {
+export function ListPageCard({ title, extra, subtitle, toolbar, titleCenter, overview, children }: ListPageCardProps) {
   const listToolbar = toolbar ?? titleCenter;
   return (
     <Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -54,6 +56,7 @@ export function ListPageCard({ title, extra, subtitle, toolbar, titleCenter, chi
         </div>
         {extra ? <div style={{ flex: "0 0 auto", marginLeft: "auto" }}>{extra}</div> : null}
       </div>
+      {overview}
       <Card
         styles={{ body: { padding: 0 }, header: { paddingInline: 16 } }}
         title={

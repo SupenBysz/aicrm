@@ -169,8 +169,8 @@ export function QualificationReviewPage() {
             <Button onClick={resetFilters}>重置</Button>
           </Space>
         }
-      >
-        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"submitted",label:"待审核",tone:"warning"},{key:"approved",label:"已通过"},{key:"rejected",label:"已驳回"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} />
+       overview={<ListOverview title="资质审核概览" data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"submitted",label:"待审核",tone:"warning"},{key:"approved",label:"已通过"},{key:"rejected",label:"已驳回"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} />}>
+
         <Table<Qualification>
           rowKey="id"
           columns={columns}

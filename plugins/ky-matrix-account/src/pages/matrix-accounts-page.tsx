@@ -2782,7 +2782,11 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
             ) : null}
           </Space>
         }
-      >
+       overview={<ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} title="账号概览"
+         metrics={[{key:"total",label:"账号总数"},{key:"online",label:"已记录在线",description:"最近记录状态，非实时在线"},{key:"attention",label:"待处理",tone:"warning",description:"已失效、需验证、风控或状态未知"},{key:"disabled",label:"已停用"}]}
+         description="统计当前工作区、平台及搜索范围。在线按账号记录，不承诺实时检测；待处理不含停用、未登录或登录中的账号，分组数不一定相加等于总数。"
+         selectedKey={queryState.attention?"attention":queryState.status==="disabled"?"disabled":queryState.loginStatus==="online"?"online":queryState.loginStatus||queryState.status?undefined:"total"}
+         onSelect={key=>{const current=queryState.attention?"attention":queryState.status==="disabled"?"disabled":queryState.loginStatus==="online"?"online":"total";if(key===current)key="total";applyState({status:key==="disabled"?"disabled":key==="online"?"normal":undefined,loginStatus:key==="online"?"online":undefined,attention:key==="attention"?"required":undefined,page:1})}}/>}>
         {error ? (
           <Alert
             banner
@@ -2794,11 +2798,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
         {!desktopRuntime ? (
           <Alert banner type="info" message="登录态能力需要 AiCRM Desktop 客户端，Web 浏览器仅支持账号档案管理。" />
         ) : null}
-        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} title="账号概览"
-         metrics={[{key:"total",label:"账号总数"},{key:"online",label:"已记录在线",description:"最近记录状态，非实时在线"},{key:"attention",label:"待处理",tone:"warning",description:"已失效、需验证、风控或状态未知"},{key:"disabled",label:"已停用"}]}
-         description="统计当前工作区、平台及搜索范围。在线按账号记录，不承诺实时检测；待处理不含停用、未登录或登录中的账号，分组数不一定相加等于总数。"
-         selectedKey={queryState.attention?"attention":queryState.status==="disabled"?"disabled":queryState.loginStatus==="online"?"online":queryState.loginStatus||queryState.status?undefined:"total"}
-         onSelect={key=>{const current=queryState.attention?"attention":queryState.status==="disabled"?"disabled":queryState.loginStatus==="online"?"online":"total";if(key===current)key="total";applyState({status:key==="disabled"?"disabled":key==="online"?"normal":undefined,loginStatus:key==="online"?"online":undefined,attention:key==="attention"?"required":undefined,page:1})}}/>
+
         <Table<MatrixAccount>
           rowKey="id"
           columns={columns}

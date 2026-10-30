@@ -207,8 +207,8 @@ export function InvitationsPage() {
             ) : null}
           </Space>
         }
-      >
-        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"pending",label:"待接受"},{key:"accepted",label:"已接受"},{key:"expired",label:"已过期",tone:"warning"},{key:"cancelled",label:"已取消"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} description="待接受邀请到期后按有效状态归入已过期；已接受/取消等终态保持不变。统计不受状态筛选影响。"/>
+       overview={<ListOverview title="邀请概览" data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"pending",label:"待接受"},{key:"accepted",label:"已接受"},{key:"expired",label:"已过期",tone:"warning"},{key:"cancelled",label:"已取消"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} description="待接受邀请到期后按有效状态归入已过期；已接受/取消等终态保持不变。统计不受状态筛选影响。"/>}>
+
         {listError&&<Alert type="error" showIcon title={(listError as Error).message} action={<Button onClick={()=>void refetchList()}>重试</Button>}/>}
         <Table<Invitation>
           rowKey="id"
