@@ -1,3 +1,4 @@
+import { PlatformCopyrightForm } from "../components/platform-copyright-form";
 import { PlatformBrandForm, preparePlatformBrand, platformBrandFormValues } from "../components/platform-brand-form";
 import { useEffect, useRef, useState } from "react";
 import { App as AntdApp, Alert, Button, Divider, Modal, Form, Input, Space, Tabs, Typography } from "antd";
@@ -65,6 +66,7 @@ export function BasicInfoPage() {
     applicationName: "应用显示名称",
     iconText: "图标文字",
     copyrightHolder: "版权署名",
+    copyrightStyle: "版权显示风格",
     brandLogoTextLong: "长文字 LOGO",
     brandLogoTextShort: "短文字 LOGO",
     companyName: "公司 / 平台主体名称",
@@ -89,7 +91,7 @@ export function BasicInfoPage() {
               return;
             }
             const fieldName = String(first.name[first.name.length - 1]);
-            if (fieldName === "companyName" || fieldName === "icpRecord") setActiveInfoTab("subject"); else setActiveInfoTab("brand");
+            if (["companyName", "icpRecord", "copyrightHolder", "copyrightStyle"].includes(fieldName)) setActiveInfoTab("subject"); else setActiveInfoTab("brand");
             void form.scrollToField(first.name, { block: "center" });
             const reason = first.errors.join("、") || "值不符合要求";
             void message.error(`${fieldLabels[fieldName] ?? fieldName}：${reason}`);
@@ -139,6 +141,8 @@ export function BasicInfoPage() {
                     <Form.Item label="ICP 备案号" name="icpRecord">
                       <Input placeholder="如 京ICP备2026000001号" />
                     </Form.Item>
+                    <Divider />
+                    <PlatformCopyrightForm form={form} />
                     {data?.updatedAt ? (
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                         最后更新:{new Date(data.updatedAt).toLocaleString("zh-CN")}
