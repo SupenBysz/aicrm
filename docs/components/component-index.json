@@ -1,0 +1,1760 @@
+{
+  "schemaVersion": 1,
+  "contentHash": "d093b4edf74d259c618f38189214ee84e901e8aacfb065f82dce1e88a4e22297",
+  "sourceHashes": {
+    "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
+    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "95c9e6a48c42371da00f3c6f0f6ba2fb4d2e52a07660b70d779a83c086d35643",
+    "packages/ky-admin-core/src/list-overview.tsx": "a962b96bec51afaeca095201504de94419b94eedf866d485a6ef78c3033cbec9",
+    "packages/ky-admin-core/src/page-shell.tsx": "826b3bcb03aa8f8d0eb0dab750c564a3e8cdb593774f7731fa258ea9e6bdd4ee",
+    "packages/ky-admin-core/src/theme/controls.tsx": "f11fde8517314e19cb9de260e8c203fd904360a8915bb7e47766b1c1dacbd834",
+    "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379"
+  },
+  "categories": {
+    "design": "设计基础",
+    "basic": "基础交互",
+    "layout": "页面布局",
+    "data": "数据展示",
+    "feedback": "反馈状态",
+    "brand": "品牌主题",
+    "patterns": "组合模式",
+    "utilities": "工具与上下文"
+  },
+  "items": [
+    {
+      "id": "design-tokens",
+      "title": "设计基础与主题色板",
+      "aliases": [
+        "themeColors"
+      ],
+      "category": "design",
+      "kind": "token",
+      "summary": "展示现有配色、语义色和常用布局值；未统一的间距明确标注。",
+      "keywords": [
+        "design",
+        "设计基础与主题色板"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/theme/tokens.ts"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [],
+      "defaults": {
+        "label": "设计基础与主题色板",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/design-tokens/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "themeColors",
+      "importPath": "@ky/admin-core",
+      "api": [],
+      "relatedComponents": []
+    },
+    {
+      "id": "typography-icons",
+      "title": "文字与图标",
+      "aliases": [],
+      "category": "design",
+      "kind": "pattern",
+      "summary": "沿用Ant Design文字层级和图标，不创建重复基础控件。",
+      "keywords": [
+        "design",
+        "文字与图标"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd",
+        "@ant-design/icons"
+      ],
+      "controls": [
+        "label"
+      ],
+      "defaults": {
+        "label": "文字与图标",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/typography-icons/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "api": [],
+      "relatedComponents": []
+    },
+    {
+      "id": "button",
+      "title": "按钮 Button",
+      "aliases": [
+        "Button"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "操作主次、加载和禁用状态。",
+      "keywords": [
+        "basic",
+        "按钮 Button"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "按钮",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "loading",
+          "title": "首次加载"
+        },
+        {
+          "id": "disabled",
+          "title": "禁用"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/button/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Button",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "type",
+          "type": "ButtonProps[\"type\"]",
+          "default": "default",
+          "description": "主次操作视觉"
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "禁用交互"
+        },
+        {
+          "name": "loading",
+          "type": "ButtonProps[\"loading\"]",
+          "default": "false",
+          "description": "防重复触发并表达进度"
+        },
+        {
+          "name": "onClick",
+          "type": "ButtonProps[\"onClick\"]",
+          "default": "无",
+          "description": "由业务处理操作"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/button/"
+    },
+    {
+      "id": "input",
+      "title": "输入 Input",
+      "aliases": [
+        "Input"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "输入、清除、错误与禁用。",
+      "keywords": [
+        "basic",
+        "输入 Input"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "输入",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "error",
+          "title": "失败"
+        },
+        {
+          "id": "disabled",
+          "title": "禁用"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/input/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Input",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "value / onChange",
+          "type": "InputProps",
+          "default": "受控时成对提供",
+          "description": "由调用方管理值"
+        },
+        {
+          "name": "allowClear",
+          "type": "boolean",
+          "default": "false",
+          "description": "可清空"
+        },
+        {
+          "name": "status",
+          "type": "InputProps[\"status\"]",
+          "default": "无",
+          "description": "校验反馈，不代替Form校验"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/input/"
+    },
+    {
+      "id": "select",
+      "title": "选择 Select",
+      "aliases": [
+        "Select"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "选择器及下拉浮层。",
+      "keywords": [
+        "basic",
+        "选择 Select"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "选择",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "loading",
+          "title": "首次加载"
+        },
+        {
+          "id": "disabled",
+          "title": "禁用"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/select/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Select",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "options",
+          "type": "SelectProps[\"options\"]",
+          "default": "无",
+          "description": "显式选项数据"
+        },
+        {
+          "name": "value / onChange",
+          "type": "SelectProps",
+          "default": "按受控合同",
+          "description": "选择和清除值"
+        },
+        {
+          "name": "loading / disabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "加载与禁用"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/select/"
+    },
+    {
+      "id": "switch",
+      "title": "开关 Switch",
+      "aliases": [
+        "Switch"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "布尔选择与加载。",
+      "keywords": [
+        "basic",
+        "开关 Switch"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "开关",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "loading",
+          "title": "首次加载"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/switch/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Switch",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "checked / onChange",
+          "type": "SwitchProps",
+          "default": "按受控合同",
+          "description": "布尔选择"
+        },
+        {
+          "name": "loading / disabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "加载和禁用"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/switch/"
+    },
+    {
+      "id": "tag",
+      "title": "状态标签 Tag",
+      "aliases": [
+        "Tag"
+      ],
+      "category": "data",
+      "kind": "component",
+      "summary": "语义色用于状态，不只依靠颜色解释含义。",
+      "keywords": [
+        "data",
+        "状态标签 Tag"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label"
+      ],
+      "defaults": {
+        "label": "状态标签",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/tag/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Tag",
+      "importPath": "antd",
+      "api": [],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/tag/"
+    },
+    {
+      "id": "table",
+      "title": "表格 Table",
+      "aliases": [
+        "Table"
+      ],
+      "category": "data",
+      "kind": "component",
+      "summary": "稳定rowKey、分页及窄屏横向滚动。",
+      "keywords": [
+        "data",
+        "表格 Table"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "count"
+      ],
+      "defaults": {
+        "label": "表格",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "loading",
+          "title": "首次加载"
+        },
+        {
+          "id": "empty",
+          "title": "空数据"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/table/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Table",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "rowKey",
+          "type": "TableProps[\"rowKey\"]",
+          "default": "key",
+          "description": "业务使用稳定标识"
+        },
+        {
+          "name": "dataSource / columns",
+          "type": "TableProps",
+          "default": "无",
+          "description": "数据和列配置"
+        },
+        {
+          "name": "pagination",
+          "type": "TableProps[\"pagination\"]",
+          "default": "按上游",
+          "description": "真实业务分页由服务端完成"
+        },
+        {
+          "name": "scroll",
+          "type": "TableProps[\"scroll\"]",
+          "default": "无",
+          "description": "窄屏表格内部滚动"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/table/"
+    },
+    {
+      "id": "tabs",
+      "title": "标签页 Tabs",
+      "aliases": [
+        "Tabs"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "分组切换和禁用。",
+      "keywords": [
+        "basic",
+        "标签页 Tabs"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "标签页",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/tabs/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Tabs",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "items",
+          "type": "TabsProps[\"items\"]",
+          "default": "无",
+          "description": "带稳定key的分组"
+        },
+        {
+          "name": "activeKey / onChange",
+          "type": "TabsProps",
+          "default": "按受控合同",
+          "description": "需要恢复时由URL或页面状态管理"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/tabs/"
+    },
+    {
+      "id": "form",
+      "title": "表单 Form",
+      "aliases": [
+        "Form"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "保存通过原表单校验，模拟结果只留在预览。",
+      "keywords": [
+        "basic",
+        "表单 Form"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "表单",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/form/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Form",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "onFinish",
+          "type": "FormProps[\"onFinish\"]",
+          "default": "无",
+          "description": "校验通过后提交"
+        },
+        {
+          "name": "form",
+          "type": "FormInstance",
+          "default": "可选",
+          "description": "Header操作可调用form.submit()"
+        },
+        {
+          "name": "rules",
+          "type": "Form.Item规则",
+          "default": "无",
+          "description": "本例必填校验"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/form/"
+    },
+    {
+      "id": "drawer",
+      "title": "抽屉布局 Drawer",
+      "aliases": [
+        "Drawer"
+      ],
+      "category": "layout",
+      "kind": "pattern",
+      "summary": "固定Header，标题左侧，保存右侧，正文独立滚动，避让主Header。",
+      "keywords": [
+        "layout",
+        "抽屉布局 Drawer"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "抽屉布局",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/drawer/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Drawer",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "title",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "固定标题，长标题省略并可查看全文"
+        },
+        {
+          "name": "extra",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "Header右侧保存/取消"
+        },
+        {
+          "name": "getContainer",
+          "type": "DrawerProps[\"getContainer\"]",
+          "default": "body",
+          "description": "预览固定在隔离文档，示例内联挂载"
+        },
+        {
+          "name": "footer",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "本项目窗口级操作不放footer"
+        },
+        {
+          "name": "onClose",
+          "type": "DrawerProps[\"onClose\"]",
+          "default": "无",
+          "description": "沿用未保存/提交中的关闭语义"
+        }
+      ],
+      "relatedComponents": [
+        "form",
+        "detail-panel"
+      ],
+      "upstreamUrl": "https://ant.design/components/drawer/"
+    },
+    {
+      "id": "modal",
+      "title": "确认弹窗 Modal",
+      "aliases": [
+        "Modal"
+      ],
+      "category": "feedback",
+      "kind": "component",
+      "summary": "确认、取消与焦点返回，不执行真实危险操作。",
+      "keywords": [
+        "feedback",
+        "确认弹窗 Modal"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "确认弹窗",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/modal/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Modal",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "default": "false",
+          "description": "受控打开"
+        },
+        {
+          "name": "onOk / onCancel",
+          "type": "ModalProps",
+          "default": "无",
+          "description": "模拟仅关闭弹窗"
+        },
+        {
+          "name": "getContainer",
+          "type": "ModalProps[\"getContainer\"]",
+          "default": "body",
+          "description": "不能将Portal送到父后台"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/modal/"
+    },
+    {
+      "id": "alert",
+      "title": "提示 Alert",
+      "aliases": [
+        "Alert"
+      ],
+      "category": "feedback",
+      "kind": "component",
+      "summary": "可理解的反馈，明确异常及恢复方式。",
+      "keywords": [
+        "feedback",
+        "提示 Alert"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label"
+      ],
+      "defaults": {
+        "label": "提示",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "warning",
+          "title": "警告"
+        },
+        {
+          "id": "error",
+          "title": "失败"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/alert/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Alert",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "title / description",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "可理解的状态说明"
+        },
+        {
+          "name": "type",
+          "type": "AlertProps[\"type\"]",
+          "default": "info",
+          "description": "明确提示语义"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/alert/"
+    },
+    {
+      "id": "empty",
+      "title": "空状态 Empty",
+      "aliases": [
+        "Empty"
+      ],
+      "category": "feedback",
+      "kind": "component",
+      "summary": "真实空数据与错误状态区分。",
+      "keywords": [
+        "feedback",
+        "空状态 Empty"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label"
+      ],
+      "defaults": {
+        "label": "空状态",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/empty/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Empty",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "description",
+          "type": "ReactNode",
+          "default": "默认无数据提示",
+          "description": "空状态文案，不代替请求错误"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/empty/"
+    },
+    {
+      "id": "skeleton",
+      "title": "骨架 Skeleton",
+      "aliases": [
+        "Skeleton"
+      ],
+      "category": "feedback",
+      "kind": "component",
+      "summary": "首次加载占位，避免布局跳动。",
+      "keywords": [
+        "feedback",
+        "骨架 Skeleton"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "Ant Design / 项目用法",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label"
+      ],
+      "defaults": {
+        "label": "骨架",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "ready",
+          "title": "已加载"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/skeleton/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "antd",
+      "exportName": "Skeleton",
+      "importPath": "antd",
+      "api": [
+        {
+          "name": "loading",
+          "type": "boolean",
+          "default": "true",
+          "description": "首次加载占位"
+        },
+        {
+          "name": "active",
+          "type": "boolean",
+          "default": "false",
+          "description": "动画效果"
+        }
+      ],
+      "relatedComponents": [],
+      "upstreamUrl": "https://ant.design/components/skeleton/"
+    },
+    {
+      "id": "list-page",
+      "title": "列表页面 ListPageCard",
+      "aliases": [
+        "ListPageCard"
+      ],
+      "category": "layout",
+      "kind": "component",
+      "summary": "页面标题、新增操作、卡片工具栏统一布局。",
+      "keywords": [
+        "layout",
+        "列表页面 ListPageCard"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/page-shell.tsx"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "列表页面",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/list-page/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "ListPageCard",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "title",
+          "type": "string",
+          "default": "必填",
+          "description": "页面标题，卡片外"
+        },
+        {
+          "name": "subtitle",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "页面副标题"
+        },
+        {
+          "name": "extra",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "页面级操作"
+        },
+        {
+          "name": "toolbar",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "卡片顶部筛选与工具栏"
+        },
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "default": "必填",
+          "description": "列表及概览主体"
+        }
+      ],
+      "relatedComponents": [
+        "list-overview",
+        "detail-panel",
+        "list-pattern"
+      ]
+    },
+    {
+      "id": "detail-panel",
+      "title": "详情面板 DetailPagePanel",
+      "aliases": [
+        "DetailPagePanel"
+      ],
+      "category": "layout",
+      "kind": "component",
+      "summary": "通用详情容器。",
+      "keywords": [
+        "layout",
+        "详情面板 DetailPagePanel"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/page-shell.tsx"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "disabled"
+      ],
+      "defaults": {
+        "label": "详情面板",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/detail-panel/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "DetailPagePanel",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "title",
+          "type": "string",
+          "default": "必填",
+          "description": "详情标题"
+        },
+        {
+          "name": "extra",
+          "type": "ReactNode",
+          "default": "无",
+          "description": "详情操作"
+        },
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "default": "必填",
+          "description": "详情内容"
+        }
+      ],
+      "relatedComponents": []
+    },
+    {
+      "id": "list-overview",
+      "title": "列表概览 ListOverview",
+      "aliases": [
+        "ListOverview"
+      ],
+      "category": "data",
+      "kind": "component",
+      "summary": "统计、筛选、错误旧值和撤权隐藏。",
+      "keywords": [
+        "data",
+        "列表概览 ListOverview"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/list-overview.tsx"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "count"
+      ],
+      "defaults": {
+        "label": "列表概览",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "loading",
+          "title": "首次加载"
+        },
+        {
+          "id": "refreshing",
+          "title": "刷新中"
+        },
+        {
+          "id": "error",
+          "title": "失败"
+        },
+        {
+          "id": "forbidden",
+          "title": "权限不足"
+        },
+        {
+          "id": "unknown",
+          "title": "未知状态"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/list-overview/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "ListOverview",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "data",
+          "type": "ListOverviewResult",
+          "default": "无",
+          "description": "未加载不伪造0值"
+        },
+        {
+          "name": "loading",
+          "type": "boolean",
+          "default": "必填",
+          "description": "首次加载或刷新状态"
+        },
+        {
+          "name": "error",
+          "type": "unknown",
+          "default": "无",
+          "description": "401/403隐藏旧计数"
+        },
+        {
+          "name": "metrics",
+          "type": "OverviewMetricDefinition[]",
+          "default": "必填",
+          "description": "指标名称、语义色及交互性"
+        },
+        {
+          "name": "selectedKey",
+          "type": "string",
+          "default": "无",
+          "description": "受控选中指标"
+        },
+        {
+          "name": "onSelect",
+          "type": "(key: string) => void",
+          "default": "无",
+          "description": "业务页接收指标并更新筛选"
+        },
+        {
+          "name": "onRetry",
+          "type": "() => void",
+          "default": "必填",
+          "description": "由业务页决定如何重取"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "default": "列表概览",
+          "description": "概览标题"
+        }
+      ],
+      "relatedComponents": [
+        "list-page",
+        "list-pattern",
+        "table"
+      ]
+    },
+    {
+      "id": "brand-logo",
+      "title": "品牌组合 BrandLogoLockup",
+      "aliases": [
+        "BrandLogoLockup"
+      ],
+      "category": "brand",
+      "kind": "component",
+      "summary": "图形与AI后缀按宽度缩放；16px为容器规范。",
+      "keywords": [
+        "brand",
+        "品牌组合 BrandLogoLockup"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/brand-ai-suffix.tsx"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "showAI"
+      ],
+      "defaults": {
+        "label": "品牌组合",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/brand-logo/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "BrandLogoLockup",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "children",
+          "type": "ReactNode",
+          "default": "必填",
+          "description": "品牌文字或图片"
+        },
+        {
+          "name": "showAIIcon",
+          "type": "boolean",
+          "default": "必填",
+          "description": "是否附加独立AI后缀"
+        },
+        {
+          "name": "maxHeight",
+          "type": "number",
+          "default": "32",
+          "description": "图形缩放高度上限"
+        },
+        {
+          "name": "compactInset",
+          "type": "number",
+          "default": "0",
+          "description": "未填满时的偏移；容器留白另设"
+        },
+        {
+          "name": "className",
+          "type": "string",
+          "default": "无",
+          "description": "可选容器样式"
+        }
+      ],
+      "relatedComponents": [
+        "ai-suffix",
+        "theme-controls"
+      ]
+    },
+    {
+      "id": "ai-suffix",
+      "title": "AI品牌后缀 BrandAISuffix",
+      "aliases": [
+        "BrandAISuffix"
+      ],
+      "category": "brand",
+      "kind": "component",
+      "summary": "可选AI后缀与分隔点，颜色跟随currentColor。",
+      "keywords": [
+        "brand",
+        "AI品牌后缀 BrandAISuffix"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/brand-ai-suffix.tsx"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "label",
+        "showAI"
+      ],
+      "defaults": {
+        "label": "AI品牌后缀",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/ai-suffix/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "BrandAISuffix",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "visible",
+          "type": "boolean",
+          "default": "必填",
+          "description": "显示开关"
+        },
+        {
+          "name": "height",
+          "type": "number | string",
+          "default": "1em",
+          "description": "相对文字/图形的后缀高度"
+        }
+      ],
+      "relatedComponents": []
+    },
+    {
+      "id": "theme-controls",
+      "title": "外观选择 AppearanceControls",
+      "aliases": [
+        "AppearanceControls"
+      ],
+      "category": "brand",
+      "kind": "component",
+      "summary": "四主题与亮暗/系统选项，本例选择不保存真实偏好。",
+      "keywords": [
+        "brand",
+        "外观选择 AppearanceControls"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/theme/controls.tsx"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "disabled"
+      ],
+      "defaults": {
+        "label": "外观选择",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/theme-controls/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "AppearanceControls",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "themeId",
+          "type": "ThemeId",
+          "default": "必填",
+          "description": "已有主题ID"
+        },
+        {
+          "name": "mode",
+          "type": "AppearanceMode",
+          "default": "必填",
+          "description": "light / dark / system"
+        },
+        {
+          "name": "onChange",
+          "type": "(themeId, mode) => void",
+          "default": "必填",
+          "description": "只发出选择，保存由调用方负责"
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "禁用选择"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "default": "个人外观",
+          "description": "无障碍标签前缀"
+        }
+      ],
+      "relatedComponents": []
+    },
+    {
+      "id": "list-pattern",
+      "title": "搜索＋概览＋表格",
+      "aliases": [],
+      "category": "patterns",
+      "kind": "pattern",
+      "summary": "完整组合范例，演示URL筛选与统计范围。",
+      "keywords": [
+        "patterns",
+        "搜索＋概览＋表格"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd",
+        "react-router-dom / MemoryRouter",
+        "readListQueryState",
+        "writeListQueryState"
+      ],
+      "controls": [
+        "label"
+      ],
+      "defaults": {
+        "label": "搜索＋概览＋表格",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/list-pattern/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "api": [],
+      "relatedComponents": [
+        "list-page",
+        "list-overview",
+        "table",
+        "permissions"
+      ]
+    },
+    {
+      "id": "permissions",
+      "title": "权限受限操作",
+      "aliases": [],
+      "category": "patterns",
+      "kind": "pattern",
+      "summary": "模拟权限Provider；不将前端控制当后端授权。",
+      "keywords": [
+        "patterns",
+        "权限受限操作"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [],
+      "defaults": {
+        "label": "权限受限操作",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "allowed",
+          "title": "允许操作"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/permissions/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "api": [],
+      "relatedComponents": [
+        "button",
+        "list-pattern"
+      ]
+    },
+    {
+      "id": "batch-requests",
+      "title": "批量请求 runBatchRequests",
+      "aliases": [
+        "runBatchRequests"
+      ],
+      "category": "utilities",
+      "kind": "utility",
+      "summary": "纯工具的模拟部分失败汇总；本例没有网络请求。",
+      "keywords": [
+        "utilities",
+        "批量请求 runBatchRequests"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/admin-core / 组件中心组合",
+      "sourcePaths": [
+        "packages/ky-admin-core/src/batch-actions.ts"
+      ],
+      "dependencies": [
+        "react",
+        "antd"
+      ],
+      "controls": [
+        "disabled"
+      ],
+      "defaults": {
+        "label": "批量请求",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "默认"
+        },
+        {
+          "id": "error",
+          "title": "失败"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/batch-requests/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。"
+      ],
+      "replacementId": null,
+      "package": "@ky/admin-core",
+      "exportName": "runBatchRequests",
+      "importPath": "@ky/admin-core",
+      "api": [
+        {
+          "name": "items",
+          "type": "T[]",
+          "default": "必填",
+          "description": "待处理集合"
+        },
+        {
+          "name": "request",
+          "type": "(item: T) => Promise<unknown>",
+          "default": "必填",
+          "description": "由调用方注入请求，工具不接管认证"
+        },
+        {
+          "name": "failureMessage",
+          "type": "string",
+          "default": "批量操作失败",
+          "description": "按失败数量汇总"
+        }
+      ],
+      "relatedComponents": [
+        "table",
+        "permissions"
+      ]
+    }
+  ]
+}
