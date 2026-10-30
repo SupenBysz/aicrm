@@ -3,3 +3,6 @@
 .cc-navigation section { margin-block-end:18px; }
 .cc-navigation .ant-btn { display:block; width:100%; height:auto; text-align:start; white-space:normal; margin-block-start:5px; padding:7px 9px; font-size:13px; }
 @media (max-width:1000px) { .cc-layout { display:block; } .cc-navigation { display:none; } }
+
+.cc-navigation .ant-btn[aria-current="page"] { background:var(--admin-accent-soft); color:var(--admin-accent); font-weight:500; box-shadow:none; }
+.cc-navigation .ant-btn[aria-current="page"]:hover { background:var(--admin-accent-soft); color:var(--admin-accent); }
