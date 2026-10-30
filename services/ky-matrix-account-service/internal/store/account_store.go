@@ -9,24 +9,7 @@ import (
 )
 
 func (s *Store) ListAccounts(ctx context.Context, params ListAccountsParams) ([]MatrixAccount, Page, error) {
-	where := []string{"a.workspace_type=$1", "a.workspace_id=$2", "a.deleted_at IS NULL"}
-	args := []any{params.WorkspaceType, params.WorkspaceID}
-	if params.Platform != "" {
-		args = append(args, params.Platform)
-		where = append(where, "a.platform=$"+itoa(len(args)))
-	}
-	if params.Keyword != "" {
-		args = append(args, "%"+params.Keyword+"%")
-		where = append(where, "(a.display_name ILIKE $"+itoa(len(args))+" OR a.platform_uid ILIKE $"+itoa(len(args))+" OR a.nickname ILIKE $"+itoa(len(args))+" OR a.remark ILIKE $"+itoa(len(args))+")")
-	}
-	if params.LoginStatus != "" {
-		args = append(args, params.LoginStatus)
-		where = append(where, "a.login_status=$"+itoa(len(args)))
-	}
-	if params.Status != "" {
-		args = append(args, params.Status)
-		where = append(where, "a.status=$"+itoa(len(args)))
-	}
+	where, args := accountConditions(params)
 
 	var total int
 	countArgs := append([]any{}, args...)
@@ -235,4 +218,31 @@ func scanAccounts(rows *sql.Rows) ([]MatrixAccount, error) {
 
 func itoa(i int) string {
 	return strconv.Itoa(i)
+}
+
+func accountConditions(params ListAccountsParams) ([]string, []any) {
+	where := []string{"a.workspace_type=$1", "a.workspace_id=$2", "a.deleted_at IS NULL"}
+	args := []any{params.WorkspaceType, params.WorkspaceID}
+	if params.Platform != "" {
+		args = append(args, params.Platform)
+		where = append(where, "a.platform=$"+itoa(len(args)))
+	}
+	if params.Keyword != "" {
+		args = append(args, "%"+params.Keyword+"%")
+		where = append(where, "(a.display_name ILIKE $"+itoa(len(args))+" OR a.platform_uid ILIKE $"+itoa(len(args))+" OR a.nickname ILIKE $"+itoa(len(args))+" OR a.remark ILIKE $"+itoa(len(args))+")")
+	}
+	if params.LoginStatus != "" {
+		args = append(args, params.LoginStatus)
+		where = append(where, "a.login_status=$"+itoa(len(args)))
+	}
+	if params.Status != "" {
+		args = append(args, params.Status)
+		where = append(where, "a.status=$"+itoa(len(args)))
+	}
+
+	if params.Attention == "required" {
+		where = append(where, "a.status='normal' AND a.login_status IN ('expired','verify_required','risk','unknown')")
+	}
+
+	return where, args
 }

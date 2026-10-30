@@ -12,28 +12,23 @@ import (
 func (s *Server) listInvitations(w http.ResponseWriter, r *http.Request, wc wsContext) {
 	page, pageSize := parsePage(r)
 
-	// Data-scope restriction (Phase 1.13c): restricted callers see only
-	// invitations created by members within their visible member set.
-	scope, err := s.store.ResolveMemberScope(r.Context(), wc.MembershipID, wc.WorkspaceType, wc.WorkspaceID)
-	if err != nil {
-		writeError(w, r, http.StatusInternalServerError, "internal_error", "数据范围解析失败")
+	q := r.URL.Query()
+	if (q.Has("status") && q.Has("effectiveStatus")) || !validStatus(q.Get("effectiveStatus"), "", "pending", "accepted", "cancelled", "expired") {
+		writeError(w, r, 400, "validation_error", "邀请状态条件无效")
 		return
 	}
-	var inviterMembershipIDs []string // nil = unrestricted
-	if !scope.Unrestricted {
-		inviterMembershipIDs, err = s.store.VisibleMembershipIDs(r.Context(), wc.WorkspaceType, wc.WorkspaceID, scope)
-		if err != nil {
-			writeError(w, r, http.StatusInternalServerError, "internal_error", "可见成员解析失败")
-			return
-		}
+	inviterMembershipIDs, err := s.invitationVisibleInviters(r.Context(), wc)
+	if err != nil {
+		writeError(w, r, 503, "statistics_unavailable", "数据范围暂不可用")
+		return
 	}
 
-	items, total, err := s.store.ListInvitations(r.Context(), wc.WorkspaceType, wc.WorkspaceID, r.URL.Query().Get("status"), inviterMembershipIDs, page, pageSize)
+	items, total, err := s.store.ListInvitationsEffective(r.Context(), wc.WorkspaceType, wc.WorkspaceID, q.Get("status"), q.Get("effectiveStatus"), inviterMembershipIDs, page, pageSize, time.Now().UTC())
 	if err != nil {
 		writeStoreError(w, r, err)
 		return
 	}
-	writeList(w, r, items, store.Page{Page: page, PageSize: pageSize, Total: total})
+	writeData(w, r, map[string]any{"items": items, "pagination": store.Page{Page: page, PageSize: pageSize, Total: total}, "filterVersion": 1})
 }
 
 type createInvitationInput struct {

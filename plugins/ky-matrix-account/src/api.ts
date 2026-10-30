@@ -202,6 +202,7 @@ export interface MatrixAccountListParams {
   keyword?: string;
   loginStatus?: string;
   status?: string;
+  attention?: string;
   page: number;
   pageSize: number;
 }
@@ -214,6 +215,7 @@ function query(params: MatrixAccountListParams): string {
   if (params.keyword) q.set("keyword", params.keyword);
   if (params.loginStatus) q.set("loginStatus", params.loginStatus);
   if (params.status) q.set("status", params.status);
+  if(params.attention) q.set("attention",params.attention);
   return q.toString();
 }
 
@@ -221,7 +223,7 @@ export function listMatrixAccounts(
   client: RequestClient,
   params: MatrixAccountListParams
 ): Promise<ListResult<MatrixAccount>> {
-  return client.request<ListResult<MatrixAccount>>(`/api/v1/matrix-accounts?${query(params)}`);
+  return client.request<ListResult<MatrixAccount>&{filterVersion?:number}>(`/api/v1/matrix-accounts?${query(params)}`).then(data=>{if(params.attention&&data.filterVersion!==1)throw new Error("账号待处理筛选待升级，未展示未确认的筛选结果");return data});
 }
 
 export function createMatrixAccount(client: RequestClient, input: MatrixAccountInput): Promise<MatrixAccount> {

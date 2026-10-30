@@ -53,10 +53,11 @@ export interface LoginLog {
 
 export function listLoginLogs(
   client: RequestClient,
-  params: { page: number; pageSize: number }
+  params: { page: number; pageSize: number;startAt?:string;endAt?:string;endBefore?:string;account?:string;userId?:string;result?:string }
 ): Promise<ListResult<LoginLog>> {
   const q = new URLSearchParams();
   q.set("page", String(params.page));
   q.set("pageSize", String(params.pageSize));
-  return client.request<ListResult<LoginLog>>(`/api/v1/login-logs?${q.toString()}`);
+  for(const key of ["startAt","endAt","endBefore","account","userId","result"] as const){if(params[key])q.set(key,params[key])}
+  return client.request<ListResult<LoginLog>&{filterVersion?:number}>(`/api/v1/login-logs?${q.toString()}`).then(data=>{if(params.endBefore&&data.filterVersion!==1)throw new Error("日志时间筛选待升级，未展示未确认的筛选结果");return data});
 }

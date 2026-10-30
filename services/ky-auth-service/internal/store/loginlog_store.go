@@ -65,22 +65,15 @@ func (s *Store) HasAny(ctx context.Context, membershipID string, wanted []string
 	return true, nil
 }
 
+type LoginLogFilter struct{ UserID, Result, StartAt, EndAt, EndBefore, Account string }
+
 func (s *Store) ListLoginLogs(ctx context.Context, userID, result, startAt, endAt string, page, pageSize int) ([]LoginLog, int64, error) {
-	where := []string{"TRUE"}
-	args := []any{}
+	return s.ListLoginLogsFiltered(ctx, LoginLogFilter{UserID: userID, Result: result, StartAt: startAt, EndAt: endAt}, page, pageSize)
+}
+func (s *Store) ListLoginLogsFiltered(ctx context.Context, filter LoginLogFilter, page, pageSize int) ([]LoginLog, int64, error) {
+	where, args := loginLogConditions(filter)
 	add := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
-	if userID != "" {
-		where = append(where, "user_id="+add(userID))
-	}
-	if result != "" {
-		where = append(where, "result="+add(result))
-	}
-	if startAt != "" {
-		where = append(where, "created_at>="+add(startAt))
-	}
-	if endAt != "" {
-		where = append(where, "created_at<="+add(endAt))
-	}
+
 	clause := strings.Join(where, " AND ")
 
 	var total int64
@@ -105,4 +98,30 @@ func (s *Store) ListLoginLogs(ctx context.Context, userID, result, startAt, endA
 		items = append(items, l)
 	}
 	return items, total, rows.Err()
+}
+
+func loginLogConditions(filter LoginLogFilter) ([]string, []any) {
+	where := []string{"TRUE"}
+	args := []any{}
+	add := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
+	if filter.UserID != "" {
+		where = append(where, "user_id="+add(filter.UserID))
+	}
+	if filter.Result != "" {
+		where = append(where, "result="+add(filter.Result))
+	}
+	if filter.StartAt != "" {
+		where = append(where, "created_at>="+add(filter.StartAt))
+	}
+	if filter.EndAt != "" {
+		where = append(where, "created_at<="+add(filter.EndAt))
+	}
+	if filter.EndBefore != "" {
+		where = append(where, "created_at<"+add(filter.EndBefore))
+	}
+	if filter.Account != "" {
+		where = append(where, "login_account="+add(filter.Account))
+	}
+
+	return where, args
 }

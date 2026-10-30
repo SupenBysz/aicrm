@@ -49,22 +49,16 @@ func stringsToJSON(v []string) string {
 // restriction by creator: nil means unrestricted; non-nil restricts to
 // invited_by_membership_id in the set (an empty set yields no rows).
 func (s *Store) ListInvitations(ctx context.Context, wsType, wsID, status string, inviterMembershipIDs []string, page, pageSize int) ([]Invitation, int64, error) {
-	where := []string{"workspace_type=$1", "workspace_id=$2"}
-	args := []any{wsType, wsID}
+	return s.ListInvitationsEffective(ctx, wsType, wsID, status, "", inviterMembershipIDs, page, pageSize, time.Now().UTC())
+}
+func (s *Store) ListInvitationsEffective(ctx context.Context, wsType, wsID, status, effectiveStatus string, inviterMembershipIDs []string, page, pageSize int, asOf time.Time) ([]Invitation, int64, error) {
+	where, args := invitationConditions(wsType, wsID, status, inviterMembershipIDs)
 	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
-	if status != "" {
-		where = append(where, "status="+add(status))
+	if effectiveStatus != "" {
+		stamp := add(asOf)
+		where = append(where, "CASE WHEN status='pending' AND expires_at<="+stamp+" THEN 'expired' ELSE status END="+add(effectiveStatus))
 	}
-	// Data-scope restriction by inviter (Phase 1.13c).
-	if inviterMembershipIDs != nil {
-		if len(inviterMembershipIDs) == 0 {
-			where = append(where, "false")
-		} else {
-			ph, a := inPlaceholders(len(args), inviterMembershipIDs)
-			args = append(args, a...)
-			where = append(where, "invited_by_membership_id IN ("+ph+")")
-		}
-	}
+
 	clause := strings.Join(where, " AND ")
 
 	var total int64
@@ -83,6 +77,10 @@ func (s *Store) ListInvitations(ctx context.Context, wsType, wsID, status string
 		inv, err := scanInvitation(rows)
 		if err != nil {
 			return nil, 0, err
+		}
+		inv.EffectiveStatus = inv.Status
+		if inv.Status == "pending" && !inv.ExpiresAt.After(asOf) {
+			inv.EffectiveStatus = "expired"
 		}
 		items = append(items, inv)
 	}
@@ -299,4 +297,24 @@ func (s *Store) UserDisplayName(ctx context.Context, userID string) (string, err
 		return "", ErrNotFound
 	}
 	return name, err
+}
+
+func invitationConditions(wsType, wsID, status string, inviterMembershipIDs []string) ([]string, []any) {
+	where := []string{"workspace_type=$1", "workspace_id=$2"}
+	args := []any{wsType, wsID}
+	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
+	if status != "" {
+		where = append(where, "status="+add(status))
+	}
+	// Data-scope restriction by inviter (Phase 1.13c).
+	if inviterMembershipIDs != nil {
+		if len(inviterMembershipIDs) == 0 {
+			where = append(where, "false")
+		} else {
+			ph, a := inPlaceholders(len(args), inviterMembershipIDs)
+			args = append(args, a...)
+			where = append(where, "invited_by_membership_id IN ("+ph+")")
+		}
+	}
+	return where, args
 }

@@ -69,12 +69,8 @@ func (s *Store) CreateQualification(ctx context.Context, q Qualification, create
 }
 
 func (s *Store) ListQualifications(ctx context.Context, status string, page, pageSize int) ([]Qualification, int64, error) {
-	where := []string{"1=1"}
-	args := []any{}
+	where, args := qualificationConditions(status)
 	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
-	if status != "" {
-		where = append(where, "status="+add(status))
-	}
 	clause := strings.Join(where, " AND ")
 	var total int64
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM ky_qualification WHERE `+clause, args...).Scan(&total); err != nil {
@@ -149,4 +145,14 @@ func (s *Store) ReviewQualification(ctx context.Context, id, status, reviewUserI
 		return err
 	}
 	return affectedOrNotFound(res)
+}
+
+func qualificationConditions(status string) ([]string, []any) {
+	where := []string{"1=1"}
+	args := []any{}
+	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
+	if status != "" {
+		where = append(where, "status="+add(status))
+	}
+	return where, args
 }

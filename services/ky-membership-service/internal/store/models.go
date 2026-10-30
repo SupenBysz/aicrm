@@ -46,6 +46,7 @@ type CreateMemberInput struct {
 }
 
 type Invitation struct {
+	EffectiveStatus    string     `json:"effectiveStatus"`
 	ID                 string     `json:"id"`
 	WorkspaceType      string     `json:"workspaceType"`
 	WorkspaceID        string     `json:"workspaceId"`

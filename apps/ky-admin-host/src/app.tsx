@@ -275,7 +275,11 @@ function setAdminLocked(locked: boolean): void {
   }
 }
 
-function DesktopSessionSync(){useEffect(()=>{const sync=()=>{void syncDesktopSession().catch(()=>{});};sync();window.addEventListener("ky:session-changed",sync);return()=>window.removeEventListener("ky:session-changed",sync);},[]);return null;}
+function DesktopSessionSync(){useEffect(()=>{
+ const sync=()=>{void syncDesktopSession().catch(()=>{});};
+ const changed=()=>{queryClient.removeQueries({predicate:query=>query.meta?.listOverview===true});sync();};
+ sync();window.addEventListener("ky:session-changed",changed);return()=>window.removeEventListener("ky:session-changed",changed);
+},[]);return null;}
 export function App() { return <AppearanceProvider><DesktopSessionSync/><ThemedApp /></AppearanceProvider>; }
 
 function ThemedApp() {
