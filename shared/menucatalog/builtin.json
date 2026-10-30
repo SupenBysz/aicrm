@@ -885,6 +885,28 @@
       }
     },
     {
+      "directoryType": "management",
+      "menuKey": "ky-component-center.catalog",
+      "nodeType": "leaf",
+      "parentKey": "group.ky-system-settings",
+      "name": "组件中心",
+      "icon": "AppstoreOutlined",
+      "workspaceTypes": [
+        "platform"
+      ],
+      "routeKey": "ky-component-center.catalog",
+      "routePath": "/system/components",
+      "pageType": "internal",
+      "status": "active",
+      "sortOrder": 2,
+      "permissionCode": "",
+      "permissionBindings": {
+        "platform": [
+          "platform.component_center.view"
+        ]
+      }
+    },
+    {
       "directoryType": "workbench",
       "menuKey": "workbench.overview",
       "nodeType": "leaf",
