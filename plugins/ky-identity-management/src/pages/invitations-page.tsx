@@ -1,5 +1,6 @@
+import { ListOverview, useOverviewIdentity, type ListOverviewResult } from "@ky/admin-core";
 import { useState } from "react";
-import { Button, Drawer, Form, Input, Popconfirm, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Drawer, Form, Input, Popconfirm, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -42,6 +43,9 @@ export function InvitationsPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
+  const overviewIdentity=useOverviewIdentity();
+  const overview=useQuery({meta:{listOverview:true},queryKey:[...["invitations"],"summary",overviewIdentity],enabled:!!overviewIdentity,retry:false,
+    queryFn:({signal})=>client.request<ListOverviewResult>(`/api/v1/invitations/summary?${new URLSearchParams().toString()}`,{signal})});
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form] = Form.useForm<CreateInvitationInput>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
@@ -53,10 +57,10 @@ export function InvitationsPage() {
     "enterprise.members.invite"
   ]);
 
-  const { data, isFetching } = useQuery({
-    queryKey: ["invitations", queryState.page, queryState.pageSize, queryState.status],
+  const { data, isFetching,error:listError, refetch:refetchList } = useQuery({
+    queryKey: ["invitations", overviewIdentity, queryState.page, queryState.pageSize, queryState.status],
     queryFn: () =>
-      listInvitations(client, { page: queryState.page, pageSize: queryState.pageSize, status: queryState.status })
+      listInvitations(client, { page: queryState.page, pageSize: queryState.pageSize, effectiveStatus: queryState.status })
   });
 
   function applyState(next: Partial<ListQueryState>) {
@@ -108,10 +112,11 @@ export function InvitationsPage() {
     { title: "类型", dataIndex: "invitationType", key: "invitationType", width: 100 },
     {
       title: "状态",
-      dataIndex: "status",
+      dataIndex: "effectiveStatus",
       key: "status",
       width: 100,
-      render: (status: string) => {
+      render: (value: string,record:Invitation) => {
+        const status=value??record.status;
         const meta = STATUS_META[status] ?? { label: status, color: "default" };
         return <Tag color={meta.color}>{meta.label}</Tag>;
       }
@@ -136,7 +141,7 @@ export function InvitationsPage() {
       className: "table-action-column",
       width: 180,
       render: (_, record) =>
-        canInvite && record.status === "pending" ? (
+        canInvite && (record.effectiveStatus??record.status) === "pending" ? (
           <Popconfirm
             title="确认取消该邀请？"
             okText="取消邀请"
@@ -203,17 +208,19 @@ export function InvitationsPage() {
           </Space>
         }
       >
+        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"pending",label:"待接受"},{key:"accepted",label:"已接受"},{key:"expired",label:"已过期",tone:"warning"},{key:"cancelled",label:"已取消"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} description="待接受邀请到期后按有效状态归入已过期；已接受/取消等终态保持不变。统计不受状态筛选影响。"/>
+        {listError&&<Alert type="error" showIcon title={(listError as Error).message} action={<Button onClick={()=>void refetchList()}>重试</Button>}/>}
         <Table<Invitation>
           rowKey="id"
           columns={columns}
           dataSource={data?.items ?? []}
-          loading={isFetching}
+          loading={isFetching||overview.isPending}
           rowSelection={
             canInvite
               ? {
                   selectedRowKeys,
                   onChange: (keys) => setSelectedRowKeys(keys.map(String)),
-                  getCheckboxProps: (record) => ({ disabled: record.status !== "pending" })
+                  getCheckboxProps: (record) => ({ disabled: (record.effectiveStatus??record.status) !== "pending" })
                 }
               : undefined
           }

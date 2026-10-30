@@ -1,3 +1,4 @@
+import { ListOverview, useOverviewIdentity, type ListOverviewResult } from "@ky/admin-core";
 import {AgencyDomainDrawer,domainStates} from "../components/agency-domain-drawer";
 import {useCurrentWorkspace,useCurrentUser} from "@ky/admin-core";
 import {AgencyBrandingDrawer} from "../components/agency-branding-drawer";
@@ -64,6 +65,13 @@ export function AgenciesPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
+  const overviewIdentity=useOverviewIdentity();
+  const overview=useQuery({meta:{listOverview:true},
+    queryKey:[...["org", "agencies"],"summary",overviewIdentity,queryState.keyword],
+    enabled:!!overviewIdentity,
+    queryFn:({signal})=>client.request<ListOverviewResult>(`/api/v1/platform/agencies/summary?${new URLSearchParams(queryState.keyword ? {keyword:queryState.keyword} : {}).toString()}`,{signal}),
+    retry:false
+  });
   const [filterValues, setFilterValues] = useState<AgencyFilterValues>({
     keyword: queryState.keyword ?? "",
     status: queryState.status
@@ -88,7 +96,7 @@ export function AgenciesPage() {
   }, [queryState.keyword, queryState.status]);
 
   const listQueryKey = ["org", "agencies", queryState.page, queryState.pageSize, queryState.keyword, queryState.status];
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, refetch:refetchList } = useQuery({
     queryKey: listQueryKey,
     queryFn: () =>
       listAgencies(client, {
@@ -375,6 +383,7 @@ export function AgenciesPage() {
           </Space>
         }
       >
+        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"total",label:"机构总数",description:`另有 ${overview.data?.metrics.find(m=>m.key==="pending")?.count??"—"} 条待处理记录`},{key:"normal",label:"正常"},{key:"disabled",label:"已停用"},{key:"frozen",label:"已冻结"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} />
         <Table<Agency>
           rowKey="id"
           columns={columns}

@@ -149,6 +149,7 @@ export function listTeams(client: RequestClient, status = "normal"): Promise<Tea
 // --- invitations ---
 
 export interface Invitation {
+  effectiveStatus?: string;
   id: string;
   workspaceType: string;
   workspaceId: string;
@@ -168,6 +169,7 @@ export interface Invitation {
 
 export interface InvitationListParams {
   status?: string;
+  effectiveStatus?: string;
   page: number;
   pageSize: number;
 }
@@ -177,7 +179,8 @@ export function listInvitations(client: RequestClient, params: InvitationListPar
   q.set("page", String(params.page));
   q.set("pageSize", String(params.pageSize));
   if (params.status) q.set("status", params.status);
-  return client.request<ListResult<Invitation>>(`/api/v1/invitations?${q.toString()}`);
+  if (params.effectiveStatus) q.set("effectiveStatus",params.effectiveStatus);
+  return client.request<ListResult<Invitation>&{filterVersion?:number}>(`/api/v1/invitations?${q.toString()}`).then(data=>{if(params.effectiveStatus&&data.filterVersion!==1)throw new Error("邀请有效状态筛选待升级，未展示未确认的筛选结果");return data});
 }
 
 export interface CreateInvitationInput {
