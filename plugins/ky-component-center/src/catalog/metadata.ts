@@ -664,11 +664,11 @@ export const catalog = [
     "examples": [
       {
         "id": "default",
-        "title": "列表工具栏"
+        "title": "双形态对照"
       },
       {
         "id": "header",
-        "title": "顶部胶囊"
+        "title": "仅顶部胶囊"
       },
       {
         "id": "disabled",
