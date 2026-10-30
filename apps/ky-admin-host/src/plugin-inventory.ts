@@ -5,6 +5,7 @@ import { adminPluginBuild } from "./plugin-build-manifest";
 import { createInventoryModel } from "./plugin-inventory-model";
 
 const metadata: Record<string, { name: string; services: string[] }> = {
+  "ky-component-center": { name: "组件中心", services: [] },
   "ky-identity-management": { name: "身份管理", services: ["auth", "membership"] },
   "ky-organization-management": { name: "组织管理", services: ["org"] },
   "ky-access-management": { name: "权限中心", services: ["membership"] },

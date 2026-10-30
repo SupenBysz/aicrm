@@ -2,11 +2,17 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
     "@ky/aicrm-desktop#build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "^build"
+      ],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/apps/ky-admin-host/src/native-overlay/**",
@@ -15,13 +21,33 @@
         "$TURBO_ROOT$/packages/ky-admin-core/src/**",
         "$TURBO_ROOT$/scripts/desktop-plugins/build-preloads.mjs"
       ],
-      "outputs": ["out/**"]
+      "outputs": [
+        "out/**"
+      ]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": [
+        "^lint"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
+    },
+    "@ky/admin-host#build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/generate_component_catalog.mjs",
+        "$TURBO_ROOT$/docs/components/**",
+        "$TURBO_ROOT$/plugins/ky-component-center/src/**"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     }
   }
 }

@@ -6,6 +6,7 @@ export const systemSettingsPlugin: AdminPlugin = {
   navGroup: "系统设置",
   navOrder: 60,
   menus: [
+
     {
       key: "ky-system-settings.plugins",
       label: "插件管理",
@@ -33,7 +34,8 @@ export const systemSettingsPlugin: AdminPlugin = {
         "platform.email.view",
         "platform.app_version.view"
       ]
-    }
+    },
+    { key: "ky-component-center.catalog", label: "组件中心", path: "/system/components", icon: "AppstoreOutlined", menuKey: "platform.component_center.view", requiredPermission: "platform.component_center.view" }
   ],
   routes
 };

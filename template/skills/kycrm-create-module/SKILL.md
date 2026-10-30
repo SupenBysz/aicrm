@@ -9,6 +9,8 @@ description: KyCRM 模块创建指南。Use when Codex needs to create a new KyC
 
 使用本 skill 创建 KyCRM 后台插件模块或完整业务模块。它约束插件命名、脚手架命令、菜单/路由/权限占位、前端 API client、Go 服务、数据库脚本、列表页规范和验证流程。
 
+创建UI模块前先按 [组件复用规则](../aicrm-solution/references/component-reuse.md) 检索目标项目的组件索引；缺失索引时核对现有Core/antd实现，不为了通过检查凭空造组件。
+
 ## 基本规则
 
 - 创建完整业务模块时优先使用 `scripts/create_business_module.sh`；只需要前端插件页面时使用 `scripts/create_admin_plugin.sh`。

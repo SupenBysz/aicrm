@@ -104,6 +104,18 @@ INSERT INTO ky_login_log(id,login_account,result,created_at) VALUES('ov_l1','Ali
         request('auth','/api/v1/login-logs/summary?startAt=2026-01-01T00:00:00Z&endBefore=2026-03-01T00:00:00Z',want=400)
         sql("UPDATE ky_user_session SET status='revoked' WHERE id='ov_denied'")
         for service,path in endpoints:request(service,path,actor='denied',want=401)
+        # Component-center permission is a page binding on one existing menu group.
+        menu_path='/api/v1/menu-directory/management/visible'
+        visible=request('membership',menu_path)
+        nodes=[x for x in visible['items'] if x['menuKey']=='ky-component-center.catalog']
+        assert len(nodes)==1 and nodes[0]['parentKey']=='group.ky-system-settings'
+        assert not any(x['menuKey']=='ky-component-center.catalog' for x in request('membership',menu_path,actor='self')['items'])
+        assert not any(x['menuKey']=='ky-component-center.catalog' for x in request('membership',menu_path,actor='agency',ws='agency',wid='ov_a')['items'])
+        sql("UPDATE ky_menu_directory SET status='disabled' WHERE menu_key='ky-component-center.catalog'")
+        assert not any(x['menuKey']=='ky-component-center.catalog' for x in request('membership',menu_path)['items'])
+        sql("UPDATE ky_menu_directory SET status='active' WHERE menu_key='ky-component-center.catalog'")
+        request('membership',menu_path,actor=None,want=401)
+        print('PASS: component-center owner menu, denied identity, agency scope, disabled menu and anonymous rejection')
         # Local 10k-row sample only, not a claim about production load or concurrency.
         sql("INSERT INTO ky_agency(id,name,code,status) SELECT 'ov_bulk_'||n,'BulkFixture '||n,'ov_bulk_'||n,'normal' FROM generate_series(1,10000) n")
         durations=[]

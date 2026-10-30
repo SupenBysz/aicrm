@@ -213,3 +213,7 @@ rg -n "Super\\.Admin|[e]ntai\\.im|[k]yaicrm|[c]loudflared|[G]lobal API Key|[t]ok
 7. 已检查敏感信息和本地临时文件。
 8. 模板资产相关改动已通过生成脚本验证。
 9. 提交信息符合 Conventional Commits。
+
+## 后台UI复用依据
+
+新增或修改UI时检索 [组件索引](docs/components/README.md)，优先antd、Core和组合示例。PR说明采用的组件、新增能力缺口、示例/规范同步及验证范围；无新UI可注明不适用。更新组件或示例后运行 `corepack pnpm components:generate`、`components:check` 和相关测试。

@@ -12,7 +12,10 @@
     "test:database-deploy": "bash scripts/test_deploy_database.sh",
     "typecheck": "turbo run typecheck",
     "typecheck:desktop": "pnpm --filter @ky/aicrm-desktop typecheck",
-    "verify:codex-appserver-protocol": "bash scripts/verify_codex_appserver_protocol.sh"
+    "verify:codex-appserver-protocol": "bash scripts/verify_codex_appserver_protocol.sh",
+    "components:generate": "node scripts/generate_component_catalog.mjs",
+    "components:check": "node scripts/generate_component_catalog.mjs --check",
+    "components:test": "node --test plugins/ky-component-center/src/component-center.test.mjs"
   },
   "devDependencies": {
     "turbo": "^2.10.4",
