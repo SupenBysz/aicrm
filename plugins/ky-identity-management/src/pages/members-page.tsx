@@ -1,3 +1,4 @@
+import { ListOverview, useOverviewIdentity, type ListOverviewResult } from "@ky/admin-core";
 import { useMemo, useState } from "react";
 import { UserAddOutlined } from "@ant-design/icons";
 import { Button, Drawer, Form, Input, Modal, Popconfirm, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
@@ -66,6 +67,9 @@ export function MembersPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
+  const overviewIdentity=useOverviewIdentity();
+  const overview=useQuery({meta:{listOverview:true},queryKey:[...["members"],"summary",overviewIdentity,queryState.keyword],enabled:!!overviewIdentity,retry:false,
+    queryFn:({signal})=>client.request<ListOverviewResult>(`/api/v1/workspace/members/summary?${new URLSearchParams(queryState.keyword?{keyword:queryState.keyword}:{}).toString()}`,{signal})});
   const [keywordInput, setKeywordInput] = useState(queryState.keyword ?? "");
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<CreateMemberInput>();
@@ -94,8 +98,8 @@ export function MembersPage() {
   const isOrgWorkspace = workspace?.type === "agency" || workspace?.type === "enterprise";
   const currentMembershipId = workspace?.membershipId;
 
-  const { data, isFetching } = useQuery({
-    queryKey: ["members", workspace?.type, workspace?.id, queryState.page, queryState.pageSize, queryState.keyword, queryState.status],
+  const { data, isFetching, refetch:refetchList } = useQuery({
+    queryKey: ["members", overviewIdentity, workspace?.type, workspace?.id, queryState.page, queryState.pageSize, queryState.keyword, queryState.status],
     queryFn: () =>
       listMembers(client, {
         page: queryState.page,
@@ -591,6 +595,7 @@ export function MembersPage() {
           </Space>
         }
       >
+        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"total",label:"当前工作区成员",description:`待加入 ${overview.data?.metrics.find(m=>m.key==="invited")?.count??"—"}，已离开 ${overview.data?.metrics.find(m=>m.key==="left")?.count??"—"}`},{key:"active",label:"正常"},{key:"disabled",label:"已禁用"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} description="统计当前工作区及授权范围内全部匹配记录，不是全平台注册用户数。状态分布不随状态筛选变化。"/>
         <Table<Member>
           rowKey="id"
           columns={columns}

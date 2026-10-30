@@ -1,3 +1,4 @@
+import { ListOverview, readListQueryState, useOverviewIdentity, type ListOverviewResult } from "@ky/admin-core";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -27,7 +28,7 @@ import {
   type TableProps
 } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   ListPageCard,
   captureMatrixAccountWebSpaceSnapshot,
@@ -153,6 +154,7 @@ interface QueryState {
   keyword?: string;
   loginStatus?: string;
   status?: string;
+  attention?: string;
   page: number;
   pageSize: number;
 }
@@ -300,9 +302,14 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
   const [sensitiveSnapshotDrawerOpen, setSensitiveSnapshotDrawerOpen] = useState(false);
   const [debugWindow, setDebugWindow] = useState<{ title: string; value: unknown } | null>(null);
   const [releasePendingWebSpace, setReleasePendingWebSpace] = useState<MatrixAccountWebSpace | null>(null);
-  const [keywordDraft, setKeywordDraft] = useState("");
+  const [searchParams,setSearchParams]=useSearchParams();
+  const [keywordDraft, setKeywordDraft] = useState(searchParams.get("keyword")??"");
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
-  const [queryState, setQueryState] = useState<QueryState>({ page: 1, pageSize: 20 });
+  const queryState=useMemo<QueryState>(()=>{const base=readListQueryState(searchParams);return {keyword:base.keyword,loginStatus:searchParams.get("loginStatus")||undefined,status:base.status,attention:searchParams.get("attention")||undefined,page:base.page,pageSize:Math.min(100,searchParams.has("pageSize")?base.pageSize:20)}},[searchParams]);
+  useEffect(()=>setKeywordDraft(queryState.keyword??""),[queryState.keyword]);
+  const overviewIdentity=useOverviewIdentity();
+  const overview=useQuery({meta:{listOverview:true},queryKey:["matrix-accounts",platform,"summary",overviewIdentity,queryState.keyword],enabled:!!overviewIdentity,retry:false,
+   queryFn:({signal})=>client.request<ListOverviewResult>(`/api/v1/matrix-accounts/summary?${new URLSearchParams({platform,...queryState.keyword?{keyword:queryState.keyword}:{}})}`,{signal})});
   const [newAccountFlowMode, setNewAccountFlowMode] = useState<NewAccountFlowMode>("legacy");
   const [accountOnboarding, setAccountOnboarding] = useState<AccountOnboardingView | null>(null);
   const webSpaceDrawerOpenRef = useRef(false);
@@ -370,7 +377,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
         ? webSpaceDesktopAvailable
         : false;
   const title = `${platformLabels[platform]}账号`;
-  const listKey = ["matrix-accounts", platform, queryState] as const;
+  const listKey = ["matrix-accounts", platform, overviewIdentity, queryState] as const;
   const canCreate = permissions.canAny([...matrixAccountPermissions.create]);
   const canUpdate = permissions.canAny([...matrixAccountPermissions.update]);
   const canStatus = permissions.canAny([...matrixAccountPermissions.updateStatus]);
@@ -546,12 +553,13 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
     }
   }, [automationView]);
 
-  const { data, error, isFetching } = useQuery({
+  const { data, error, isFetching,refetch:refetchList } = useQuery({
     queryKey: listKey,
     queryFn: () =>
       listMatrixAccounts(client, {
         platform,
         keyword: queryState.keyword,
+        attention:queryState.attention,
         loginStatus: queryState.loginStatus,
         status: queryState.status,
         page: queryState.page,
@@ -1820,7 +1828,9 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
 
   function applyState(next: Partial<QueryState>) {
     setSelectedRowKeys([]);
-    setQueryState((current) => ({ ...current, ...next }));
+    const value={...queryState,...next};const params=new URLSearchParams(searchParams);
+    for(const key of ["keyword","loginStatus","status","attention","page","pageSize"] as const){const v=value[key];if(v===undefined||v==="")params.delete(key);else params.set(key,String(v))}
+    setSearchParams(params);
   }
 
   function resetWebSpaceFlow(options?: { keepCancelled?: boolean }) {
@@ -2706,18 +2716,20 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
             />
             <Segmented
               className="list-status-segmented"
-              value={queryState.status === "disabled" ? "disabled" : queryState.loginStatus ?? ""}
+              value={queryState.attention?"attention":queryState.status === "disabled" ? "disabled" : queryState.loginStatus ?? ""}
               onChange={(value) => {
                 const next = String(value);
                 applyState({
-                  loginStatus: next && next !== "disabled" ? next : undefined,
-                  status: next === "disabled" ? "disabled" : undefined,
+                  attention:next==="attention"?"required":undefined,
+                  loginStatus: next && next !== "disabled" && next!=="attention" ? next : undefined,
+                  status: next === "disabled" ? "disabled" : next==="online"?"normal":undefined,
                   page: 1
                 });
               }}
               options={[
                 { value: "", label: "全部" },
-                { value: "online", label: "在线" },
+                { value: "online", label: "已记录在线" },
+                { value: "attention", label: "待处理" },
                 { value: "expired", label: "已失效" },
                 { value: "verify_required", label: "需验证" },
                 { value: "disabled", label: "已停用" }
@@ -2726,7 +2738,7 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
             <Button
               onClick={() => {
                 setKeywordDraft("");
-                applyState({ keyword: undefined, loginStatus: undefined, status: undefined, page: 1 });
+                applyState({ keyword: undefined, loginStatus: undefined, status: undefined, attention:undefined, page: 1 });
               }}
             >
               重置
@@ -2782,6 +2794,11 @@ export function MatrixAccountsPage({ platform }: { platform: MatrixAccountPlatfo
         {!desktopRuntime ? (
           <Alert banner type="info" message="登录态能力需要 AiCRM Desktop 客户端，Web 浏览器仅支持账号档案管理。" />
         ) : null}
+        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} title="账号概览"
+         metrics={[{key:"total",label:"账号总数"},{key:"online",label:"已记录在线",description:"最近记录状态，非实时在线"},{key:"attention",label:"待处理",tone:"warning",description:"已失效、需验证、风控或状态未知"},{key:"disabled",label:"已停用"}]}
+         description="统计当前工作区、平台及搜索范围。在线按账号记录，不承诺实时检测；待处理不含停用、未登录或登录中的账号，分组数不一定相加等于总数。"
+         selectedKey={queryState.attention?"attention":queryState.status==="disabled"?"disabled":queryState.loginStatus==="online"?"online":queryState.loginStatus||queryState.status?undefined:"total"}
+         onSelect={key=>{const current=queryState.attention?"attention":queryState.status==="disabled"?"disabled":queryState.loginStatus==="online"?"online":"total";if(key===current)key="total";applyState({status:key==="disabled"?"disabled":key==="online"?"normal":undefined,loginStatus:key==="online"?"online":undefined,attention:key==="attention"?"required":undefined,page:1})}}/>
         <Table<MatrixAccount>
           rowKey="id"
           columns={columns}

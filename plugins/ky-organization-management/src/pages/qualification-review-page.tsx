@@ -1,3 +1,4 @@
+import { ListOverview, useOverviewIdentity, type ListOverviewResult } from "@ky/admin-core";
 import { useEffect, useState } from "react";
 import { Button, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -40,6 +41,13 @@ export function QualificationReviewPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryState = readListQueryState(searchParams);
+  const overviewIdentity=useOverviewIdentity();
+  const overview=useQuery({meta:{listOverview:true},
+    queryKey:[...["qualifications", "review"],"summary",overviewIdentity],
+    enabled:!!overviewIdentity,
+    queryFn:({signal})=>client.request<ListOverviewResult>(`/api/v1/platform/qualifications/summary?${new URLSearchParams().toString()}`,{signal}),
+    retry:false
+  });
   const [filterValues, setFilterValues] = useState<QualificationFilterValues>({ status: queryState.status });
   const [reject, setReject] = useState<Qualification | null>(null);
   const [rejectRemark, setRejectRemark] = useState("");
@@ -50,7 +58,7 @@ export function QualificationReviewPage() {
     setFilterValues({ status: queryState.status });
   }, [queryState.status]);
 
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, refetch:refetchList } = useQuery({
     queryKey: ["qualifications", "review", queryState.page, queryState.pageSize, queryState.status],
     queryFn: () => listQualifications(client, { page: queryState.page, pageSize: queryState.pageSize, status: queryState.status })
   });
@@ -162,6 +170,7 @@ export function QualificationReviewPage() {
           </Space>
         }
       >
+        <ListOverview data={overview.data} loading={overview.isFetching} error={overview.error} onRetry={()=>{void overview.refetch();void refetchList();}} metrics={[{key:"submitted",label:"待审核",tone:"warning"},{key:"approved",label:"已通过"},{key:"rejected",label:"已驳回"}]} selectedKey={queryState.status??"total"} onSelect={key=>applyState({status:key==="total"||key===queryState.status?undefined:key,page:1})} />
         <Table<Qualification>
           rowKey="id"
           columns={columns}

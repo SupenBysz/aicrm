@@ -45,16 +45,7 @@ func userBriefFrom(uid, uname, udisp, uemail, uphone, ustatus sql.NullString) *U
 }
 
 func (s *Store) ListAgencies(ctx context.Context, keyword, status string, page, pageSize int) ([]Agency, int64, error) {
-	where := []string{"a.deleted_at IS NULL"}
-	args := []any{}
-	if keyword != "" {
-		args = append(args, "%"+keyword+"%")
-		where = append(where, "(a.name ILIKE $1 OR a.code ILIKE $1)")
-	}
-	if status != "" {
-		args = append(args, status)
-		where = append(where, "a.status = $"+itoa(len(args)))
-	}
+	where, args := agencyConditions(keyword, status)
 	clause := strings.Join(where, " AND ")
 
 	var total int64
@@ -114,4 +105,18 @@ func (s *Store) UpdateAgencyStatus(ctx context.Context, id, status, updatedBy st
 		return err
 	}
 	return affectedOrNotFound(res)
+}
+
+func agencyConditions(keyword, status string) ([]string, []any) {
+	where := []string{"a.deleted_at IS NULL"}
+	args := []any{}
+	if keyword != "" {
+		args = append(args, "%"+keyword+"%")
+		where = append(where, "(a.name ILIKE $1 OR a.code ILIKE $1)")
+	}
+	if status != "" {
+		args = append(args, status)
+		where = append(where, "a.status = $"+itoa(len(args)))
+	}
+	return where, args
 }

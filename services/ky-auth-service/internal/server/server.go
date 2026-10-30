@@ -68,6 +68,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/auth/me/appearance", s.getAppearance)
 	mux.HandleFunc("PUT /api/v1/auth/me/appearance", s.updateAppearance)
 	mux.HandleFunc("GET /api/v1/auth/bootstrap", s.bootstrap)
+	mux.HandleFunc("GET /api/v1/login-logs/summary", s.loginLogOverview)
 	mux.HandleFunc("GET /api/v1/login-logs", s.loginLogs)
 	mux.HandleFunc("GET /api/v1/platform/users", s.searchPlatformUsers)
 	mux.HandleFunc("PATCH /api/v1/platform/users/{id}", s.updateUser)

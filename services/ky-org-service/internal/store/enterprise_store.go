@@ -33,22 +33,8 @@ func scanEnterprise(row interface{ Scan(...any) error }) (Enterprise, error) {
 // ListEnterprises lists enterprises. When agencyScope is non-empty, results are
 // limited to enterprises owned by that agency (used for the agency backend).
 func (s *Store) ListEnterprises(ctx context.Context, keyword, status, agencyID, agencyScope string, page, pageSize int) ([]Enterprise, int64, error) {
-	where := []string{"e.deleted_at IS NULL"}
-	args := []any{}
+	where, args := enterpriseConditions(keyword, status, agencyID, agencyScope)
 	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
-
-	if keyword != "" {
-		p := add("%" + keyword + "%")
-		where = append(where, "(e.name ILIKE "+p+" OR e.code ILIKE "+p+")")
-	}
-	if status != "" {
-		where = append(where, "e.status = "+add(status))
-	}
-	if agencyScope != "" {
-		where = append(where, "e.agency_id = "+add(agencyScope))
-	} else if agencyID != "" {
-		where = append(where, "e.agency_id = "+add(agencyID))
-	}
 	clause := strings.Join(where, " AND ")
 
 	var total int64
@@ -170,4 +156,24 @@ func upsertOwnerRelation(ctx context.Context, tx *sql.Tx, agencyID, enterpriseID
 		DO UPDATE SET status='normal', ended_at=NULL, updated_at=now()
 	`, id, agencyID, enterpriseID, createdBy)
 	return classifyWriteErr(err)
+}
+
+func enterpriseConditions(keyword, status, agencyID, agencyScope string) ([]string, []any) {
+	where := []string{"e.deleted_at IS NULL"}
+	args := []any{}
+	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
+
+	if keyword != "" {
+		p := add("%" + keyword + "%")
+		where = append(where, "(e.name ILIKE "+p+" OR e.code ILIKE "+p+")")
+	}
+	if status != "" {
+		where = append(where, "e.status = "+add(status))
+	}
+	if agencyScope != "" {
+		where = append(where, "e.agency_id = "+add(agencyScope))
+	} else if agencyID != "" {
+		where = append(where, "e.agency_id = "+add(agencyID))
+	}
+	return where, args
 }
