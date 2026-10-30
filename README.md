@@ -55,6 +55,8 @@ template/   从本工程梳理出的衍生模板资产和解决方案级 skill�
 
 当前阶段基线以 `docs/` 下的文档为准，重点文档包括：
 
+- 列表概览：[完整迭代方案](docs/list-overviews/列表概览完整迭代方案.md)，包含列表分级、指标口径、查询联动、权限隔离、接口与分批验收；已按源码完成二次复评；首期本地实现与边界见[实施与验证记录](docs/list-overviews/实施与验证记录.md)，尚未发布。
+
 - 多配色外观主题：[需求与迭代方案](docs/appearance-theme/需求与迭代方案.md)、[实施与验证记录](docs/appearance-theme/实施与验证记录.md)、[个人偏好入口方案](docs/appearance-theme/个人偏好入口与设置迭代方案.md)
 - 菜单与桌面贡献：[PR #11 修复迭代方案](docs/contributions-integration/PR11菜单与WebView修复迭代方案.md)及[实施与验证记录](docs/contributions-integration/PR11实施与验证记录.md)，覆盖菜单与授权、原生浮层/锁屏、配置并发、视口与状态握手；当前在独立分支验证，尚未发布。
 - 总体架构：`docs/kyai_crm_architecture.md`
