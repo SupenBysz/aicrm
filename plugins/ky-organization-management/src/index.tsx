@@ -4,6 +4,7 @@ import { routes } from "./routes";
 export const organizationManagementPlugin: AdminPlugin = {
   name: "ky-organization-management",
   navGroup: "组织管理",
+  navIcon: "ApartmentOutlined",
   navOrder: 10,
   menus: [
     {

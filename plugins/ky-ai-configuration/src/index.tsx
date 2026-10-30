@@ -5,6 +5,7 @@ import { AI_CONFIGURATION_MENU_KEY } from "./permissions";
 export const aiConfigurationPlugin: AdminPlugin = {
   name: "ky-ai-configuration",
   navGroup: "AI 配置",
+  navIcon: "RobotOutlined",
   navOrder: 50,
   menus: [
     {

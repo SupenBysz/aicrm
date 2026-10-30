@@ -106,6 +106,8 @@ export interface AdminPlugin {
   name: string;
   /** Sidebar group title for this plugin's menus. */
   navGroup?: string;
+  /** Explicit icon for the sidebar group; independent of its first child. */
+  navIcon?: string;
   /** Relative ordering of this plugin's group in the sidebar (lower first). */
   navOrder?: number;
   menus?: PluginMenuItem[];

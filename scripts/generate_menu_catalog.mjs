@@ -42,7 +42,7 @@ for (const folder of readdirSync('plugins').sort()) {
   }
   if (plugin.menus?.length) {
     const key='group.'+plugin.name;
-    entries.push({directoryType:'management',menuKey:key,nodeType:'group',parentKey:null,name:plugin.navGroup,icon:plugin.menus[0].icon??'AppstoreOutlined',workspaceTypes:[...new Set(plugin.menus.flatMap(m=>(m.requiredAnyPermissions??[m.requiredPermission]).filter(Boolean).map(p=>p.split('.')[0])))],routeKey:null,routePath:null,pageType:'internal',status:'active',sortOrder:plugin.navOrder??100,permissionCode:'',permissionBindings:{}});
+    entries.push({directoryType:'management',menuKey:key,nodeType:'group',parentKey:null,name:plugin.navGroup,icon:plugin.navIcon??plugin.menus[0].icon??'AppstoreOutlined',workspaceTypes:[...new Set(plugin.menus.flatMap(m=>(m.requiredAnyPermissions??[m.requiredPermission]).filter(Boolean).map(p=>p.split('.')[0])))],routeKey:null,routePath:null,pageType:'internal',status:'active',sortOrder:plugin.navOrder??100,permissionCode:'',permissionBindings:{}});
     plugin.menus.forEach((m,i)=>add(m,'management',key,i));
   }
   plugin.workbenchMenus?.forEach((m,i)=>add(m,'workbench',null,(plugin.navOrder??100)+i));

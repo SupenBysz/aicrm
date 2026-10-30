@@ -4,6 +4,7 @@ import { routes } from "./routes";
 export const systemSettingsPlugin: AdminPlugin = {
   name: "ky-system-settings",
   navGroup: "系统设置",
+  navIcon: "SettingOutlined",
   navOrder: 60,
   menus: [
 

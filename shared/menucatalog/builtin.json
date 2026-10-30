@@ -110,7 +110,7 @@
       "nodeType": "group",
       "parentKey": null,
       "name": "AI 配置",
-      "icon": "ApiOutlined",
+      "icon": "RobotOutlined",
       "workspaceTypes": [
         "platform"
       ],
@@ -580,7 +580,7 @@
       "nodeType": "group",
       "parentKey": null,
       "name": "组织管理",
-      "icon": "BankOutlined",
+      "icon": "ApartmentOutlined",
       "workspaceTypes": [
         "platform",
         "agency",
@@ -810,7 +810,7 @@
       "nodeType": "group",
       "parentKey": null,
       "name": "系统设置",
-      "icon": "ApiOutlined",
+      "icon": "SettingOutlined",
       "workspaceTypes": [
         "platform",
         "agency",
