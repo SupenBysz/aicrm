@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { CopyrightStyle } from "@ky/admin-core";
 
 export interface PlatformProfile {
- brand?: { name?: string; applicationName?: string; iconText?: string; iconId?: string; wordmarkId?: string; showAiIcon?: boolean; wordmarkGenerated?: boolean; copyrightHolder?: string };
+ brand?: { name?: string; applicationName?: string; iconText?: string; iconId?: string; wordmarkId?: string; wordmarkDarkId?: string; showAiIcon?: boolean; wordmarkGenerated?: boolean; wordmarkDarkGenerated?: boolean; copyrightHolder?: string };
   companyName: string;
   copyrightStyle: CopyrightStyle;
   brandLogoTextLong: string;

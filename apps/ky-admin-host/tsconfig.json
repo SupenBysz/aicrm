@@ -40,6 +40,9 @@
       ],
       "@ky/plugin-component-center": [
         "../../plugins/ky-component-center/src/index.tsx"
+      ],
+      "@ky/admin-core/theme": [
+        "../../packages/ky-admin-core/src/theme/tokens.ts"
       ]
     }
   },

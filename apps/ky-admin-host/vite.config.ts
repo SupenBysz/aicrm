@@ -12,12 +12,13 @@ const versions=Object.fromEntries(pluginNames.map(name=>[name,JSON.parse(readFil
 const buildId=createHash("sha256").update(JSON.stringify(versions)+new Date().toISOString()+Math.random()).digest("hex").slice(0,16);
 
 export default defineConfig({
-  build: { rolldownOptions: { input: { main: resolve(configDir, "index.html"), componentPreview: resolve(configDir, "component-preview.html") } } },
+  build: { rolldownOptions: { input: { main: resolve(configDir, "index.html"), componentPreview: resolve(configDir, "component-preview.html"), publicDocument: resolve(configDir, "public-document.html") } } },
   define: { __KWW_ADMIN_PLUGIN_BUILD__: JSON.stringify({buildId, versions}) },
   plugins: [react(), {
     name: "component-preview-dev-policy",
     configureServer(server) {
       server.middlewares.use((req,res,next) => {
+        if(req.url?.startsWith("/legal/"))req.url="/public-document.html";
         if(req.url?.split("?")[0] === "/component-preview.html") {
           res.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ws://127.0.0.1:5173 ws://localhost:5173; form-action 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; frame-ancestors 'self'");
           res.setHeader("Cache-Control", "no-cache");
@@ -29,6 +30,7 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom", "antd", "@ant-design/icons"],
     alias: {
+      "@ky/admin-core/theme": new URL("../../packages/ky-admin-core/src/theme/tokens.ts", import.meta.url).pathname,
       "@ky/plugin-component-center": new URL("../../plugins/ky-component-center/src/index.tsx", import.meta.url).pathname,
       "@ky/plugin-script-management": new URL("../../plugins/ky-script-management/src/index.tsx", import.meta.url).pathname,
       "@ky/admin-core": new URL("../../packages/ky-admin-core/src/index.ts", import.meta.url).pathname,

@@ -18,20 +18,22 @@ type BrandAsset struct {
 	Format string `json:"format"`
 }
 type Brand struct {
-	ShowAIIcon           bool       `json:"showAiIcon"`
-	WordmarkGenerated    bool       `json:"wordmarkGenerated,omitempty"`
-	IconGenerated        bool       `json:"iconGenerated,omitempty"`
-	IconText             string     `json:"iconText,omitempty"`
-	CopyrightHolder      string     `json:"copyrightHolder,omitempty"`
-	CopyrightStyle       string     `json:"copyrightStyle,omitempty"`
-	Source               string     `json:"source,omitempty"`
-	EffectiveFingerprint string     `json:"effectiveFingerprint,omitempty"`
-	AgencyID             string     `json:"agencyId"`
-	Version              int64      `json:"version"`
-	Name                 string     `json:"name"`
-	ApplicationName      string     `json:"applicationName"`
-	Icon                 BrandAsset `json:"icon"`
-	Wordmark             BrandAsset `json:"wordmark"`
+	WordmarkDark          BrandAsset `json:"wordmarkDark"`
+	WordmarkDarkGenerated bool       `json:"wordmarkDarkGenerated,omitempty"`
+	ShowAIIcon            bool       `json:"showAiIcon"`
+	WordmarkGenerated     bool       `json:"wordmarkGenerated,omitempty"`
+	IconGenerated         bool       `json:"iconGenerated,omitempty"`
+	IconText              string     `json:"iconText,omitempty"`
+	CopyrightHolder       string     `json:"copyrightHolder,omitempty"`
+	CopyrightStyle        string     `json:"copyrightStyle,omitempty"`
+	Source                string     `json:"source,omitempty"`
+	EffectiveFingerprint  string     `json:"effectiveFingerprint,omitempty"`
+	AgencyID              string     `json:"agencyId"`
+	Version               int64      `json:"version"`
+	Name                  string     `json:"name"`
+	ApplicationName       string     `json:"applicationName"`
+	Icon                  BrandAsset `json:"icon"`
+	Wordmark              BrandAsset `json:"wordmark"`
 }
 
 func ValidName(s string, max int) bool {

@@ -110,7 +110,7 @@ func (s *Server) publicDomainEntry(w http.ResponseWriter, r *http.Request) {
 	safe := map[string]any{}
 
 	if published, ok := brand["effectiveBrand"].(map[string]any); ok {
-		for _, k := range []string{"name", "applicationName", "icon", "wordmark", "copyrightHolder", "copyrightStyle", "source", "effectiveFingerprint", "wordmarkGenerated"} {
+		for _, k := range []string{"name", "applicationName", "icon", "wordmark", "wordmarkDark", "wordmarkDarkGenerated", "showAiIcon", "copyrightHolder", "copyrightStyle", "source", "effectiveFingerprint", "wordmarkGenerated"} {
 			safe[k] = published[k]
 		}
 	}

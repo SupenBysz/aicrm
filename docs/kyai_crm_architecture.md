@@ -874,3 +874,7 @@ Nginx 负责：
 - `docs/kyai_crm_workspace_layout.md`
 - `docs/kyai_crm_phase1_implementation_plan.md`
 - `docs/kyai_crm_deployment.md`
+
+### 平台协议与文档增量（2026-10-31）
+
+协议与文档业务由ky-system-settings插件和ky-org-service负责，四张新增领域表仅由Org写入，发布快照服务角色只读/追加。Host接入公开阅读入口与登录用途链接，不承载发布规则。`@ky/markdown`承载跨Host/插件复用的安全阅读器与编辑器；`@ky/admin-core/theme`提供公开主题Token入口，避免公开页面导入整个后台壳层。完整设计及验证见[模块方案](public-documents/协议与文档完整迭代方案.md)与[实施记录](public-documents/实施与验证记录.md)。

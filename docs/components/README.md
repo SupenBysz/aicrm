@@ -27,10 +27,11 @@
 | 详情面板 DetailPagePanel | 通用详情容器。 | @ky/admin-core / DetailPagePanel | [源码](../../plugins/ky-component-center/src/examples/detail-panel/usage.tsx) |
 | 列表概览 ListOverview | 统计、筛选、错误旧值和撤权隐藏。 | @ky/admin-core / ListOverview | [源码](../../plugins/ky-component-center/src/examples/list-overview/usage.tsx) |
 | 品牌组合 BrandLogoLockup | 图形与AI后缀按宽度缩放；16px为容器规范。 | @ky/admin-core / BrandLogoLockup | [源码](../../plugins/ky-component-center/src/examples/brand-logo/usage.tsx) |
-| AI品牌后缀 BrandAISuffix | 可选AI后缀与分隔点，颜色跟随currentColor。 | @ky/admin-core / BrandAISuffix | [源码](../../plugins/ky-component-center/src/examples/ai-suffix/usage.tsx) |
+| AI品牌后缀 BrandAISuffix | 可选AI后缀与分隔点，默认使用当前主题强调色，不继承Logo文字的黑白色。 | @ky/admin-core / BrandAISuffix | [源码](../../plugins/ky-component-center/src/examples/ai-suffix/usage.tsx) |
 | 外观选择 AppearanceControls | 四主题与亮暗/系统选项，本例选择不保存真实偏好。 | @ky/admin-core / AppearanceControls | [源码](../../plugins/ky-component-center/src/examples/theme-controls/usage.tsx) |
 | 搜索＋概览＋表格 | 完整组合范例，演示URL筛选与统计范围。 | 组合模式 | [源码](../../plugins/ky-component-center/src/examples/list-pattern/usage.tsx) |
 | 权限受限操作 | 模拟权限Provider；不将前端控制当后端授权。 | 组合模式 | [源码](../../plugins/ky-component-center/src/examples/permissions/usage.tsx) |
 | 批量请求 runBatchRequests | 纯工具的模拟部分失败汇总；本例没有网络请求。 | @ky/admin-core / runBatchRequests | [源码](../../plugins/ky-component-center/src/examples/batch-requests/usage.tsx) |
+| Markdown 编辑与阅读 | 安全Markdown编辑、导入导出与统一阅读，示例只修改虚构内容。 | @ky/markdown / MarkdownReader | [源码](../../plugins/ky-component-center/src/examples/markdown/usage.tsx) |
 
 详细规范：[项目复用规则](../../template/skills/aicrm-solution/references/component-reuse.md)。索引只含静态元数据，无业务数据和凭证。

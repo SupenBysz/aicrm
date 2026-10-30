@@ -1,4 +1,4 @@
-export function generatedBrandImage(name: string, kind: "icon" | "wordmark") {
+export function generatedBrandImage(name: string, kind: "icon" | "wordmark", dark = false) {
   const text = name.trim() || "KyCRM",
     canvas = document.createElement("canvas"),
     ctx = canvas.getContext("2d");
@@ -29,7 +29,7 @@ export function generatedBrandImage(name: string, kind: "icon" | "wordmark") {
     ctx.roundRect(0, 0, 256, 256, 40);
     ctx.fill();
   }
-  ctx.fillStyle = "#322718";
+  ctx.fillStyle = kind === "wordmark" && dark ? "#ffffff" : "#322718";
   ctx.font = `700 ${size}px ${font}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";

@@ -108,20 +108,30 @@ func TestProfileConditionalDatabase(t *testing.T) {
 	if _, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "bad-brand", map[string]json.RawMessage{"brand": json.RawMessage(`{"name":"Platform","wordmarkId":"missing"}`)}); !errors.Is(e, ErrValidation) {
 		t.Fatal("missing asset accepted", e)
 	}
-	brand := BrandDraft{Name: "Platform", ApplicationName: "Platform App", IconText: "PL", ShowAIIcon: true, WordmarkID: assetID, CopyrightHolder: "Brand Owner"}
+	darkID, e := s.SavePlatformBrandAsset(ctx, []byte("dark-platform-png"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "bad-dark", map[string]json.RawMessage{"brand": json.RawMessage(`{"wordmarkDarkId":"missing"}`)}); !errors.Is(e, ErrValidation) {
+		t.Fatal("missing dark asset accepted", e)
+	}
+	brand := BrandDraft{WordmarkDarkID: darkID, Name: "Platform", ApplicationName: "Platform App", IconText: "PL", ShowAIIcon: true, WordmarkID: assetID, CopyrightHolder: "Brand Owner"}
 	rawBrand, _ := json.Marshal(brand)
 	after, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "brand-save", map[string]json.RawMessage{"brand": rawBrand})
 	if e != nil || !after.Brand.ShowAIIcon || after.Brand.WordmarkID != assetID {
 		t.Fatal(after, e)
 	}
 	effective := resolveBrand(nil, after)
-	if effective.Name != "Platform" || !effective.ShowAIIcon || effective.CopyrightHolder != "Brand Owner" || !strings.HasSuffix(effective.Wordmark.URL, assetID) {
+	if !strings.HasSuffix(effective.WordmarkDark.URL, darkID) || effective.Name != "Platform" || !effective.ShowAIIcon || effective.CopyrightHolder != "Brand Owner" || !strings.HasSuffix(effective.Wordmark.URL, assetID) {
 		t.Fatal(effective)
 	}
 	if raw, e := s.PlatformBrandAsset(ctx, assetID, true); e != nil || string(raw) != "platform-png-fixture" {
 		t.Fatal("active asset unavailable", e)
 	}
-	after, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "brand-clear", map[string]json.RawMessage{"brand": json.RawMessage(`{}`)})
+	if _, e = s.PlatformBrandAsset(ctx, darkID, true); e != nil {
+		t.Fatal("dark asset unavailable", e)
+	}
+	after, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "brand-clear", map[string]json.RawMessage{"brand": json.RawMessage(`{"wordmarkDarkId":""}`)})
 	if e != nil {
 		t.Fatal(e)
 	}

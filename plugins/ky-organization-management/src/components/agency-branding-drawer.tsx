@@ -37,6 +37,9 @@ interface Draft {
   applicationName: string;
   iconId: string;
   wordmarkId: string;
+  wordmarkDarkId?: string;
+  wordmarkDarkGenerated?: boolean;
+  wordmarkDarkGeneratorVersion?: number;
   iconGenerated?: boolean;
   wordmarkGenerated?: boolean;
 }
@@ -166,15 +169,15 @@ export function AgencyBrandingDrawer({
     try {
       if (kind === "save") {
         const draft = await form.validateFields();
-        for (const kind of ["icon", "wordmark"] as const) {
-          const field = kind === "icon" ? "iconId" : "wordmarkId",
-            generated = kind === "icon" ? "iconGenerated" : "wordmarkGenerated";
+        for (const kind of ["icon", "wordmark", "wordmarkDark"] as const) {
+          const field = `${kind}Id` as const,
+            generated = `${kind}Generated` as const;
           if (
             !draft[field] ||
             (draft[generated] &&
               ((kind === "icon"
                 ? draft.iconGeneratorVersion
-                : draft.wordmarkGeneratorVersion) !== 1 ||
+                : kind === "wordmarkDark" ? draft.wordmarkDarkGeneratorVersion : draft.wordmarkGeneratorVersion) !== 1 ||
                 (kind === "icon"
                   ? (draft.iconText?.trim() || draft.name) !==
                     (data.draft.iconText?.trim() || data.draft.name)
@@ -184,19 +187,20 @@ export function AgencyBrandingDrawer({
               kind === "icon"
                 ? draft.iconText?.trim() || draft.name
                 : draft.name,
-              kind,
+              kind === "icon" ? "icon" : "wordmark",
+              kind === "wordmarkDark",
             );
             const asset = await client.request<{ id: string }>(
               path + "/assets",
               {
                 method: "POST",
-                body: { kind, pngBase64: image.split(",")[1] },
+                body: { kind: kind === "icon" ? "icon" : "wordmark", pngBase64: image.split(",")[1] },
               },
             );
             draft[field] = asset.id;
             draft[generated] = true;
             if (kind === "icon") draft.iconGeneratorVersion = 1;
-            else draft.wordmarkGeneratorVersion = 1;
+            else if(kind === "wordmarkDark") draft.wordmarkDarkGeneratorVersion = 1; else draft.wordmarkGeneratorVersion = 1;
           }
         }
         if (!current()) return;
@@ -238,7 +242,7 @@ export function AgencyBrandingDrawer({
       if (current()) setBusy(false);
     }
   }
-  async function upload(file: File | undefined, kind: "icon" | "wordmark") {
+  async function upload(file: File | undefined, kind: "icon" | "wordmark" | "wordmarkDark") {
     if (!file || !data || busy) return;
     if (file.type !== "image/png" || file.size > 4 * 1024 * 1024) {
       void message.error("请选择4MB以内的PNG图片");
@@ -254,12 +258,12 @@ export function AgencyBrandingDrawer({
       for (const b of new Uint8Array(bytes)) binary += String.fromCharCode(b);
       const asset = await client.request<{ id: string }>(path + "/assets", {
         method: "POST",
-        body: { kind, pngBase64: btoa(binary) },
+        body: { kind: kind === "icon" ? "icon" : "wordmark", pngBase64: btoa(binary) },
       });
       if (!current()) return;
-      form.setFieldValue(kind === "icon" ? "iconId" : "wordmarkId", asset.id);
+      form.setFieldValue(`${kind}Id` as const, asset.id);
       form.setFieldValue(
-        kind === "icon" ? "iconGenerated" : "wordmarkGenerated",
+        `${kind}Generated` as const,
         false,
       );
       setDirty(true);
@@ -304,6 +308,8 @@ export function AgencyBrandingDrawer({
   const name = Form.useWatch("name", form),
     iconId = Form.useWatch("iconId", form),
     wordmarkId = Form.useWatch("wordmarkId", form),
+    wordmarkDarkId = Form.useWatch("wordmarkDarkId", form),
+    wordmarkDarkGenerated = Form.useWatch("wordmarkDarkGenerated", form),
     iconGenerated = Form.useWatch("iconGenerated", form),
     wordmarkGenerated = Form.useWatch("wordmarkGenerated", form);
   const generated = useMemo(
@@ -313,6 +319,7 @@ export function AgencyBrandingDrawer({
         "icon",
       ),
       wordmark: generatedBrandImage(name || official.name, "wordmark"),
+      wordmarkDark: generatedBrandImage(name || official.name, "wordmark", true),
     }),
     [name, iconText, official.name],
   );
@@ -394,6 +401,7 @@ export function AgencyBrandingDrawer({
         <Form.Item name="iconId" hidden>
           <Input />
         </Form.Item>
+        {["wordmarkDarkId","wordmarkDarkGenerated","wordmarkDarkGeneratorVersion"].map(field=><Form.Item key={field} name={field} hidden><Input/></Form.Item>)}
         <Form.Item name="wordmarkId" hidden>
           <Input />
         </Form.Item>
@@ -443,13 +451,14 @@ export function AgencyBrandingDrawer({
               },
               {
                 kind: "wordmark",
-                title: "文字 LOGO",
+                title: "文字 LOGO（亮色）",
                 hint: "用于软件左上角，上传透明 PNG，仅含品牌文字",
                 id:
                   wordmarkGenerated && name !== data?.draft.name
                     ? ""
                     : wordmarkId,
               },
+              {kind:"wordmarkDark",title:"文字 LOGO（暗色）",hint:"用于暗色模式，上传透明 PNG，仅含品牌文字",id:wordmarkDarkGenerated && name !== data?.draft.name ? "" : wordmarkDarkId},
             ] as const
           ).map((asset) => (
             <section className="agency-brand-upload" key={asset.kind}>
@@ -501,13 +510,11 @@ export function AgencyBrandingDrawer({
                       disabled={!data || !canEdit || busy}
                       onClick={() => {
                         form.setFieldValue(
-                          asset.kind === "icon" ? "iconId" : "wordmarkId",
+                          `${asset.kind}Id`,
                           "",
                         );
                         form.setFieldValue(
-                          asset.kind === "icon"
-                            ? "iconGenerated"
-                            : "wordmarkGenerated",
+                          `${asset.kind}Generated`,
                           true,
                         );
                         setDirty(true);
@@ -517,7 +524,7 @@ export function AgencyBrandingDrawer({
                     </Button>
                   )}
                 </Space>
-                {asset.kind === "wordmark" && (
+                {asset.kind !== "icon" && (
                   <Typography.Text
                     type="secondary"
                     className="agency-brand-preview-note"
@@ -592,18 +599,18 @@ export function AgencyBrandingDrawer({
             <div className="agency-brand-preview-scroll">
               <div className="agency-brand-preview-header">
                 <BrandLogoLockup compactInset={6} className="agency-brand-lockup" showAIIcon={showAiIcon === true}>
-                  {wordmarkId &&
-                  (!wordmarkGenerated || name === data?.draft.name) ? (
+                  {(dark ? wordmarkDarkId : wordmarkId) &&
+                  (!(dark ? wordmarkDarkGenerated : wordmarkGenerated) || name === data?.draft.name) ? (
                     <BrandAssetPreview
                       path={path}
-                      assetId={wordmarkId}
-                      className={`agency-brand-wordmark${wordmarkGenerated ? " generated" : ""}`}
+                      assetId={(dark ? wordmarkDarkId : wordmarkId) || ""}
+                      className="agency-brand-wordmark"
                       alt="品牌文字"
                     />
                   ) : (
                     <img
-                      className="agency-brand-wordmark generated"
-                      src={generated.wordmark}
+                      className="agency-brand-wordmark"
+                      src={dark ? generated.wordmarkDark : generated.wordmark}
                       alt="自动生成的品牌文字"
                     />
                   )}

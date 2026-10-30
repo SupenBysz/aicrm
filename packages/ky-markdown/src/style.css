@@ -1,0 +1,12 @@
+.ky-markdown { color:var(--admin-text,inherit); line-height:1.85; overflow-wrap:anywhere; min-width:0; }
+.ky-markdown h1,.ky-markdown h2,.ky-markdown h3 {line-height:1.4;margin:1.2em 0 .6em;color:inherit}
+.ky-markdown a{color:var(--admin-accent,#1677ff)}
+.ky-markdown img{max-width:100%;height:auto}
+.ky-markdown pre {overflow:auto;padding:16px;background:var(--admin-surface-soft,#f3f4f6);border-radius:8px}
+.ky-markdown code{font-family:monospace}
+.ky-markdown blockquote{border-left:3px solid var(--admin-stroke,#ddd);margin:16px 0;padding-left:16px;color:var(--admin-text-muted,#777)}
+.ky-markdown table{display:block;overflow:auto;border-collapse:collapse;max-width:100%}
+.ky-markdown th,.ky-markdown td{border:1px solid var(--admin-stroke,#ddd);padding:8px 12px}
+.document-editor-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+.document-editor-split{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+@media(max-width:760px){.document-editor-split{grid-template-columns:minmax(0,1fr)}}

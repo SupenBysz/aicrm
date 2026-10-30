@@ -1,0 +1,5 @@
+.documents-editor-drawer .ant-drawer-header{flex-wrap:wrap;gap:8px}
+.documents-editor-drawer .ant-drawer-header-title{min-width:0}
+.documents-editor-drawer .ant-drawer-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.documents-editor-drawer .ant-drawer-extra{margin-left:auto}
+@media(max-width:640px){.documents-editor-drawer .ant-drawer-extra{width:100%;display:flex;justify-content:flex-end}}

@@ -57,3 +57,6 @@
 .agency-brand-upload .ant-typography.ant-typography-secondary{color:var(--admin-text-muted)}
 .agency-brand-upload .agency-brand-upload-button.ant-btn{color:var(--admin-accent)}
 .agency-brand-upload .agency-brand-upload-button.ant-btn-dangerous{color:var(--ant-color-error,#c43c3c)}
+
+.agency-brand-upload-image.wordmarkDark { background: #181818; }
+.agency-brand-upload-image.wordmarkDark .agency-brand-generated-thumbnail { width:auto; height:43.125%; max-width:82%; max-height:none; }

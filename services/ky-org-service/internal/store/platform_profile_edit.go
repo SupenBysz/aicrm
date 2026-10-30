@@ -49,8 +49,10 @@ func MergePlatformProfile(current PlatformProfile, fields map[string]json.RawMes
 		var err error
 		switch key {
 		case "brand":
+			before := current.Brand
 			current.Brand = BrandDraft{}
 			err = json.Unmarshal(raw, &current.Brand)
+			preserveDarkBrand(&current.Brand, before)
 			if err == nil && !validBrandDraft(current.Brand) {
 				err = ErrValidation
 			}
@@ -123,7 +125,7 @@ func (s *Store) EditPlatformProfile(ctx context.Context, expected, actor, reques
 	if err != nil {
 		return out, err
 	}
-	for _, id := range []string{out.Brand.IconID, out.Brand.WordmarkID} {
+	for _, id := range []string{out.Brand.IconID, out.Brand.WordmarkID, out.Brand.WordmarkDarkID} {
 		if id == "" {
 			continue
 		}

@@ -66,6 +66,10 @@ func resolveBrand(published *d.Brand, p PlatformProfile) *d.Brand {
 	if p.Brand.WordmarkID != "" {
 		out.Wordmark.URL = "/api/v1/public/platform-brand-assets/" + p.Brand.WordmarkID
 	}
+	if p.Brand.WordmarkDarkID != "" {
+		out.WordmarkDark.URL = "/api/v1/public/platform-brand-assets/" + p.Brand.WordmarkDarkID
+		out.WordmarkDarkGenerated = p.Brand.WordmarkDarkGenerated
+	}
 	if p.Brand.IconID != "" {
 		out.Icon.URL = "/api/v1/public/platform-brand-assets/" + p.Brand.IconID
 	}

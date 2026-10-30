@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { DemoArgs } from "../catalog/protocol";
 export const loaders: Record<string, () => Promise<{ default: ComponentType<Partial<DemoArgs>> }>> = {
+  "markdown": () => import("../examples/markdown/usage"),
   "button": () => import("../examples/button/usage"),
   "input": () => import("../examples/input/usage"),
   "select": () => import("../examples/select/usage"),

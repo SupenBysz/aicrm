@@ -11,19 +11,46 @@ import (
 )
 
 type BrandDraft struct {
-	ShowAIIcon               bool   `json:"showAiIcon"`
-	IconGeneratorVersion     int    `json:"iconGeneratorVersion,omitempty"`
-	WordmarkGeneratorVersion int    `json:"wordmarkGeneratorVersion,omitempty"`
-	IconText                 string `json:"iconText"`
-	CopyrightHolder          string `json:"copyrightHolder"`
-	CopyrightStyle           string `json:"copyrightStyle"`
-	Name                     string `json:"name"`
-	ApplicationName          string `json:"applicationName"`
-	IconID                   string `json:"iconId"`
-	WordmarkID               string `json:"wordmarkId"`
-	IconGenerated            bool   `json:"iconGenerated,omitempty"`
-	WordmarkGenerated        bool   `json:"wordmarkGenerated,omitempty"`
+	WordmarkDarkID               string `json:"wordmarkDarkId"`
+	WordmarkDarkGenerated        bool   `json:"wordmarkDarkGenerated,omitempty"`
+	WordmarkDarkGeneratorVersion int    `json:"wordmarkDarkGeneratorVersion,omitempty"`
+	darkSpecified                bool
+	ShowAIIcon                   bool   `json:"showAiIcon"`
+	IconGeneratorVersion         int    `json:"iconGeneratorVersion,omitempty"`
+	WordmarkGeneratorVersion     int    `json:"wordmarkGeneratorVersion,omitempty"`
+	IconText                     string `json:"iconText"`
+	CopyrightHolder              string `json:"copyrightHolder"`
+	CopyrightStyle               string `json:"copyrightStyle"`
+	Name                         string `json:"name"`
+	ApplicationName              string `json:"applicationName"`
+	IconID                       string `json:"iconId"`
+	WordmarkID                   string `json:"wordmarkId"`
+	IconGenerated                bool   `json:"iconGenerated,omitempty"`
+	WordmarkGenerated            bool   `json:"wordmarkGenerated,omitempty"`
 }
+
+func (b *BrandDraft) UnmarshalJSON(raw []byte) error {
+	type plain BrandDraft
+	var v plain
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return err
+	}
+	*b = BrandDraft(v)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	_, b.darkSpecified = fields["wordmarkDarkId"]
+	return nil
+}
+func preserveDarkBrand(in *BrandDraft, before BrandDraft) {
+	if !in.darkSpecified && in.WordmarkDarkID == "" {
+		in.WordmarkDarkID = before.WordmarkDarkID
+		in.WordmarkDarkGenerated = before.WordmarkDarkGenerated
+		in.WordmarkDarkGeneratorVersion = before.WordmarkDarkGeneratorVersion
+	}
+}
+
 type AgencyBranding struct {
 	AgencyID         string     `json:"agencyId"`
 	Revision         int64      `json:"revision"`
@@ -41,7 +68,7 @@ type BrandAsset struct {
 }
 
 func validBrandDraft(b BrandDraft) bool {
-	return b.IconGeneratorVersion >= 0 && b.IconGeneratorVersion <= 1 && b.WordmarkGeneratorVersion >= 0 && b.WordmarkGeneratorVersion <= 1 && validBrandText(b.IconText, 8) && validCopyrightHolder(b.CopyrightHolder) && validCopyrightStyle(b.CopyrightStyle, true) && (b.Name == "" || d.ValidName(b.Name, 40)) && (b.ApplicationName == "" || d.ValidName(b.ApplicationName, 80)) && len(b.IconID) < 128 && len(b.WordmarkID) < 128
+	return len(b.WordmarkDarkID) < 128 && b.WordmarkDarkGeneratorVersion >= 0 && b.WordmarkDarkGeneratorVersion <= 1 && b.IconGeneratorVersion >= 0 && b.IconGeneratorVersion <= 1 && b.WordmarkGeneratorVersion >= 0 && b.WordmarkGeneratorVersion <= 1 && validBrandText(b.IconText, 8) && validCopyrightHolder(b.CopyrightHolder) && validCopyrightStyle(b.CopyrightStyle, true) && (b.Name == "" || d.ValidName(b.Name, 40)) && (b.ApplicationName == "" || d.ValidName(b.ApplicationName, 80)) && len(b.IconID) < 128 && len(b.WordmarkID) < 128
 }
 func (s *Store) AgencyBranding(ctx context.Context, id string) (AgencyBranding, error) {
 	out := AgencyBranding{AgencyID: id}
@@ -98,12 +125,22 @@ func (s *Store) SaveBrandDraft(ctx context.Context, agency, actor string, expect
 	if _, err = tx.ExecContext(ctx, `INSERT INTO ky_agency_branding(agency_id) VALUES($1) ON CONFLICT DO NOTHING`, agency); err != nil {
 		return err
 	}
+	var beforeRaw []byte
+	if err = tx.QueryRowContext(ctx, `SELECT draft FROM ky_agency_branding WHERE agency_id=$1 FOR UPDATE`, agency).Scan(&beforeRaw); err != nil {
+		return err
+	}
+	var before BrandDraft
+	if err = json.Unmarshal(beforeRaw, &before); err != nil {
+		return err
+	}
+	preserveDarkBrand(&in, before)
+	raw, _ = json.Marshal(in)
 	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_brand_asset WHERE agency_id=$1 AND (id=$2 OR id=$3)`, agency, in.IconID, in.WordmarkID).Scan(&count); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM ky_brand_asset WHERE agency_id=$1 AND (id=$2 OR id=$3 OR id=$4)`, agency, in.IconID, in.WordmarkID, in.WordmarkDarkID).Scan(&count); err != nil {
 		return err
 	}
 	expectedAssets := map[string]bool{}
-	for _, id := range []string{in.IconID, in.WordmarkID} {
+	for _, id := range []string{in.IconID, in.WordmarkID, in.WordmarkDarkID} {
 		if id != "" {
 			expectedAssets[id] = true
 		}
@@ -206,7 +243,14 @@ func (s *Store) PublishBrand(ctx context.Context, agency, actor, base string, ex
 		if wordmark.ID != "" && wordmark.Format != "png" {
 			return AgencyBranding{}, ErrValidation
 		}
-		brand = d.Brand{ShowAIIcon: draft.ShowAIIcon, WordmarkGenerated: draft.WordmarkGenerated, IconGenerated: draft.IconGenerated, IconText: draft.IconText, CopyrightHolder: draft.CopyrightHolder, CopyrightStyle: draft.CopyrightStyle, AgencyID: agency, Name: draft.Name, ApplicationName: draft.ApplicationName, Icon: assetDescriptor(icon, base), Wordmark: assetDescriptor(wordmark, base)}
+		dark, e := read(draft.WordmarkDarkID)
+		if e != nil {
+			return AgencyBranding{}, e
+		}
+		if dark.ID != "" && dark.Format != "png" {
+			return AgencyBranding{}, ErrValidation
+		}
+		brand = d.Brand{WordmarkDark: assetDescriptor(dark, base), WordmarkDarkGenerated: draft.WordmarkDarkGenerated, ShowAIIcon: draft.ShowAIIcon, WordmarkGenerated: draft.WordmarkGenerated, IconGenerated: draft.IconGenerated, IconText: draft.IconText, CopyrightHolder: draft.CopyrightHolder, CopyrightStyle: draft.CopyrightStyle, AgencyID: agency, Name: draft.Name, ApplicationName: draft.ApplicationName, Icon: assetDescriptor(icon, base), Wordmark: assetDescriptor(wordmark, base)}
 	}
 	brand.Version = latest + 1
 	brand.AgencyID = agency
@@ -217,7 +261,7 @@ func (s *Store) PublishBrand(ctx context.Context, agency, actor, base string, ex
 	if _, err = tx.ExecContext(ctx, `UPDATE ky_agency_branding SET published_version=$2,revision=revision+1,updated_by=$3,updated_at=$4 WHERE agency_id=$1`, agency, brand.Version, actor, time.Now()); err != nil {
 		return AgencyBranding{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE ky_brand_asset SET published_at=COALESCE(published_at,now()) WHERE agency_id=$1 AND id IN ($2,$3)`, agency, strings.TrimPrefix(brand.Icon.URL, base+"/api/v1/public/brand-assets/"), strings.TrimPrefix(brand.Wordmark.URL, base+"/api/v1/public/brand-assets/")); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE ky_brand_asset SET published_at=COALESCE(published_at,now()) WHERE agency_id=$1 AND id IN ($2,$3,$4)`, agency, strings.TrimPrefix(brand.Icon.URL, base+"/api/v1/public/brand-assets/"), strings.TrimPrefix(brand.Wordmark.URL, base+"/api/v1/public/brand-assets/"), strings.TrimPrefix(brand.WordmarkDark.URL, base+"/api/v1/public/brand-assets/")); err != nil {
 		return AgencyBranding{}, err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO ky_brand_change(agency_id,actor_id,action,revision) VALUES($1,$2,'publish',$3)`, agency, actor, expected+1); err != nil {
