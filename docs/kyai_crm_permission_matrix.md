@@ -735,3 +735,7 @@ AI 配置菜单的唯一真相仍为 `menu.platform.ai_configuration`。`platfor
 Agency/enterprise 只能经 Matrix API 读取已经发布给当前 workspace 的安全摘要：executor ID、名称、runtime、readiness 与脚本维护能力。不得读取账号标签、设备详情、公钥、凭据/credential revision、路径、授权会话、challenge、user code、原始任务输出或敏感诊断。
 
 详情、Session、WebSpace、Generation Run 和 Executor Task 越权查询统一按对应领域合同返回 404 或 403；凡可能形成资源 ID 探测的 Matrix 资源统一返回 404。
+
+## 组件中心（2026-10-30，本地实现）
+
+平台页面权限 `platform.component_center.view`（category=page），资源中文名称“组件中心”。菜单目录节点 `ky-component-center.catalog` 挂在 `group.ky-system-settings`，以平台页面权限绑定求可见性，不新增同名系统设置组或独立menu.权限编码。追加迁移111只给内置platform_root超级管理员默认授予查看权限，保留其他角色授权和菜单自定义元数据；未部署到准生产。独立静态预览仅含可信模拟数据，不是受保护业务API。详见 [实施与验证记录](component-center/实施与验证记录.md)。

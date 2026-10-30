@@ -32,3 +32,6 @@ Thumbs.db
 
 # 本项目本地环境配置，可能包含访问凭据
 /.env
+
+# Generated from component usage source by the Host build
+/apps/ky-admin-host/public/component-examples/

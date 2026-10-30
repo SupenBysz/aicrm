@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
-    "build": "vite build",
+    "dev": "node ../../scripts/generate_component_catalog.mjs --assets && vite --host 0.0.0.0 --port 5173",
+    "build": "node ../../scripts/generate_component_catalog.mjs --check && node ../../scripts/generate_component_catalog.mjs --assets && vite build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test:desktop-client": "node --test src/desktop-client.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -29,7 +29,8 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.14",
+    "@ky/plugin-component-center": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

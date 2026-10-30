@@ -16,6 +16,7 @@ export const WORKSPACE_LABELS: Record<string, string> = {
 };
 
 export const RESOURCE_LABELS: Record<string, string> = {
+  component_center: "组件中心",
   appearance: "外观主题",
   menu_catalog: "菜单管理",
   matrix_accounts: "矩阵账号",
@@ -108,6 +109,7 @@ export const DOMAIN_LABELS: Record<DomainKey, string> = {
 
 /** Maps a permission resource to its top-level domain. Unknown resources fall back to 平台治理. */
 export const RESOURCE_DOMAIN: Record<string, DomainKey> = {
+  component_center: "platform",
   agencies: "org",
   enterprises: "org",
   departments: "org",

@@ -1,0 +1,5 @@
+.cc-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:24px; }
+.cc-navigation { border-inline-end:1px solid var(--admin-stroke); padding-inline-end:12px; max-height:900px; overflow:auto; }
+.cc-navigation section { margin-block-end:18px; }
+.cc-navigation .ant-btn { display:block; width:100%; height:auto; text-align:start; white-space:normal; margin-block-start:5px; padding:7px 9px; font-size:13px; }
+@media (max-width:1000px) { .cc-layout { display:block; } .cc-navigation { display:none; } }

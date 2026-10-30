@@ -1,0 +1,28 @@
+import type { ComponentType } from "react";
+import type { DemoArgs } from "../catalog/protocol";
+export const loaders: Record<string, () => Promise<{ default: ComponentType<Partial<DemoArgs>> }>> = {
+  "button": () => import("../examples/button/usage"),
+  "input": () => import("../examples/input/usage"),
+  "select": () => import("../examples/select/usage"),
+  "switch": () => import("../examples/switch/usage"),
+  "tag": () => import("../examples/tag/usage"),
+  "table": () => import("../examples/table/usage"),
+  "tabs": () => import("../examples/tabs/usage"),
+  "form": () => import("../examples/form/usage"),
+  "drawer": () => import("../examples/drawer/usage"),
+  "modal": () => import("../examples/modal/usage"),
+  "alert": () => import("../examples/alert/usage"),
+  "empty": () => import("../examples/empty/usage"),
+  "skeleton": () => import("../examples/skeleton/usage"),
+  "list-page": () => import("../examples/list-page/usage"),
+  "detail-panel": () => import("../examples/detail-panel/usage"),
+  "list-overview": () => import("../examples/list-overview/usage"),
+  "brand-logo": () => import("../examples/brand-logo/usage"),
+  "ai-suffix": () => import("../examples/ai-suffix/usage"),
+  "theme-controls": () => import("../examples/theme-controls/usage"),
+  "design-tokens": () => import("../examples/design-tokens/usage"),
+  "typography-icons": () => import("../examples/typography-icons/usage"),
+  "list-pattern": () => import("../examples/list-pattern/usage"),
+  "permissions": () => import("../examples/permissions/usage"),
+  "batch-requests": () => import("../examples/batch-requests/usage"),
+};

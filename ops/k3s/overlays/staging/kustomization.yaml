@@ -24,7 +24,7 @@
     {
       "name": "ghcr.io/supenbysz/kycrm-membership",
       "newName": "ghcr.io/supenbysz/kycrm-membership",
-      "digest": "sha256:0dd40ab6971ecf839085946415baf79d83a4371a28c70a9b6930d19051404afc"
+      "digest": "sha256:2022118a6118b54233f08a970d724a667e656adecf10c040a1521b39d11ad57a"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-matrix",

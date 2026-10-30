@@ -22,6 +22,7 @@ description: AiCRM 解决方案级工程规范。Use when Codex works on an AiCR
 
 按任务加载 skill references：
 
+- 新增/修改后台UI、组件、主题、表单、抽屉、列表时，读 `references/component-reuse.md` 并检索项目组件索引；仅服务端或纯文字任务不要求浏览全部组件。
 - 改 Host/Core/Plugin/Desktop/Service/Shared 边界时，读 `references/module-boundaries.md`。
 - 改身份、角色、权限、菜单、数据范围、工作区缓存时，读 `references/permission-data-scope.md`。
 - 改 API、前后端契约、分页、错误码、请求上下文时，读 `references/api-contracts.md`。

@@ -57,6 +57,9 @@ importers:
       '@ky/plugin-audit-management':
         specifier: workspace:*
         version: link:../../plugins/ky-audit-management
+      '@ky/plugin-component-center':
+        specifier: workspace:*
+        version: link:../../plugins/ky-component-center
       '@ky/plugin-identity-management':
         specifier: workspace:*
         version: link:../../plugins/ky-identity-management
@@ -228,6 +231,40 @@ importers:
       react:
         specifier: ^19.2.7
         version: 19.2.7
+      react-router-dom:
+        specifier: ^7.18.1
+        version: 7.18.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  plugins/ky-component-center:
+    dependencies:
+      '@ky/admin-core':
+        specifier: workspace:*
+        version: link:../../packages/ky-admin-core
+    devDependencies:
+      '@ant-design/icons':
+        specifier: ^6.3.2
+        version: 6.3.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tanstack/react-query':
+        specifier: ^5.101.2
+        version: 5.101.2(react@19.2.7)
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      antd:
+        specifier: ^6.5.0
+        version: 6.5.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.2.7
+        version: 19.2.7(react@19.2.7)
       react-router-dom:
         specifier: ^7.18.1
         version: 7.18.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
