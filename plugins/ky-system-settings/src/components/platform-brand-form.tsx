@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Form, Input, Switch, Typography, Upload, Select, message } from "antd";
-import { BrandLogoLockup, generatedBrandImage, formatCopyright, copyrightStyleOptions, useRequestClient, type RequestClient } from "@ky/admin-core";
+import { Button, Form, Input, Switch, Typography, Upload, message } from "antd";
+import { BrandLogoLockup, generatedBrandImage, useRequestClient, type RequestClient } from "@ky/admin-core";
 import type { PlatformProfile } from "../api";
 import "../../../../packages/ky-admin-core/src/brand-form.css";
 const assetPath = "/api/v1/platform/platform-profile/assets";
@@ -33,7 +33,7 @@ export function platformBrandFormValues(p:PlatformProfile):PlatformProfile {
 }
 export function PlatformBrandForm({form,disabled,onBusyChange,onDirty}:{form:ReturnType<typeof Form.useForm<PlatformProfile>>[0];disabled:boolean;onBusyChange:(busy:boolean)=>void;onDirty:()=>void}) {
  const client=useRequestClient();
- const brand=Form.useWatch("brand",form), style=Form.useWatch("copyrightStyle",form), company=Form.useWatch("companyName",form);
+ const brand=Form.useWatch("brand",form);
  const [previews,setPreviews]=useState<Record<string,string>>({});
  const name=brand?.name || "KyCRM", iconText=brand?.iconText || name;
  const generated=useMemo(()=>({icon:generatedBrandImage(iconText,"icon"),wordmark:generatedBrandImage(name,"wordmark"),wordmarkDark:generatedBrandImage(name,"wordmark",true)}),[iconText,name]);
@@ -72,10 +72,6 @@ export function PlatformBrandForm({form,disabled,onBusyChange,onDirty}:{form:Ret
    </section>
   })}</div>
   <Form.Item name={["brand","showAiIcon"]} label="显示 AI 图标" valuePropName="checked"><Switch checkedChildren="显示" unCheckedChildren="隐藏"/></Form.Item>
-  <Typography.Title level={5}>版权信息</Typography.Title>
-  <Form.Item name={["brand","copyrightHolder"]} label="版权署名（可选）" extra="留空使用公司 / 平台主体名称。" rules={[{max:120}]}><Input placeholder="填写主体名称，不含©或年份"/></Form.Item>
-  <Form.Item name="copyrightStyle" label="版权显示风格"><Select options={copyrightStyleOptions}/></Form.Item>
-  <Typography.Paragraph type="secondary">预览：{formatCopyright(brand?.copyrightHolder || company || name,style || "standard")}</Typography.Paragraph>
   <section className="agency-brand-previews"><Typography.Text strong>应用 LOGO 预览</Typography.Text>
    <Typography.Paragraph type="secondary">按后台顶部实际尺寸展示；窄屏可横向查看完整效果。</Typography.Paragraph>
    {[false,true].map(dark=><div key={String(dark)} className={`agency-brand-preview ${dark?"dark":"light"}`}><span className="agency-brand-preview-label">{dark?"深色背景":"浅色背景"}</span><div className="agency-brand-preview-scroll"><div className="agency-brand-preview-header">
