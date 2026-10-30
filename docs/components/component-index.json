@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contentHash": "06a197a5f9156ff7b3f55e962298a6626f2244aece200d8d0d1687271ecad9e7",
+  "contentHash": "aa775aebc3c8938010e3f3a164b49a5965b540cc329e6726bd5d63792943b14e",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "ea37ab77433d4249acc610becdb2c5951d23c129bf5ff6d8143cc2fe5f742f6a",
     "apps/ky-admin-host/src/styles.css": "127b8837da3e51c3ebe6393c9f45e45e8de20aa4a7ac21c67b955db593641ece",
@@ -686,11 +686,11 @@
       "examples": [
         {
           "id": "default",
-          "title": "列表工具栏"
+          "title": "双形态对照"
         },
         {
           "id": "header",
-          "title": "顶部胶囊"
+          "title": "仅顶部胶囊"
         },
         {
           "id": "disabled",
