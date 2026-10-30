@@ -55,7 +55,7 @@ template/   从本工程梳理出的衍生模板资产和解决方案级 skill�
 
 当前阶段基线以 `docs/` 下的文档为准，重点文档包括：
 
-- 组件中心：[完整迭代方案](docs/component-center/组件中心完整迭代方案.md)，覆盖真实组件展示、首期清单、模拟预览隔离、AI复用索引、项目Skill规则及分批验收；首期已完成本地实现与验证，见[实施记录](docs/component-center/实施与验证记录.md)，尚未部署。
+- 组件中心：[完整迭代方案](docs/component-center/组件中心完整迭代方案.md)，覆盖真实组件展示、首期清单、模拟预览隔离、AI复用索引、项目Skill规则及分批验收；首期已部署准生产，见[实施记录](docs/component-center/实施与验证记录.md)与[发布记录](docs/deployment/2026-10-30-component-center-release.md)；入口为管理中心→系统设置→组件中心。
 
 - 列表概览：[完整迭代方案](docs/list-overviews/列表概览完整迭代方案.md)，包含列表分级、指标口径、查询联动、权限隔离、接口与分批验收；首期实现见[实施与验证记录](docs/list-overviews/实施与验证记录.md)，发布结果见[部署记录](docs/deployment/2026-10-30-list-overviews-release.md)。
 

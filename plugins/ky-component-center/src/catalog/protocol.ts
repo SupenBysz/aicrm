@@ -20,8 +20,14 @@ export function normalizeQuery(params: URLSearchParams, id?:string) {
  const cat=params.get("category");if(cat&&Object.hasOwn(categories,cat))p.set("category",cat);
  const status=params.get("status");if(status&&["experimental","stable","deprecated"].includes(status))p.set("status",status);
  const item=id?findComponent(id):undefined;const example=params.get("example");if(item)p.set("example",item.examples.some(e=>e.id===example)?example!:item.examples[0].id);
- const theme=params.get("previewTheme");p.set("previewTheme",themes.includes(theme as typeof themes[number])?theme!:"classic-gold");
- const mode=params.get("previewMode");p.set("previewMode",["light","dark","system"].includes(mode||"")?mode!:"light");
+ const theme=params.get("previewTheme");p.set("previewTheme",(theme==="current"||themes.includes(theme as typeof themes[number]))?theme!:"current");
+ const mode=params.get("previewMode");p.set("previewMode",["current","light","dark","system"].includes(mode||"")?mode!:"current");
  p.set("viewport",["narrow","desktop","wide","auto"].includes(params.get("viewport")||"")?params.get("viewport")!:"auto");return p;
 }
 export function filterCatalog(q:string,category?:string,status?:string) {const needle=q.toLocaleLowerCase();return catalog.filter(item=>(!category||item.category===category)&&(!status||item.status===status)&&[item.title,item.summary,...item.aliases,...item.keywords].join(" ").toLocaleLowerCase().includes(needle));}
+
+// Only resolved appearance values cross the preview boundary; no Host context is shared.
+export function resolvePreviewAppearance(params: URLSearchParams, appearance?: {themeId: PreviewConfig["themeId"]; dark: boolean} | null): Pick<PreviewConfig,"themeId"|"mode"> {
+ const selectedTheme=params.get("previewTheme"),selectedMode=params.get("previewMode");
+ return {themeId:themes.includes(selectedTheme as PreviewConfig["themeId"])?selectedTheme as PreviewConfig["themeId"]:appearance?.themeId||"classic-gold",mode:selectedMode==="light"||selectedMode==="dark"||selectedMode==="system"?selectedMode:appearance?.dark?"dark":"light"};
+}

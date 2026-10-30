@@ -8,7 +8,7 @@ test('preview accepts bounded known configuration and rejects side-channel/inval
  assert.ok(p.validReply({version:1,kind:'applied',generation:'cc_test'},'cc_test'));assert.equal(p.validReply({version:1,kind:'applied',generation:'cc_old'},'cc_test'),false);assert.equal(p.validReply({version:1,kind:'error',generation:'cc_test',code:'sensitive stack'},'cc_test'),false);
 });
 test('catalog search and canonical deep links preserve only supported state',()=>{
- const q=p.normalizeQuery(new URLSearchParams('example=bad&previewTheme=bad&previewMode=bad&viewport=bad&token=secret&q=ListOverview'),'list-overview');assert.equal(q.get('example'),'default');assert.equal(q.get('previewTheme'),'classic-gold');assert.equal(q.get('previewMode'),'light');assert.equal(q.get('viewport'),'auto');assert.equal(q.get('token'),null);assert.equal(p.filterCatalog('ListOverview')[0].id,'list-overview');assert.equal(p.filterCatalog('', 'basic').every(x=>x.category==='basic'),true);assert.equal(p.filterCatalog('no-such-component').length,0);
+ const q=p.normalizeQuery(new URLSearchParams('example=bad&previewTheme=bad&previewMode=bad&viewport=bad&token=secret&q=ListOverview'),'list-overview');assert.equal(q.get('example'),'default');assert.equal(q.get('previewTheme'),'current');assert.equal(q.get('previewMode'),'current');assert.equal(q.get('viewport'),'auto');assert.equal(q.get('token'),null);assert.equal(p.filterCatalog('ListOverview')[0].id,'list-overview');assert.equal(p.filterCatalog('', 'basic').every(x=>x.category==='basic'),true);assert.equal(p.filterCatalog('no-such-component').length,0);
 });
 test('copyable examples and deterministic registry stay synchronized, menu has one existing parent',()=>{
  execFileSync(process.execPath,['scripts/generate_component_catalog.mjs','--check'],{cwd:root});execFileSync(process.execPath,['scripts/generate_menu_catalog.mjs','--check'],{cwd:root});
@@ -35,3 +35,13 @@ test('real frame ignores wrong origin/source/generation, acknowledges configurat
 });
 
  test('demo client only serves fixed GET fixtures and rejects all other requests',async()=>{const file=join(temp,'fixtures.mjs');writeFileSync(file,ts.transpileModule(readFileSync(new URL('./preview/fixtures.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);const {createDemoClient}=await import(pathToFileURL(file));const client=createDemoClient();const first=await client.request('/demo/options');assert.equal(first[0].label,'虚构选项');first[0].label='changed';assert.equal((await client.request('/demo/options'))[0].label,'虚构选项');for(const [path,options] of [['/api/v1/roles',{}],['https://example.com',{}],['/demo/options',{method:'POST'}],['/demo/options',{body:{token:'fixture'}}]])await assert.rejects(client.request(path,options),/拒绝/);});
+
+test('preview follows Host appearance dynamically while explicit overrides remain independent',()=>{
+ const q=p.normalizeQuery(new URLSearchParams(),'form');
+ assert.deepEqual(p.resolvePreviewAppearance(q,{themeId:'graphite-cyan',dark:false}),{themeId:'graphite-cyan',mode:'light'});
+ assert.deepEqual(p.resolvePreviewAppearance(q,{themeId:'jade-green',dark:true}),{themeId:'jade-green',mode:'dark'});
+ q.set('previewTheme','business-blue');
+ assert.deepEqual(p.resolvePreviewAppearance(q,{themeId:'jade-green',dark:true}),{themeId:'business-blue',mode:'dark'});
+ q.set('previewMode','light');
+ assert.deepEqual(p.resolvePreviewAppearance(q,{themeId:'jade-green',dark:true}),{themeId:'business-blue',mode:'light'});
+});
