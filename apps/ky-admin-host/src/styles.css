@@ -3777,3 +3777,27 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
  background-color: var(--admin-surface) !important;
  border-color: var(--admin-stroke) !important;
 }
+
+/* Compact toolbar segments have a visible rail independent of the page background. */
+.list-toolbar-segmented.ant-segmented {
+  background: var(--admin-surface-soft) !important;
+  border: 1px solid var(--admin-stroke);
+  border-radius: 10px;
+  padding: 3px;
+}
+.list-toolbar-segmented .ant-segmented-item,
+.list-toolbar-segmented .ant-segmented-thumb {
+  border-radius: 7px;
+}
+.list-toolbar-segmented .ant-segmented-item-selected,
+.list-toolbar-segmented .ant-segmented-thumb {
+  background: var(--admin-surface) !important;
+}
+:root[data-admin-theme="dark"] .list-toolbar-segmented.ant-segmented {
+  background: rgba(0, 0, 0, 0.32) !important;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+:root[data-admin-theme="dark"] .list-toolbar-segmented .ant-segmented-item-selected,
+:root[data-admin-theme="dark"] .list-toolbar-segmented .ant-segmented-thumb {
+  background: rgba(255, 255, 255, 0.12) !important;
+}

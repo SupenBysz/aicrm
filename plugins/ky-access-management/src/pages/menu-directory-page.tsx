@@ -105,7 +105,7 @@ export function MenuDirectoryPage() {
     </Space>}
   ];
   return <>
-    <ListPageCard title="菜单管理" subtitle="维护通用管理中心与工作台菜单结构、启停和 WebView 页面配置。" toolbar={<Space wrap><Segmented value={directory} options={[{value:"management",label:"管理中心"},{value:"workbench",label:"工作台"}]} onChange={v=>setDirectory(v as MenuDirectoryType)}/>{canManage?<Button type="primary" disabled={query.isFetching||query.isError||!query.data} onClick={openCreate}>新建菜单</Button>:null}</Space>}>
+    <ListPageCard title="菜单管理" subtitle="维护通用管理中心与工作台菜单结构、启停和 WebView 页面配置。" toolbar={<Space wrap><Segmented className="list-toolbar-segmented" value={directory} options={[{value:"management",label:"管理中心"},{value:"workbench",label:"工作台"}]} onChange={v=>setDirectory(v as MenuDirectoryType)}/>{canManage?<Button type="primary" disabled={query.isFetching||query.isError||!query.data} onClick={openCreate}>新建菜单</Button>:null}</Space>}>
       {query.isError?<Alert type="error" showIcon message="菜单目录读取失败" description="请确认数据库迁移已由部署流程执行，并检查当前权限。"/>:null}
       <Table rowKey="menuKey" columns={columns} dataSource={treeRows} loading={query.isFetching} pagination={false}/>
     </ListPageCard>
