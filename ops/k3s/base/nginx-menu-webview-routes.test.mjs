@@ -34,3 +34,23 @@ test("menu runtime resolve is routed to matrix before the generic membership men
   assert.ok(config.indexOf(runtimeRoute) < config.indexOf("location /api/v1/menu-webviews/"));
   assert.match(genericBlock, /proxy_pass http:\/\/membership:18083;/);
 });
+
+// Summary suffixes must share the same upstream/auth contract as their lists.
+test("seven overview list prefixes reach their owning services", () => {
+  for (const [location, upstream] of [
+    ["/api/v1/platform/agencies", "org:18082"],
+    ["/api/v1/platform/enterprises", "org:18082"],
+    ["/api/v1/platform/qualifications", "org:18082"],
+    ["/api/v1/qualifications", "org:18082"],
+    ["/api/v1/workspace/members", "membership:18083"],
+    ["/api/v1/invitations", "membership:18083"],
+    ["/api/v1/matrix-accounts", "matrix:18085"],
+    ["/api/v1/login-logs", "auth:18081"],
+  ]) {
+    const block = locationBlock(location);
+    assert.ok(block.includes(`proxy_pass http://${upstream};`));
+    for (const header of ["Authorization", "X-KY-Workspace-Id", "X-KY-Workspace-Type", "X-KY-Request-Id"]) {
+      assert.ok(block.includes(`proxy_set_header ${header} `));
+    }
+  }
+});
