@@ -1,0 +1,6 @@
+-- psql -v org_writer=actual_org_role -f this-file (migration role executes DDL)
+GRANT SELECT,INSERT,UPDATE,DELETE ON ky_document,ky_document_draft TO :"org_writer";
+-- Runtime role must not own these tables or inherit a broader writer role.
+REVOKE UPDATE,DELETE,TRUNCATE ON ky_document_version FROM :"org_writer";
+GRANT SELECT,INSERT ON ky_document_version TO :"org_writer";
+GRANT SELECT,UPDATE ON ky_document_link_binding TO :"org_writer";

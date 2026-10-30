@@ -133,6 +133,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// Settings
 	mux.HandleFunc("GET /api/v1/settings", s.ws(orgWs, perms("agency.settings.view", "enterprise.settings.view"), s.getSettings))
 	mux.HandleFunc("PATCH /api/v1/settings", s.ws(orgWs, perms("agency.settings.update", "enterprise.settings.update"), s.updateSettings))
+	s.documentRoutes(mux)
 	mux.HandleFunc("GET /api/v1/platform/system-settings", s.ws("platform", perms("platform.settings.view"), s.getPlatformSettings))
 	mux.HandleFunc("GET /api/v1/public/appearance", s.publicAppearance)
 	mux.HandleFunc("GET /api/v1/platform/appearance", s.ws("platform", perms("platform.appearance.view"), s.getAppearance))

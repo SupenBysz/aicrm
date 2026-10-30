@@ -2063,3 +2063,15 @@ POST /internal/v1/executor-tasks/{taskId}/cancel
 ```
 
 仅允许 loopback/受控内网并校验 `X-KY-Internal-Token` 与 `X-KY-Request-Id`。响应只返回冻结 binding、任务状态或安全结果投影，不返回凭据、路径、账号原文或原始 Codex/App Server 输出。
+
+## 平台协议与公开文档（2026-10-31增量）
+
+完整合同与实施边界见[协议与文档方案](public-documents/协议与文档完整迭代方案.md)及[实施记录](public-documents/实施与验证记录.md)。
+
+公开例外新增GET/HEAD `/api/v1/public/documents/{slug}`、`/api/v1/public/documents/{slug}/versions/{version}`、`/api/v1/public/document-links`，无需Authorization、Cookie、workspace Header。只返回有效发布快照；未知/未发布/下线统一404，先检查状态再判断ETag。成功响应必须重新验证缓存，错误no-store。
+
+管理端`/api/v1/platform/documents`及`/api/v1/platform/document-links`要求平台根workspace及各操作权限。草稿及状态变更携带expectedRevision；发布另携带publishKey，同一key绑定同一源修订。入口绑定PATCH携带purpose、documentId（可null）、revision，冲突409。首期发布立即生效，不提供未来生效时间。
+
+#### 文字 LOGO 亮暗素材兼容扩展（2026-10-31）
+
+平台 `brand` 与机构品牌草稿保留 `wordmarkId`（亮色），增加 `wordmarkDarkId`、`wordmarkDarkGenerated`、`wordmarkDarkGeneratorVersion`。两类文字素材上传均沿用 `kind: "wordmark"`，由对应 ID 区分用途；机构发布/有效品牌及公开入口增加 `wordmarkDark` 资产描述。机构所有权验证及平台当前引用公开规则同样适用于暗色素材。旧客户端省略 `wordmarkDarkId` 时保留原暗色设置，显式空字符串表示清空；旧发布版本无暗色素材时客户端回退品牌文字，不复用黑色亮色图。

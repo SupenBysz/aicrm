@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	d "github.com/Kysion/KyaiCRM/shared/branding"
 	"os"
@@ -60,7 +61,11 @@ func TestBrandDatabase(t *testing.T) {
 	if _, err = s.PublicBrandAsset(ctx, asset.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatal("draft publicly available", err)
 	}
-	draft := BrandDraft{Name: "Team", IconText: "Ky", WordmarkID: asset.ID}
+	darkAsset, err := s.SaveBrandAsset(ctx, "a", "png", []byte("dark-fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := BrandDraft{Name: "Team", IconText: "Ky", WordmarkID: asset.ID, WordmarkDarkID: darkAsset.ID}
 	if err = s.SaveBrandDraft(ctx, "b", "actor", 0, draft); !errors.Is(err, ErrValidation) {
 		t.Fatal("cross-agency asset accepted", err)
 	}
@@ -71,7 +76,7 @@ func TestBrandDatabase(t *testing.T) {
 		t.Fatal("stale update accepted", err)
 	}
 	pub, err := s.PublishBrand(ctx, "a", "actor", "", 1, 0)
-	if err != nil || pub.PublishedVersion != 1 || pub.Published.ShowAIIcon {
+	if err != nil || pub.PublishedVersion != 1 || pub.Published.ShowAIIcon || !strings.HasSuffix(pub.Published.WordmarkDark.URL, darkAsset.ID) {
 		t.Fatal(pub, err)
 	}
 	if _, err = s.PublicBrandAsset(ctx, asset.ID); err != nil {
@@ -80,6 +85,9 @@ func TestBrandDatabase(t *testing.T) {
 	pub, err = s.PublishBrand(ctx, "a", "actor", "", 2, 1)
 	if err != nil || pub.PublishedVersion != 2 {
 		t.Fatal(pub, err)
+	}
+	if _, err = s.PublicBrandAsset(ctx, darkAsset.ID); err != nil {
+		t.Fatal("dark asset unavailable", err)
 	}
 	// The suffix is versioned separately from images and survives draft reload,
 	// publication, explicit disable, rollback, and effective-brand inheritance.
@@ -120,5 +128,37 @@ func TestBrandDatabase(t *testing.T) {
 	after, err := s.AgencyBranding(ctx, "a")
 	if err != nil || after.PublishedVersion != 6 || after.Revision != 9 {
 		t.Fatal(after, err)
+	}
+}
+
+func TestDarkBrandCompatibility(t *testing.T) {
+	before := BrandDraft{WordmarkDarkID: "dark", WordmarkDarkGenerated: true, WordmarkDarkGeneratorVersion: 1}
+	for _, tc := range []struct{ raw, want string }{
+		{`{"name":"Brand"}`, "dark"},
+		{`{"name":"Brand","wordmarkDarkId":""}`, ""},
+		{`{"name":"Brand","wordmarkDarkId":"new"}`, "new"},
+	} {
+		var in BrandDraft
+		if err := json.Unmarshal([]byte(tc.raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		preserveDarkBrand(&in, before)
+		if in.WordmarkDarkID != tc.want {
+			t.Fatal(tc.raw, in)
+		}
+		p := PlatformProfile{Brand: before}
+		normalizePlatformProfile(&p)
+		out, _, err := MergePlatformProfile(p, map[string]json.RawMessage{"brand": json.RawMessage(tc.raw)})
+		if err != nil || out.Brand.WordmarkDarkID != tc.want {
+			t.Fatal(out, err)
+		}
+	}
+	p := PlatformProfile{Brand: before}
+	effective := resolveBrand(nil, p)
+	if !strings.HasSuffix(effective.WordmarkDark.URL, "dark") || !effective.WordmarkDarkGenerated {
+		t.Fatal(effective)
+	}
+	if validBrandDraft(BrandDraft{WordmarkDarkID: strings.Repeat("x", 128)}) {
+		t.Fatal("oversized ID accepted")
 	}
 }

@@ -15,7 +15,7 @@ for(const row of catalog){
  for(const p of [...row.sourcePaths,...row.files])if(!p||p.startsWith('/')||p.includes('..')||!existsSync(resolve(root,p)))throw Error('Missing or unsafe path '+p);
  files[row.id]=row.files.map(p=>{const text=readFileSync(resolve(root,p),'utf8');
   const ast=ts.createSourceFile(p,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
-  for(const n of ast.statements)if(ts.isImportDeclaration(n)&&!['react','antd','react-router-dom','@ky/admin-core','@ant-design/icons'].includes(n.moduleSpecifier.text))throw Error('Private example dependency '+p);
+  for(const n of ast.statements)if(ts.isImportDeclaration(n)&&!['react','antd','react-router-dom','@ky/admin-core','@ant-design/icons','@ky/markdown','@ky/markdown/editor'].includes(n.moduleSpecifier.text))throw Error('Private example dependency '+p);
   if(/\bfetch\s*\(|\bXMLHttpRequest\b|\blocalStorage\b|\bsessionStorage\b|window\.aicrm|window\.parent|window\.top|\beval\s*\(/.test(text))throw Error('Forbidden example effect '+p);
   return {path:p,text};
  });

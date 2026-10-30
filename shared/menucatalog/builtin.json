@@ -867,6 +867,7 @@
       "permissionBindings": {
         "platform": [
           "platform.settings.view",
+          "platform.documents.view",
           "platform.appearance.view",
           "platform.dictionaries.view",
           "platform.basic_info.view",

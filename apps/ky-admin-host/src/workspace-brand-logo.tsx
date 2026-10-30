@@ -1,4 +1,4 @@
-import { BrandLogoLockup } from "@ky/admin-core";
+import { BrandLogoLockup, useAppearance } from "@ky/admin-core";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { requestClient } from "./remote-api";
 import { usePlatformProfile } from "./platform-profile";
@@ -7,6 +7,7 @@ interface Brand {
   iconText?: string;
   name: string;
   applicationName: string;
+  wordmarkDark?: {url:string};
   wordmarkGenerated?: boolean;
   wordmark?: {
     url: string;
@@ -24,6 +25,7 @@ export function WorkspaceBrandLogo({
   };
   collapsed: boolean;
 }) {
+  const {dark} = useAppearance();
   const p = usePlatformProfile(),
     key = `${workspace.type}:${workspace.id}:${workspace.membershipId}`;
   const [resolved, setResolved] = useState<{
@@ -64,6 +66,7 @@ export function WorkspaceBrandLogo({
  iconText:p.brand?.iconText, showAiIcon:p.brand?.showAiIcon,
  wordmarkGenerated:p.brand?.wordmarkGenerated,
  wordmark:p.brand?.wordmarkId ? {url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(p.brand.wordmarkId)} : undefined,
+ wordmarkDark:p.brand?.wordmarkDarkId ? {url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(p.brand.wordmarkDarkId)} : undefined,
  effectiveFingerprint:"platform"
  } : resolved?.key === key ? resolved.brand : undefined;
   const name =
@@ -92,7 +95,7 @@ export function WorkspaceBrandLogo({
         )}
       </span>
     );
-  const url = brand?.wordmark?.url;
+  const url = dark ? brand?.wordmarkDark?.url : brand?.wordmark?.url;
   return (
     <BrandLogoLockup compactInset={collapsed ? 0 : 6} showAIIcon={!collapsed && brand?.showAiIcon === true} maxHeight={40}>
       {url && broken !== url && !collapsed ? (
@@ -103,9 +106,7 @@ export function WorkspaceBrandLogo({
             maxHeight: 40,
             maxWidth: brand?.showAiIcon ? "calc(100% - 37px)" : "100%",
             objectFit: "contain",
-            ...(brand?.wordmarkGenerated
-              ? { filter: "var(--brand-generated-filter,none)" }
-              : {}),
+
           }}
           onError={() => setBroken(url)}
         />

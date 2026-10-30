@@ -1,0 +1,16 @@
+import { useEffect, useRef, useState } from "react";
+import { App, Button, Input, Segmented, Space } from "antd";
+import { MarkdownReader } from "./index";
+const maxBytes=1048576;
+export function MarkdownEditor({value,onChange,disabled=false,fileActions=true}:{value:string;onChange:(v:string)=>void;disabled?:boolean;fileActions?:boolean}){
+ const [mode,setMode]=useState("split");const [narrow,setNarrow]=useState(false);
+ useEffect(()=>{const media=matchMedia("(max-width:760px)");const sync=()=>{setNarrow(media.matches);if(media.matches)setMode(v=>v==="split"?"edit":v)};sync();media.addEventListener("change",sync);return()=>media.removeEventListener("change",sync)},[]);const input=useRef<HTMLTextAreaElement|null>(null);const file=useRef<HTMLInputElement|null>(null);const {message,modal}=App.useApp();
+ function insert(before:string,after=""){const el=input.current;const start=el?.selectionStart??value.length,end=el?.selectionEnd??value.length;change(value.slice(0,start)+before+value.slice(start,end)+after+value.slice(end))}
+ function change(v:string){if(new TextEncoder().encode(v).length>maxBytes){void message.error("正文不能超过1MiB");return}onChange(v)}
+ return <Space orientation="vertical" style={{width:"100%"}}><Space wrap><Segmented className="list-toolbar-segmented" value={mode} options={[{value:"edit",label:"编辑"},{value:"split",label:"双栏",disabled:narrow},{value:"preview",label:"预览"}]} onChange={setMode}/>{!disabled&&<><Button onClick={()=>insert("\n## ")}>标题</Button><Button onClick={()=>insert("**","**")}>加粗</Button><Button onClick={()=>insert("\n- ")}>列表</Button><Button onClick={()=>insert("\n> ")}>引用</Button><Button onClick={()=>insert("[","](https://example.com)")}>链接</Button><Button onClick={()=>insert("\n| 标题 | 内容 |\n| --- | --- |\n| 项目 | 说明 |\n")}>表格</Button><Button onClick={()=>insert("\n```\n","\n```\n")}>代码</Button>{fileActions&&<Button onClick={()=>file.current?.click()}>导入.md</Button>}</>}{fileActions&&<Button onClick={()=>{const u=URL.createObjectURL(new Blob([value],{type:"text/markdown;charset=utf-8"}));const a=document.createElement("a");a.href=u;a.download="document.md";a.click();URL.revokeObjectURL(u)}}>导出.md</Button>}</Space>
+ <input ref={file} type="file" accept=".md" hidden onChange={async e=>{const f=e.target.files?.[0];e.target.value="";if(!f)return;if(!f.name.toLowerCase().endsWith(".md")||f.size>maxBytes){void message.error("请选择不超过1MiB的.md文件");return}try{const text=new TextDecoder("utf-8",{fatal:true}).decode(await f.arrayBuffer());modal.confirm({title:"导入会替换当前草稿正文",content:<div style={{maxHeight:240,overflow:"auto"}}><MarkdownReader markdown={text}/></div>,okText:"替换草稿",onOk:()=>change(text)})}catch{void message.error("文件不是有效UTF-8文本")}}}/>
+ <div className={`document-editor-grid document-editor-${mode}`}>
+ {mode!=="preview"&&<textarea aria-label="Markdown正文" ref={input} value={value} readOnly={disabled} onChange={e=>change(e.target.value)} style={{width:"100%",minHeight:420,padding:12,background:"var(--admin-surface)",color:"var(--admin-text)",border:"1px solid var(--admin-stroke)",borderRadius:8,fontFamily:"monospace",resize:"vertical"}}/>}
+ {mode!=="edit"&&<div style={{minWidth:0,padding:16,border:"1px solid var(--admin-stroke)",borderRadius:8}}><MarkdownReader markdown={value}/></div>}
+ </div></Space>
+}

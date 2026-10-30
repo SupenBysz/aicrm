@@ -21,5 +21,15 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "typescript": "^6.0.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./theme": {
+      "types": "./src/theme/tokens.ts",
+      "default": "./src/theme/tokens.ts"
+    }
   }
 }

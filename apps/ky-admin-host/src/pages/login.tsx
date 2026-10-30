@@ -1,6 +1,7 @@
+import { PublicDocumentLinks } from "../public-document-links";
 import {useQuery} from "@tanstack/react-query";
 import {requestClient} from "../remote-api";
-import { BrandLogoLockup, type CopyrightStyle } from "@ky/admin-core";
+import { BrandLogoLockup, useAppearance, type CopyrightStyle } from "@ky/admin-core";
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from "antd";
 import { useState,useLayoutEffect } from "react";
@@ -15,17 +16,20 @@ const PASSWORD_MIN_LENGTH = 6;
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const {dark}=useAppearance();
   const profile=usePlatformProfile();
- const entry=useQuery({queryKey:["public-entry",window.location.host],retry:false,queryFn:()=>requestClient.request<{institution:boolean;brand?:{name:string;applicationName:string;copyrightHolder:string;copyrightStyle:CopyrightStyle;showAiIcon?:boolean;wordmarkGenerated?:boolean;wordmark?:{url:string}}}>("/api/v1/public/entry",{skipAuthRedirect:true})});
+ const entry=useQuery({queryKey:["public-entry",window.location.host],retry:false,queryFn:()=>requestClient.request<{institution:boolean;brand?:{name:string;applicationName:string;copyrightHolder:string;copyrightStyle:CopyrightStyle;showAiIcon?:boolean;wordmarkGenerated?:boolean;wordmarkDark?:{url:string};wordmark?:{url:string}}}>("/api/v1/public/entry",{skipAuthRedirect:true})});
  const brand=entry.data?.institution?entry.data.brand:profile.brand?.name ? {
  name:profile.brand.name, applicationName:profile.brand.applicationName || profile.logoTextLong,
  copyrightHolder:profile.brand.copyrightHolder || profile.name, copyrightStyle:profile.copyrightStyle,
  showAiIcon:profile.brand.showAiIcon, wordmarkGenerated:profile.brand.wordmarkGenerated,
+ wordmarkDark:profile.brand.wordmarkDarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkDarkId)}:undefined,
  wordmark:profile.brand.wordmarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkId)}:undefined
  }:undefined;
  const {icpRecord,refresh}=profile;const logoTextLong=brand?.name??profile.logoTextLong,companyName=brand?.copyrightHolder??profile.name,copyrightStyle=brand?.copyrightStyle??profile.copyrightStyle,ready=profile.ready&&entry.isSuccess&&(!entry.data.institution||!!brand),error=profile.error||entry.isError;
   const [submitting, setSubmitting] = useState(false);
- const [imageBroken,setImageBroken]=useState(false);
+ const [imageBroken,setImageBroken]=useState("");
+ const wordmarkUrl=dark?brand?.wordmarkDark?.url:brand?.wordmark?.url;
  useLayoutEffect(()=>{document.title=ready?`${logoTextLong} 后台`:"管理后台";return()=>{document.title="管理后台"}},[ready,logoTextLong]);
  if(!ready)return <div role="status" className="auth-page">{error?<Button onClick={()=>{refresh();void entry.refetch()}}>品牌加载失败，重试</Button>:"正在加载…"}</div>;
 
@@ -66,7 +70,7 @@ export function LoginPage() {
               <div className="login-hero">
                 <div>
                   <Typography.Text className="login-eyebrow" type="secondary">
-                    <BrandLogoLockup showAIIcon={brand?.showAiIcon === true} maxHeight={48}>{brand?.wordmark?.url&&!imageBroken?<img src={brand.wordmark.url} alt={logoTextLong} style={{maxWidth:240,maxHeight:48,filter:brand.wordmarkGenerated?"var(--brand-generated-filter,none)":undefined}} onError={()=>setImageBroken(true)}/>:`${logoTextLong} Console`}</BrandLogoLockup>
+                    <BrandLogoLockup showAIIcon={brand?.showAiIcon === true} maxHeight={48}>{wordmarkUrl&&imageBroken!==wordmarkUrl?<img src={wordmarkUrl} alt={logoTextLong} style={{maxWidth:240,maxHeight:48}} onError={()=>setImageBroken(wordmarkUrl)}/>:`${logoTextLong} Console`}</BrandLogoLockup>
                   </Typography.Text>
                   <Typography.Title className="login-title" level={1}>
                     后台登录
@@ -76,24 +80,7 @@ export function LoginPage() {
                   </Typography.Paragraph>
                 </div>
 
-                <Space size={16} wrap>
-                  <Typography.Link
-                    href="https://kyaicrm.entai.im/privacy"
-                    rel="noreferrer"
-                    style={{ fontSize: 12 }}
-                    target="_blank"
-                  >
-                    隐私政策
-                  </Typography.Link>
-                  <Typography.Link
-                    href="https://kyaicrm.entai.im/terms"
-                    rel="noreferrer"
-                    style={{ fontSize: 12 }}
-                    target="_blank"
-                  >
-                    服务条款
-                  </Typography.Link>
-                </Space>
+                <PublicDocumentLinks />
               </div>
             </Col>
 

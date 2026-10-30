@@ -1588,7 +1588,7 @@ export const catalog = [
     ],
     "category": "brand",
     "kind": "component",
-    "summary": "可选AI后缀与分隔点，颜色跟随currentColor。",
+    "summary": "可选AI后缀与分隔点，默认使用当前主题强调色，不继承Logo文字的黑白色。",
     "keywords": [
       "brand",
       "AI品牌后缀 BrandAISuffix"
@@ -1908,6 +1908,96 @@ export const catalog = [
     "relatedComponents": [
       "table",
       "permissions"
+    ]
+  },
+  {
+    "id": "markdown",
+    "title": "Markdown 编辑与阅读",
+    "aliases": [
+      "MarkdownReader",
+      "MarkdownEditor"
+    ],
+    "category": "basic",
+    "kind": "component",
+    "summary": "安全Markdown编辑、导入导出与统一阅读，示例只修改虚构内容。",
+    "keywords": [
+      "Markdown",
+      "协议",
+      "文档",
+      "编辑器"
+    ],
+    "status": "experimental",
+    "environment": "web_and_client",
+    "owner": "@ky/markdown",
+    "sourcePaths": [
+      "packages/ky-markdown/src/index.tsx",
+      "packages/ky-markdown/src/editor.tsx",
+      "packages/ky-markdown/src/style.css"
+    ],
+    "dependencies": [
+      "react",
+      "antd",
+      "react-markdown",
+      "remark-gfm"
+    ],
+    "controls": [
+      "disabled"
+    ],
+    "defaults": {
+      "label": "Markdown",
+      "count": 12,
+      "disabled": false,
+      "showAI": true
+    },
+    "examples": [
+      {
+        "id": "default",
+        "title": "编辑与预览"
+      },
+      {
+        "id": "readonly",
+        "title": "只读"
+      },
+      {
+        "id": "empty",
+        "title": "空正文"
+      }
+    ],
+    "files": [
+      "plugins/ky-component-center/src/examples/markdown/usage.tsx"
+    ],
+    "guidelines": [
+      "优先复用公开导出；业务请求由Host注入。",
+      "示例数据为虚构，操作不保存真实配置。",
+      "编辑器通过 @ky/markdown/editor 导入 MarkdownEditor；只读页面仅导入阅读器。"
+    ],
+    "replacementId": null,
+    "package": "@ky/markdown",
+    "exportName": "MarkdownReader",
+    "importPath": "@ky/markdown",
+    "api": [
+      {
+        "name": "markdown / value",
+        "type": "string",
+        "default": "必填",
+        "description": "Markdown正文；编辑器通过onChange更新受控值"
+      },
+      {
+        "name": "disabled",
+        "type": "boolean",
+        "default": "false",
+        "description": "禁用编辑，仍可预览及导出"
+      },
+      {
+        "name": "fileActions",
+        "type": "boolean",
+        "default": "true",
+        "description": "控制导入导出；隔离演示关闭，业务编辑器保留。"
+      }
+    ],
+    "relatedComponents": [
+      "input",
+      "form"
     ]
   }
 ] as const;

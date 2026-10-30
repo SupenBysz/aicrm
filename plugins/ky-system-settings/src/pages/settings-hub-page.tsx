@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { resolveSettingsTab } from "../settings-tab-selection";
 import { AppearancePage } from "./appearance-page";
 import { useEffect, useMemo, type ReactNode } from "react";
@@ -23,6 +24,8 @@ import { SmsPage } from "./sms-page";
 import { EmailPage } from "./email-page";
 import { AppVersionPage } from "./app-version-page";
 
+const DocumentsPage=lazy(()=>import("./documents-page").then(m=>({default:m.DocumentsPage})));
+
 interface Section {
   key: string;
   label: string;
@@ -42,6 +45,7 @@ const SECTIONS: Section[] = [
   { key: "storage", label: "对象存储", icon: <PartitionOutlined />, perm: "platform.storage.view", element: <StoragePage /> },
   { key: "sms", label: "短信服务", icon: <BellOutlined />, perm: "platform.sms.view", element: <SmsPage /> },
   { key: "email", label: "邮件服务", icon: <MailOutlined />, perm: "platform.email.view", element: <EmailPage /> },
+  {key:"documents",label:"协议与文档",icon:<BookOutlined/>,perm:"platform.documents.view",element:<Suspense fallback={<div>正在初始化文档模块…</div>}><DocumentsPage/></Suspense>},
   { key: "app-version", label: "App 版本", icon: <ApiOutlined />, perm: "platform.app_version.view", element: <AppVersionPage /> }
 ];
 

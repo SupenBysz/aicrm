@@ -1,15 +1,18 @@
 {
   "schemaVersion": 1,
-  "contentHash": "e204fda0471431d2883bac0b6611ee2bd99334f828c7fc680d21cfaf6d698b60",
+  "contentHash": "b39f37ca40d8d23ffae2eff16383ff464ca12da8b7d7eb6f294298fd20ef92db",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "ea37ab77433d4249acc610becdb2c5951d23c129bf5ff6d8143cc2fe5f742f6a",
     "apps/ky-admin-host/src/styles.css": "f65e5c997be928fcabe2f921a393f69d828051f97cdbcbb2e98a5e7dd0cdfb20",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
-    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "95c9e6a48c42371da00f3c6f0f6ba2fb4d2e52a07660b70d779a83c086d35643",
+    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "6bc948f955b417d431ba19a8edb8466a91ca1219318120d1cfc00bdfa7c44863",
     "packages/ky-admin-core/src/list-overview.tsx": "fa96300489709e0e8285e6f985b501f2538a7667cf93cfe317459de23fbc4fd0",
     "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
-    "packages/ky-admin-core/src/theme/controls.tsx": "f11fde8517314e19cb9de260e8c203fd904360a8915bb7e47766b1c1dacbd834",
+    "packages/ky-admin-core/src/theme/controls.tsx": "d10cf381a90aa31820352c9cc31aa9f2ea08e22ae9272b708e976f885f4f7bc6",
     "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379",
+    "packages/ky-markdown/src/editor.tsx": "3cbee8b79fa6027f12f7d9432e62270f4bfe1dae230f890aef16403640814feb",
+    "packages/ky-markdown/src/index.tsx": "9ac9f6204a823029247ee129977a1ce298a9671bf6e0813396c0a3254a6635c9",
+    "packages/ky-markdown/src/style.css": "67320cf0742f2f1062dde4d656042ffdbad5a42a39a68a48f84c87629266c9cb",
     "plugins/ky-access-management/src/pages/menu-directory-page.tsx": "b2a6e64bb4e1335cc8035aeb840d18f7d45880d29d4b9c111815c1f7ebbc41e1"
   },
   "categories": {
@@ -1610,7 +1613,7 @@
       ],
       "category": "brand",
       "kind": "component",
-      "summary": "可选AI后缀与分隔点，颜色跟随currentColor。",
+      "summary": "可选AI后缀与分隔点，默认使用当前主题强调色，不继承Logo文字的黑白色。",
       "keywords": [
         "brand",
         "AI品牌后缀 BrandAISuffix"
@@ -1930,6 +1933,96 @@
       "relatedComponents": [
         "table",
         "permissions"
+      ]
+    },
+    {
+      "id": "markdown",
+      "title": "Markdown 编辑与阅读",
+      "aliases": [
+        "MarkdownReader",
+        "MarkdownEditor"
+      ],
+      "category": "basic",
+      "kind": "component",
+      "summary": "安全Markdown编辑、导入导出与统一阅读，示例只修改虚构内容。",
+      "keywords": [
+        "Markdown",
+        "协议",
+        "文档",
+        "编辑器"
+      ],
+      "status": "experimental",
+      "environment": "web_and_client",
+      "owner": "@ky/markdown",
+      "sourcePaths": [
+        "packages/ky-markdown/src/index.tsx",
+        "packages/ky-markdown/src/editor.tsx",
+        "packages/ky-markdown/src/style.css"
+      ],
+      "dependencies": [
+        "react",
+        "antd",
+        "react-markdown",
+        "remark-gfm"
+      ],
+      "controls": [
+        "disabled"
+      ],
+      "defaults": {
+        "label": "Markdown",
+        "count": 12,
+        "disabled": false,
+        "showAI": true
+      },
+      "examples": [
+        {
+          "id": "default",
+          "title": "编辑与预览"
+        },
+        {
+          "id": "readonly",
+          "title": "只读"
+        },
+        {
+          "id": "empty",
+          "title": "空正文"
+        }
+      ],
+      "files": [
+        "plugins/ky-component-center/src/examples/markdown/usage.tsx"
+      ],
+      "guidelines": [
+        "优先复用公开导出；业务请求由Host注入。",
+        "示例数据为虚构，操作不保存真实配置。",
+        "编辑器通过 @ky/markdown/editor 导入 MarkdownEditor；只读页面仅导入阅读器。"
+      ],
+      "replacementId": null,
+      "package": "@ky/markdown",
+      "exportName": "MarkdownReader",
+      "importPath": "@ky/markdown",
+      "api": [
+        {
+          "name": "markdown / value",
+          "type": "string",
+          "default": "必填",
+          "description": "Markdown正文；编辑器通过onChange更新受控值"
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "default": "false",
+          "description": "禁用编辑，仍可预览及导出"
+        },
+        {
+          "name": "fileActions",
+          "type": "boolean",
+          "default": "true",
+          "description": "控制导入导出；隔离演示关闭，业务编辑器保留。"
+        }
+      ],
+      "relatedComponents": [
+        "input",
+        "form"
       ]
     }
   ]

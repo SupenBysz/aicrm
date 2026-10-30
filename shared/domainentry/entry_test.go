@@ -51,6 +51,19 @@ func TestEntryGate(t *testing.T) {
 		}
 		w.WriteHeader(204)
 	}), false)
+	for _, method := range []string{"GET", "HEAD"} {
+		for _, path := range []string{"/api/v1/public/documents/privacy-policy", "/api/v1/public/document-links"} {
+			r := httptest.NewRequest(method, "http://work.example.com"+path, nil)
+			r.Header.Set("X-KY-Entry-Proxy", strings.Repeat("p", 32))
+			r.Header.Set("X-KY-Entry-Host", "work.example.com")
+			w := httptest.NewRecorder()
+			gate.ServeHTTP(w, r)
+			if w.Code != 204 {
+				t.Fatal("anonymous document gate", method, path, w.Code)
+			}
+		}
+	}
+
 	cases := []struct {
 		name, host, path, bearer, proxy string
 		want                            int

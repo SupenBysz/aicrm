@@ -44,7 +44,7 @@ func (s *Server) saveAgencyBrand(w http.ResponseWriter, r *http.Request, wc wsCo
 	if before.Draft.ShowAIIcon != in.Draft.ShowAIIcon {
 		changed = append(changed, "showAiIcon")
 	}
-	for field, pair := range map[string][2]string{"name": {before.Draft.Name, in.Draft.Name}, "applicationName": {before.Draft.ApplicationName, in.Draft.ApplicationName}, "iconText": {before.Draft.IconText, strings.TrimSpace(in.Draft.IconText)}, "copyrightHolder": {before.Draft.CopyrightHolder, strings.TrimSpace(in.Draft.CopyrightHolder)}, "copyrightStyle": {before.Draft.CopyrightStyle, in.Draft.CopyrightStyle}, "iconId": {before.Draft.IconID, in.Draft.IconID}, "wordmarkId": {before.Draft.WordmarkID, in.Draft.WordmarkID}} {
+	for field, pair := range map[string][2]string{"name": {before.Draft.Name, in.Draft.Name}, "applicationName": {before.Draft.ApplicationName, in.Draft.ApplicationName}, "iconText": {before.Draft.IconText, strings.TrimSpace(in.Draft.IconText)}, "copyrightHolder": {before.Draft.CopyrightHolder, strings.TrimSpace(in.Draft.CopyrightHolder)}, "copyrightStyle": {before.Draft.CopyrightStyle, in.Draft.CopyrightStyle}, "iconId": {before.Draft.IconID, in.Draft.IconID}, "wordmarkId": {before.Draft.WordmarkID, in.Draft.WordmarkID}, "wordmarkDarkId": {before.Draft.WordmarkDarkID, in.Draft.WordmarkDarkID}} {
 		if pair[0] != pair[1] {
 			changed = append(changed, field)
 		}

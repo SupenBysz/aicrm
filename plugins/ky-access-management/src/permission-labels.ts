@@ -16,6 +16,7 @@ export const WORKSPACE_LABELS: Record<string, string> = {
 };
 
 export const RESOURCE_LABELS: Record<string, string> = {
+  documents: "协议与文档",
   component_center: "组件中心",
   appearance: "外观主题",
   menu_catalog: "菜单管理",
@@ -83,6 +84,8 @@ export const ACTION_LABELS: Record<string, string> = {
   invite_admin: "邀请管理员",
   manage_members: "管理成员",
   publish: "发布",
+  unpublish: "下线",
+  bind: "绑定入口",
   remove: "移除",
   reset_password: "重置密码",
   review: "审核",
@@ -109,6 +112,7 @@ export const DOMAIN_LABELS: Record<DomainKey, string> = {
 
 /** Maps a permission resource to its top-level domain. Unknown resources fall back to 平台治理. */
 export const RESOURCE_DOMAIN: Record<string, DomainKey> = {
+  documents: "platform",
   component_center: "platform",
   agencies: "org",
   enterprises: "org",

@@ -30,7 +30,8 @@
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
     "zustand": "^5.0.14",
-    "@ky/plugin-component-center": "workspace:*"
+    "@ky/plugin-component-center": "workspace:*",
+    "@ky/markdown": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
