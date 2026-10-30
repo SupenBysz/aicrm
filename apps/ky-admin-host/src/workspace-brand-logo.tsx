@@ -97,7 +97,7 @@ export function WorkspaceBrandLogo({
     );
   const url = dark ? brand?.wordmarkDark?.url : brand?.wordmark?.url;
   return (
-    <BrandLogoLockup compactInset={collapsed ? 0 : 6} showAIIcon={!collapsed && brand?.showAiIcon === true} maxHeight={40}>
+    <BrandLogoLockup fitText compactInset={collapsed ? 0 : 6} showAIIcon={!collapsed && brand?.showAiIcon === true} maxHeight={40}>
       {url && broken !== url && !collapsed ? (
         <img
           src={url}
