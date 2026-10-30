@@ -15,7 +15,7 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, wc wsConte
 		return
 	}
 	loginStatus := strings.TrimSpace(r.URL.Query().Get("loginStatus"))
-	if loginStatus != "" && !validOneOf(loginStatus, "not_logged_in", "login_pending", "online", "expired", "verify_required", "risk") {
+	if loginStatus != "" && !validOneOf(loginStatus, "not_logged_in", "login_pending", "online", "expired", "verify_required", "risk", "unknown") {
 		writeError(w, r, http.StatusBadRequest, "validation_error", "登录状态无效")
 		return
 	}
@@ -24,7 +24,13 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, wc wsConte
 		writeError(w, r, http.StatusBadRequest, "validation_error", "账号状态无效")
 		return
 	}
+	attention := r.URL.Query().Get("attention")
+	if (attention != "" && attention != "required") || (attention != "" && (status != "" || loginStatus != "")) {
+		writeError(w, r, 400, "validation_error", "待处理条件不能与账号或登录状态同时提供")
+		return
+	}
 	items, pagination, err := s.store.ListAccounts(r.Context(), store.ListAccountsParams{
+		Attention:     attention,
 		WorkspaceType: wc.WorkspaceType,
 		WorkspaceID:   wc.WorkspaceID,
 		Platform:      platform,
@@ -36,6 +42,10 @@ func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request, wc wsConte
 	})
 	if err != nil {
 		writeStoreError(w, r, err)
+		return
+	}
+	if attention != "" {
+		writeData(w, r, map[string]any{"items": items, "pagination": pagination, "filterVersion": 1})
 		return
 	}
 	writeList(w, r, items, pagination)

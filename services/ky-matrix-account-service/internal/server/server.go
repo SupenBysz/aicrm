@@ -74,6 +74,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /healthz", s.healthz)
 
+	mux.HandleFunc("GET /api/v1/matrix-accounts/summary", s.ws("view", s.accountOverview))
 	mux.HandleFunc("GET /api/v1/matrix-accounts", s.ws("view", s.listAccounts))
 	mux.HandleFunc("POST /api/v1/matrix-accounts", s.ws("create", s.createAccount))
 	mux.HandleFunc("GET /api/v1/matrix-accounts/{id}", s.ws("view", s.getAccount))

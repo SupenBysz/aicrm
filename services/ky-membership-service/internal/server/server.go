@@ -74,6 +74,8 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("GET /api/v1/platform/organizations/{workspaceType}/{workspaceId}/members", s.ws("platform", perms("platform.members.view"), s.listOrgMembers))
 
 	// Invitations
+	mux.HandleFunc("GET /api/v1/invitations/summary", s.ws(allWs, perms("platform.invitations.view", "agency.invitations.view", "enterprise.invitations.view"), s.invitationOverview))
+	mux.HandleFunc("GET /api/v1/workspace/members/summary", s.ws(allWs, perms("platform.members.view", "agency.members.view", "enterprise.members.view"), s.memberOverview))
 	mux.HandleFunc("GET /api/v1/invitations", s.ws(allWs, perms("platform.invitations.view", "agency.invitations.view", "enterprise.invitations.view"), s.listInvitations))
 	mux.HandleFunc("POST /api/v1/invitations", s.ws(allWs, perms("platform.members.invite", "agency.members.invite", "agency.enterprises.invite_admin", "enterprise.members.invite"), s.createInvitation))
 	mux.HandleFunc("PATCH /api/v1/invitations/{id}/cancel", s.ws(allWs, perms("platform.members.invite", "agency.members.invite", "agency.enterprises.invite_admin", "enterprise.members.invite"), s.cancelInvitation))

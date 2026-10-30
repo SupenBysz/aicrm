@@ -308,6 +308,7 @@ type GeneratedLoginScript struct {
 }
 
 type ListAccountsParams struct {
+	Attention     string
 	WorkspaceType string
 	WorkspaceID   string
 	Platform      string

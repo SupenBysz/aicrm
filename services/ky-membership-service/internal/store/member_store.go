@@ -173,45 +173,8 @@ func (s *Store) CreateMemberWithUser(ctx context.Context, in CreateMemberInput) 
 }
 
 func (s *Store) ListMembers(ctx context.Context, wsType, wsID, keyword, departmentID, teamID, status string, scope ScopeFilter, page, pageSize int) ([]Member, int64, error) {
-	where := []string{"m.workspace_type=$1", "m.workspace_id=$2", "m.deleted_at IS NULL"}
-	args := []any{wsType, wsID}
+	where, args := memberConditions(wsType, wsID, keyword, departmentID, teamID, status, scope)
 	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
-
-	if keyword != "" {
-		p := add("%" + keyword + "%")
-		where = append(where, "(m.display_name ILIKE "+p+" OR u.username ILIKE "+p+" OR u.email ILIKE "+p+" OR u.phone ILIKE "+p+")")
-	}
-	if status != "" {
-		where = append(where, "m.status="+add(status))
-	}
-	if departmentID != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM ky_membership_department md WHERE md.membership_id=m.id AND md.department_id="+add(departmentID)+")")
-	}
-	if teamID != "" {
-		where = append(where, "EXISTS (SELECT 1 FROM ky_membership_team mt WHERE mt.membership_id=m.id AND mt.team_id="+add(teamID)+")")
-	}
-	// Apply caller data-scope restriction (Phase 1.13).
-	if !scope.Unrestricted {
-		ors := []string{}
-		if scope.SelfMembershipID != "" {
-			ors = append(ors, "m.id="+add(scope.SelfMembershipID))
-		}
-		if len(scope.DepartmentIDs) > 0 {
-			ph, a := inPlaceholders(len(args), scope.DepartmentIDs)
-			args = append(args, a...)
-			ors = append(ors, "EXISTS (SELECT 1 FROM ky_membership_department md WHERE md.membership_id=m.id AND md.department_id IN ("+ph+"))")
-		}
-		if len(scope.TeamIDs) > 0 {
-			ph, a := inPlaceholders(len(args), scope.TeamIDs)
-			args = append(args, a...)
-			ors = append(ors, "EXISTS (SELECT 1 FROM ky_membership_team mt WHERE mt.membership_id=m.id AND mt.team_id IN ("+ph+"))")
-		}
-		if len(ors) == 0 {
-			where = append(where, "false")
-		} else {
-			where = append(where, "("+strings.Join(ors, " OR ")+")")
-		}
-	}
 	clause := strings.Join(where, " AND ")
 
 	var total int64
@@ -384,4 +347,47 @@ func (s *Store) AssignMemberTeams(ctx context.Context, id, wsType, wsID string, 
 		}
 	}
 	return tx.Commit()
+}
+
+func memberConditions(wsType, wsID, keyword, departmentID, teamID, status string, scope ScopeFilter) ([]string, []any) {
+	where := []string{"m.workspace_type=$1", "m.workspace_id=$2", "m.deleted_at IS NULL"}
+	args := []any{wsType, wsID}
+	add := func(v any) string { args = append(args, v); return "$" + itoa(len(args)) }
+
+	if keyword != "" {
+		p := add("%" + keyword + "%")
+		where = append(where, "(m.display_name ILIKE "+p+" OR u.username ILIKE "+p+" OR u.email ILIKE "+p+" OR u.phone ILIKE "+p+")")
+	}
+	if status != "" {
+		where = append(where, "m.status="+add(status))
+	}
+	if departmentID != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM ky_membership_department md WHERE md.membership_id=m.id AND md.department_id="+add(departmentID)+")")
+	}
+	if teamID != "" {
+		where = append(where, "EXISTS (SELECT 1 FROM ky_membership_team mt WHERE mt.membership_id=m.id AND mt.team_id="+add(teamID)+")")
+	}
+	// Apply caller data-scope restriction (Phase 1.13).
+	if !scope.Unrestricted {
+		ors := []string{}
+		if scope.SelfMembershipID != "" {
+			ors = append(ors, "m.id="+add(scope.SelfMembershipID))
+		}
+		if len(scope.DepartmentIDs) > 0 {
+			ph, a := inPlaceholders(len(args), scope.DepartmentIDs)
+			args = append(args, a...)
+			ors = append(ors, "EXISTS (SELECT 1 FROM ky_membership_department md WHERE md.membership_id=m.id AND md.department_id IN ("+ph+"))")
+		}
+		if len(scope.TeamIDs) > 0 {
+			ph, a := inPlaceholders(len(args), scope.TeamIDs)
+			args = append(args, a...)
+			ors = append(ors, "EXISTS (SELECT 1 FROM ky_membership_team mt WHERE mt.membership_id=m.id AND mt.team_id IN ("+ph+"))")
+		}
+		if len(ors) == 0 {
+			where = append(where, "false")
+		} else {
+			where = append(where, "("+strings.Join(ors, " OR ")+")")
+		}
+	}
+	return where, args
 }
