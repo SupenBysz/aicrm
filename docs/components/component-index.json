@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "contentHash": "aa775aebc3c8938010e3f3a164b49a5965b540cc329e6726bd5d63792943b14e",
+  "contentHash": "e204fda0471431d2883bac0b6611ee2bd99334f828c7fc680d21cfaf6d698b60",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "ea37ab77433d4249acc610becdb2c5951d23c129bf5ff6d8143cc2fe5f742f6a",
-    "apps/ky-admin-host/src/styles.css": "127b8837da3e51c3ebe6393c9f45e45e8de20aa4a7ac21c67b955db593641ece",
+    "apps/ky-admin-host/src/styles.css": "f65e5c997be928fcabe2f921a393f69d828051f97cdbcbb2e98a5e7dd0cdfb20",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
     "packages/ky-admin-core/src/brand-ai-suffix.tsx": "95c9e6a48c42371da00f3c6f0f6ba2fb4d2e52a07660b70d779a83c086d35643",
     "packages/ky-admin-core/src/list-overview.tsx": "fa96300489709e0e8285e6f985b501f2538a7667cf93cfe317459de23fbc4fd0",
     "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
     "packages/ky-admin-core/src/theme/controls.tsx": "f11fde8517314e19cb9de260e8c203fd904360a8915bb7e47766b1c1dacbd834",
     "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379",
-    "plugins/ky-access-management/src/pages/menu-directory-page.tsx": "653e4befd108b8bc63ab2156bbd3ba76fdd007287ab1ff92991a2652513873b0"
+    "plugins/ky-access-management/src/pages/menu-directory-page.tsx": "b2a6e64bb4e1335cc8035aeb840d18f7d45880d29d4b9c111815c1f7ebbc41e1"
   },
   "categories": {
     "design": "设计基础",
