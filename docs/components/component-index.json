@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "contentHash": "51b1473daea3b074edb5409a08b81d0808fa3c887a87e41ec15d1b840db2bed1",
+  "contentHash": "bdb92872f93d49ccf724cec7760ff0cc2b1aace7cee162cde78407e136a64051",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "a7a992041d2be006b763d1c32026698d475991ae8afabc266416f0bb4ccfedc1",
-    "apps/ky-admin-host/src/styles.css": "f65e5c997be928fcabe2f921a393f69d828051f97cdbcbb2e98a5e7dd0cdfb20",
+    "apps/ky-admin-host/src/styles.css": "f8410daa8f68c31b38203c310950598218573a110b20a88b11e4c779ea464ecb",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
     "packages/ky-admin-core/src/brand-ai-suffix.tsx": "1bfb96de7be23945dc9645ea55bddd34a9961e07bece7dc3fc3ab43561c5e376",
     "packages/ky-admin-core/src/brand-identity.tsx": "88a12628c0d124c653bb5f903531a65ca5ac7f60f884695cc58b505619c309ca",
