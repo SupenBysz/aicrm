@@ -1,4 +1,4 @@
-import { BrandIdentityProvider, BrandLogo, useAppearance, useBrandIdentity, type BrandIdentity } from "@ky/admin-core";
+import { BrandIdentityProvider, BrandLogo, BrandLogoLockup, useAppearance, useBrandIdentity, type BrandIdentity } from "@ky/admin-core";
 import { createContext, useContext, useEffect, useLayoutEffect, useState, type PropsWithChildren } from "react";
 import { requestClient } from "./remote-api";
 import { usePlatformProfile } from "./platform-profile";
@@ -36,6 +36,6 @@ export function WorkspaceBrandLogo({workspace,collapsed}:{workspace:Workspace;co
     return()=>{document.title="管理后台"};
   },[brand?.name,brand?.applicationName,workspace.id]);
   if(!brand)return <span role="status">{status.error?<button onClick={status.retry}>重试加载品牌</button>:"加载中"}</span>;
-  if(collapsed)return <>{workspace.type==="platform"?p.logoTextShort:brand.iconText||Array.from(brand.name).slice(0,2).join("")}</>;
+  if(collapsed)return <BrandLogoLockup className="brand-short-lockup" fitText maxHeight={32} showAIIcon={false}><span>{workspace.type==="platform"?p.logoTextShort:brand.iconText||Array.from(brand.name).slice(0,2).join("")}</span></BrandLogoLockup>;
   return <BrandLogo brand={brand} dark={dark} maxHeight={40} compactInset={6}/>;
 }

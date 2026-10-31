@@ -632,7 +632,7 @@ body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.i
 .app-shell--sidebar-collapsed .brand-block {
   gap: 0;
   justify-content: center;
-  max-width: calc(var(--admin-sidebar-width) - 10px);
+  max-width: calc(var(--admin-sidebar-width) - 32px);
   width: 100%;
 }
 
@@ -648,6 +648,7 @@ body.aicrm-desktop-window-chrome-enabled #aicrm-desktop-floating-window-chrome.i
 }
 
 .app-shell--sidebar-collapsed .brand-title {
+  width: 100%;
   display: block;
   font-size: 15px;
   max-width: 100%;
@@ -3801,3 +3802,6 @@ body:has(.monaco-source-editor) .context-view.monaco-menu-container .monaco-menu
 :root[data-admin-theme="dark"] .list-toolbar-segmented .ant-segmented-thumb {
   background: rgba(255, 255, 255, 0.12) !important;
 }
+
+/* Fit short brand names within the collapsed rail with symmetric 16px insets. */
+.brand-title .brand-short-lockup { justify-content: center; height: 40px; }
