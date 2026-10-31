@@ -1,0 +1,15 @@
+.platform-appearance-page { width: 100%; max-width: 1200px; }
+.platform-appearance { max-width: 1120px; margin: 0; padding: 8px 24px 28px; }
+.platform-appearance-preview { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--admin-stroke); }
+.platform-appearance-preview-title { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.appearance-window { border: 1px solid var(--admin-stroke); border-radius: 12px; overflow: hidden; }
+.appearance-window-header { display: flex; align-items: center; gap: 20px; height: 64px; padding: 16px 20px; background: var(--admin-surface); border-bottom: 1px solid var(--admin-stroke); }
+.appearance-window-content { display: grid; grid-template-columns: 140px minmax(0,1fr); min-height: 230px; }
+.appearance-window-nav { padding: 20px 12px; background: var(--admin-nav-bg); border-right: 1px solid var(--admin-stroke); }
+.appearance-window-nav span { display: block; padding: 10px 12px; border-radius: 6px; margin-bottom: 4px; }
+.appearance-window-nav span:first-child { color: var(--admin-accent); background: var(--admin-content-bg); }
+.appearance-window-body { padding: 24px; min-width: 0; background: var(--admin-content-bg); }
+.appearance-window-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.appearance-window-field { display: block; width: 100%; border: 1px solid var(--admin-stroke); background: var(--admin-surface); color: var(--admin-text); border-radius: 6px; padding: 9px 12px; font: inherit; margin-bottom: 12px; }
+.appearance-window-row { display:flex; justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--admin-stroke); }
+@media(max-width:640px){.platform-appearance{padding:8px 16px 24px}.appearance-window-content{grid-template-columns:90px minmax(0,1fr)}.appearance-window-nav{padding:12px 4px}.appearance-window-body{padding:16px}.appearance-window-header{padding:12px;gap:12px}.platform-appearance-preview-title{flex-wrap:wrap}}

@@ -1,52 +1,110 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import { Alert, App, Button, Card, Empty, Space } from "antd";
-import { AppearanceControls, DEFAULT_APPEARANCE, ListPageCard, themeColors, themeVariables, useAppearance, useCurrentUser, validAppearance, usePermissions, useRequestClient, type AppearanceValue, type AppearanceMode, type ThemeId } from "@ky/admin-core";
-
-/** Platform defaults only. Personal choices live in the account menu. */
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { App, Button, Empty, Segmented, Space, Tooltip, Typography } from "antd";
+import { QuestionCircleOutlined } from "@ant-design/icons";
+import { AppearanceControls, DEFAULT_APPEARANCE, ListPageCard, themeVariables, useAppearance, useCurrentUser, validAppearance, usePermissions, useRequestClient, type AppearanceValue } from "@ky/admin-core";
+import "./appearance-page.css";
+/** Draft selection changes only the preview; platform settings change on save. */
 export function AppearancePage() {
-  const appearance=useAppearance();const client=useRequestClient();const permission=usePermissions();
-  const {message,modal}=App.useApp();const user=useCurrentUser();
-  const draftKey="ky.appearance.platform-draft.v1:"+(user?.id??"anonymous");
-  const [initial]=useState(()=>{try{const value=JSON.parse(sessionStorage.getItem(draftKey)??"null");return validAppearance(value)?value:null}catch{return null}});
-  const [draft,setDraft]=useState<AppearanceValue>(initial??appearance.platform);
-  const [edited,setEdited]=useState(!!initial);const [saving,setSaving]=useState(false);const [error,setError]=useState("");
-  const canUpdate=permission.can("platform.appearance.update");
-  useEffect(()=>{if(!edited)setDraft(appearance.platform)},[appearance.platform,edited]);
-  useEffect(()=>{
-    try{if(edited)sessionStorage.setItem(draftKey,JSON.stringify(draft));else sessionStorage.removeItem(draftKey)}catch{/* In-memory draft remains available. */}
-    const guard=(event:BeforeUnloadEvent)=>{if(edited){event.preventDefault();event.returnValue=""}};
-    window.addEventListener("beforeunload",guard);return()=>window.removeEventListener("beforeunload",guard);
-  },[draftKey,draft,edited]);
-  async function save(){
-    if(!canUpdate||saving)return;setSaving(true);setError("");
-    try{const saved=await client.request<AppearanceValue>("/api/v1/platform/appearance",{method:"PUT",body:draft});await appearance.reloadPlatform(saved);setDraft(saved);setEdited(false);void message.success("平台默认外观已保存");}
-    catch{setError("保存失败，可能已被其他管理员更新。草稿已保留，请重新读取后重试。");}
-    finally{setSaving(false)}
-  }
-  async function reload(){
-    if(saving)return;
-    setSaving(true);
-    try{const latest=await client.request<AppearanceValue>("/api/v1/platform/appearance");setDraft(latest);setEdited(false);setError("");await appearance.reloadPlatform(latest)}
-    catch{setError("重新读取失败，当前草稿已保留")}
-    finally{setSaving(false)}
-  }
-  if(!permission.can("platform.appearance.view"))return <Empty description="暂无平台外观查看权限"/>;
-  if(!appearance.enabled)return <Alert type="info" title="外观主题已临时停用，当前使用经典金并跟随系统。"/>;
-  return <ListPageCard title="外观主题" subtitle="维护平台默认配色与明暗模式；本人外观请在用户菜单的个人偏好中设置。">
-    <Card title="平台默认"><Space orientation="vertical" size={16} style={{width:"100%"}}>
-      <Alert type="info" showIcon title="仅影响跟随平台默认的用户及未登录页面；个人覆盖保持不变。其他在线用户在重新聚焦或重新登录时更新。"/>
-      <AppearanceControls label="平台默认" disabled={!canUpdate||saving} themeId={(draft.themeId||"classic-gold") as ThemeId} mode={(draft.mode||"system") as AppearanceMode} onChange={(themeId,mode)=>{setDraft({...draft,themeId,mode});setEdited(true)}}/>
-      <div style={{display:"flex",flexWrap:"wrap",gap:16}}>{[false,true].map(dark=>{
-        const colors=themeColors(draft.themeId,dark);
-        return <div key={String(dark)} style={{...themeVariables(draft.themeId,dark),background:colors.bg,color:colors.text,padding:16,borderRadius:10,minWidth:0,maxWidth:"100%",flex:"1 1 240px"} as CSSProperties}>
-          <strong>{dark?"暗色预览":"亮色预览"}</strong>
-          <div style={{display:"flex",marginTop:12,border:`1px solid ${colors.primary}`,borderRadius:6,overflow:"hidden"}}><div style={{background:colors.nav,padding:12,color:colors.primary}}>导航</div><div style={{background:colors.surface,padding:12,flex:1}}>页面内容 <span style={{color:colors.primary}}>主要操作</span></div></div>
-        </div>;
-      })}</div>
-      {error&&<Alert type="error" showIcon title={error}/>}
-      <Space wrap>{canUpdate&&<><Button type="primary" loading={saving} disabled={!edited} onClick={()=>void save()}>保存平台默认</Button><Button disabled={saving} onClick={()=>{setDraft({...DEFAULT_APPEARANCE,revision:draft.revision});setEdited(true)}}>恢复出厂配置（待保存）</Button></>}
-        <Button disabled={saving} onClick={()=>edited?modal.confirm({title:"重新读取平台默认？",content:"这会替换当前未保存的平台配置草稿。",okText:"重新读取",cancelText:"保留草稿",onOk:reload}):void reload()}>重新读取平台默认</Button>
-      </Space>
-    </Space></Card>
-  </ListPageCard>;
+    const appearance = useAppearance(), client = useRequestClient(), permission = usePermissions();
+    const { message, modal } = App.useApp(), user = useCurrentUser();
+    const key = "ky.appearance.platform-draft.v1:" + (user?.id ?? "anonymous");
+    const [initial] = useState(() => { try {
+        const v = JSON.parse(sessionStorage.getItem(key) ?? "null");
+        return validAppearance(v) ? v : null;
+    }
+    catch {
+        return null;
+    } });
+    const [previewing, setPreviewing] = useState(false);
+    const [draft, setDraft] = useState<AppearanceValue>(initial ?? appearance.platform), [edited, setEdited] = useState(!!initial), [saving, setSaving] = useState(false), [previewDark, setPreviewDark] = useState(false);
+    useEffect(() => { appearance.previewPlatform?.(previewing ? draft : null); return () => appearance.previewPlatform?.(null); }, [draft, previewing, appearance.previewPlatform]);
+    useEffect(() => { setPreviewDark(draft.mode === "dark" || (draft.mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches)); }, [appearance.dark, draft.mode]);
+    const inFlight = useRef(false);
+    const canUpdate = permission.can("platform.appearance.update");
+    useEffect(() => { if (!edited)
+        setDraft(appearance.platform); }, [appearance.platform, edited]);
+    useEffect(() => {
+        try {
+            if (edited)
+                sessionStorage.setItem(key, JSON.stringify(draft));
+            else
+                sessionStorage.removeItem(key);
+        }
+        catch { /* Preserve the in-memory draft. */ }
+        const guard = (e: BeforeUnloadEvent) => { if (edited) {
+            e.preventDefault();
+            e.returnValue = "";
+        } };
+        window.addEventListener("beforeunload", guard);
+        return () => window.removeEventListener("beforeunload", guard);
+    }, [key, draft, edited]);
+    async function save() {
+        if (!canUpdate || !edited || inFlight.current)
+            return;
+        inFlight.current = true;
+        setSaving(true);
+        try {
+            const v = await client.request<AppearanceValue>("/api/v1/platform/appearance", { method: "PUT", body: draft });
+            await appearance.reloadPlatform(v);
+            setDraft(v);
+            setEdited(false);
+            setPreviewing(false);
+            void message.success("外观设置已保存。");
+        }
+        catch (error) {
+            const conflict = !!error && typeof error === "object" && "code" in error && error.code === "appearance_conflict";
+            if (conflict)
+                modal.confirm({ title: "外观设置已更新", content: "其他管理员已保存新的设置。是否读取最新设置？当前修改将被替换。", okText: "读取最新设置", cancelText: "保留修改", onOk: reload });
+            else
+                void message.error("暂时无法保存，修改内容已保留。");
+        }
+        finally {
+            inFlight.current = false;
+            setSaving(false);
+        }
+    }
+    async function reload() {
+        if (inFlight.current)
+            return;
+        inFlight.current = true;
+        setSaving(true);
+        try {
+            const latest = await client.request<AppearanceValue>("/api/v1/platform/appearance");
+            await appearance.reloadPlatform(latest);
+            setDraft(latest);
+            setEdited(false);
+            setPreviewing(false);
+        }
+        catch {
+            void message.error("暂时无法读取，修改内容已保留。");
+        }
+        finally {
+            inFlight.current = false;
+            setSaving(false);
+        }
+    }
+    const change = (themeId: AppearanceValue['themeId'], mode: AppearanceValue['mode']) => { setPreviewing(true); setDraft({ ...draft, themeId, mode }); setEdited(themeId !== appearance.platform.themeId || mode !== appearance.platform.mode); };
+    if (!permission.can("platform.appearance.view"))
+        return <Empty description="暂无外观设置查看权限"/>;
+    if (!appearance.enabled)
+        return <Empty description="暂不可配置外观"/>;
+    return <div className="platform-appearance-page"><ListPageCard title="外观主题" subtitle="设置平台默认配色与明暗模式" extra={<Space wrap>
+  <Tooltip title="适用于未登录页面及跟随平台设置的用户，个人偏好保持独立。"><Button type="text" aria-label="外观设置适用范围" icon={<QuestionCircleOutlined />}/></Tooltip>
+  {canUpdate && <><Button disabled={saving} onClick={() => modal.confirm({ title: "恢复默认外观？", content: "预览将恢复为经典金并跟随系统，保存后生效。", okText: "恢复默认", cancelText: "取消", onOk: () => change(DEFAULT_APPEARANCE.themeId, DEFAULT_APPEARANCE.mode) })}>恢复默认</Button><Button type="primary" loading={saving} disabled={!edited} onClick={() => void save()}>保存设置</Button></>}
+ </Space>}>
+ <div className="platform-appearance">
+  <AppearanceControls label="平台默认" disabled={!canUpdate || saving} themeId={draft.themeId || "classic-gold"} mode={draft.mode || "system"} onChange={change}/>
+  <section className="platform-appearance-preview">
+   <div className="platform-appearance-preview-title"><Typography.Text strong>界面预览</Typography.Text><Segmented aria-label="预览明暗" value={previewDark ? "dark" : "light"} options={[{ label: "亮色", value: "light" }, { label: "暗色", value: "dark" }]} onChange={v => setPreviewDark(v === "dark")}/></div>
+   <div className="appearance-window" style={{ ...themeVariables(draft.themeId, previewDark), color: "var(--admin-text)", colorScheme: previewDark ? "dark" : "light" } as CSSProperties} role="img" aria-label={`${previewDark ? "暗色" : "亮色"}界面效果`}>
+    <div className="appearance-window-header"><span style={{ color: "var(--admin-accent)", fontWeight: 600 }}>管理中心</span></div>
+    <div className="appearance-window-content"><div className="appearance-window-nav"><span>系统设置</span><span>通知中心</span><span>身份管理</span></div><div className="appearance-window-body">
+     <div className="appearance-window-toolbar"><strong>通知设置</strong><span style={{ background: "var(--admin-accent)", color: "var(--admin-on-primary)", padding: "7px 14px", borderRadius: 6 }}>保存设置</span></div>
+     <span className="appearance-window-field">系统通知</span>
+     <div className="appearance-window-row"><span>消息通知</span><span style={{ color: "var(--admin-accent)" }}>已开启</span></div><div className="appearance-window-row"><span>账号安全</span><span>已开启</span></div>
+    </div></div>
+   </div>
+  </section>
+ </div>
+ </ListPageCard></div>;
 }
