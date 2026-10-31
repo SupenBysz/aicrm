@@ -60,3 +60,22 @@
 
 .agency-brand-upload-image.wordmarkDark { background: #181818; }
 .agency-brand-upload-image.wordmarkDark .agency-brand-generated-thumbnail { width:auto; height:43.125%; max-width:82%; max-height:none; }
+
+/* Four-state preview geometry never inherits the Host collapsed sidebar width. */
+.brand-preview-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.brand-preview-heading .agency-brand-preview-label{margin:0}
+.brand-preview-actions{display:flex;gap:8px;flex-wrap:wrap}
+.brand-preview-states{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px}
+.brand-preview-states>div{min-width:0}
+.brand-preview-collapsed{min-width:340px}
+.brand-preview-logo-slot{position:absolute;left:16px;top:0;bottom:0;width:calc(var(--admin-sidebar-width) - 32px);display:flex;align-items:center;justify-content:center}
+.brand-preview-logo-slot .agency-brand-lockup{position:static!important;width:100%;max-width:100%;height:40px}
+@media(max-width:900px){.brand-preview-states{grid-template-columns:minmax(0,1fr)}}
+
+.brand-preview-app-icon{display:block;width:48px;height:48px;object-fit:contain;border-radius:8px}
+
+.brand-icon-text{justify-content:center}
+.brand-preview-logo-slot .brand-icon-text{width:100%}
+.brand-preview-actions .ant-btn{white-space:nowrap}
+
+.brand-preview-logo-slot{color:var(--admin-text)}

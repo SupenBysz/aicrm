@@ -65,7 +65,15 @@ func TestBrandDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	draft := BrandDraft{Name: "Team", IconText: "Ky", WordmarkID: asset.ID, WordmarkDarkID: darkAsset.ID}
+	darkIcon, err := s.SaveBrandAsset(ctx, "a", "png", []byte("dark-icon-fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	navIcon, err := s.SaveBrandAsset(ctx, "a", "png", []byte("nav-icon-fixture"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := BrandDraft{NavIconID: navIcon.ID, Name: "Team", IconText: "Ky", IconDarkID: darkIcon.ID, WordmarkID: asset.ID, WordmarkDarkID: darkAsset.ID}
 	if err = s.SaveBrandDraft(ctx, "b", "actor", 0, draft); !errors.Is(err, ErrValidation) {
 		t.Fatal("cross-agency asset accepted", err)
 	}
@@ -76,11 +84,17 @@ func TestBrandDatabase(t *testing.T) {
 		t.Fatal("stale update accepted", err)
 	}
 	pub, err := s.PublishBrand(ctx, "a", "actor", "", 1, 0)
-	if err != nil || pub.PublishedVersion != 1 || pub.Published.ShowAIIcon || !strings.HasSuffix(pub.Published.WordmarkDark.URL, darkAsset.ID) {
+	if err != nil || pub.PublishedVersion != 1 || pub.Published.ShowAIIcon || !strings.HasSuffix(pub.Published.NavIcon.URL, navIcon.ID) || !strings.HasSuffix(pub.Published.IconDark.URL, darkIcon.ID) || !strings.HasSuffix(pub.Published.WordmarkDark.URL, darkAsset.ID) {
 		t.Fatal(pub, err)
 	}
 	if _, err = s.PublicBrandAsset(ctx, asset.ID); err != nil {
 		t.Fatal("published asset unavailable", err)
+	}
+	if _, err = s.PublicBrandAsset(ctx, darkIcon.ID); err != nil {
+		t.Fatal("dark icon unavailable after publish", err)
+	}
+	if _, err = s.PublicBrandAsset(ctx, navIcon.ID); err != nil {
+		t.Fatal("navigation icon unavailable", err)
 	}
 	pub, err = s.PublishBrand(ctx, "a", "actor", "", 2, 1)
 	if err != nil || pub.PublishedVersion != 2 {
@@ -100,7 +114,7 @@ func TestBrandDatabase(t *testing.T) {
 		t.Fatal(saved, err)
 	}
 	pub, err = s.PublishBrand(ctx, "a", "actor", "", 4, 0)
-	if err != nil || !pub.Published.ShowAIIcon || !resolveBrand(pub.Published, PlatformProfile{}).ShowAIIcon {
+	if err != nil || !pub.Published.ShowAIIcon || !strings.HasSuffix(pub.Published.NavIcon.URL, navIcon.ID) || !resolveBrand(pub.Published, PlatformProfile{}).ShowAIIcon {
 		t.Fatal(pub, err)
 	}
 	draft.ShowAIIcon = false
@@ -160,5 +174,48 @@ func TestDarkBrandCompatibility(t *testing.T) {
 	}
 	if validBrandDraft(BrandDraft{WordmarkDarkID: strings.Repeat("x", 128)}) {
 		t.Fatal("oversized ID accepted")
+	}
+}
+
+func TestDarkIconFieldPresence(t *testing.T) {
+	before := BrandDraft{IconDarkID: "custom-dark"}
+	for _, tc := range []struct{ raw, want string }{{`{"name":"old-client"}`, "custom-dark"}, {`{"iconDarkId":""}`, ""}, {`{"iconDarkId":"new"}`, "new"}} {
+		var in BrandDraft
+		if err := json.Unmarshal([]byte(tc.raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		preserveDarkBrand(&in, before)
+		if in.IconDarkID != tc.want {
+			t.Fatal(in.IconDarkID, tc.want)
+		}
+	}
+	if validBrandDraft(BrandDraft{IconDarkID: strings.Repeat("x", 128)}) {
+		t.Fatal("oversized dark icon reference accepted")
+	}
+	p := PlatformProfile{Brand: before}
+	b := resolveBrand(nil, p)
+	if !strings.HasSuffix(b.IconDark.URL, "custom-dark") {
+		t.Fatal(b)
+	}
+}
+
+func TestNavigationIconFieldPresence(t *testing.T) {
+	before := BrandDraft{NavIconID: "nav", IconID: "desktop"}
+	for _, tc := range []struct{ raw, want string }{{`{"name":"legacy"}`, "nav"}, {`{"navIconId":""}`, ""}, {`{"navIconId":"next"}`, "next"}} {
+		var in BrandDraft
+		if err := json.Unmarshal([]byte(tc.raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		preserveDarkBrand(&in, before)
+		if in.NavIconID != tc.want {
+			t.Fatal(in)
+		}
+	}
+	b := resolveBrand(nil, PlatformProfile{Brand: before})
+	if !strings.HasSuffix(b.NavIcon.URL, "nav") || !strings.HasSuffix(b.Icon.URL, "desktop") {
+		t.Fatal(b)
+	}
+	if validBrandDraft(BrandDraft{NavIconID: strings.Repeat("x", 128)}) {
+		t.Fatal("invalid navigation icon accepted")
 	}
 }

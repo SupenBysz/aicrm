@@ -4,7 +4,7 @@ export type SettingsMap = Record<string, unknown>;
 
 export interface PlatformBrand {
  name: string; applicationName: string; iconText: string;
- iconId: string; wordmarkId: string; wordmarkDarkId?: string; showAiIcon: boolean;
+ iconId: string; navIconId?:string; navIconGenerated?:boolean; iconDarkId?: string; iconDarkGenerated?: boolean; wordmarkId: string; wordmarkDarkId?: string; showAiIcon: boolean;
  copyrightHolder: string; copyrightStyle?: string;
  iconGenerated?: boolean; wordmarkGenerated?: boolean; wordmarkDarkGenerated?: boolean;
  iconGeneratorVersion?: number; wordmarkGeneratorVersion?: number; wordmarkDarkGeneratorVersion?: number;

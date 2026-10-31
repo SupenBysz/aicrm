@@ -125,7 +125,7 @@ func (s *Store) EditPlatformProfile(ctx context.Context, expected, actor, reques
 	if err != nil {
 		return out, err
 	}
-	for _, id := range []string{out.Brand.IconID, out.Brand.WordmarkID, out.Brand.WordmarkDarkID} {
+	for _, id := range []string{out.Brand.IconID, out.Brand.WordmarkID, out.Brand.WordmarkDarkID, out.Brand.IconDarkID, out.Brand.NavIconID} {
 		if id == "" {
 			continue
 		}

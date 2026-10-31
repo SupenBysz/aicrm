@@ -58,7 +58,7 @@ test('formal logo and theme previews share the injected brand, mode-specific art
  const require=createRequire(resolve(root,'apps/aicrm-desktop/package.json'));const {build}=require('esbuild');
  const host=resolve(root,'apps/ky-admin-host'),fixture=join(host,'tmp');const {mkdirSync}=await import('node:fs');mkdirSync(fixture,{recursive:true});const folder=mkdtempSync(join(fixture,'brand-render-'));
  try {
-  const code=`import React from 'react';import {renderToString} from 'react-dom/server';import assert from 'node:assert/strict';import {BrandLogo,BrandIdentityProvider,AppearanceControls} from '@ky/admin-core';
+  const code=`import React from 'react';import {renderToString} from 'react-dom/server';import assert from 'node:assert/strict';import {BrandLogo,BrandIcon,BrandNavigationPreview,BrandIdentityProvider,AppearanceControls} from '@ky/admin-core';
 const render=(brand)=>renderToString(React.createElement(BrandIdentityProvider,{brand},React.createElement(AppearanceControls,{themeId:'classic-gold',mode:'light',onChange:()=>{}})));
 for(const name of ['示例甲','示例乙'])for(const showAiIcon of [true,false]){
  const brand={name,showAiIcon,wordmark:{url:'/light-'+name+'.png'},wordmarkDark:{url:'/dark-'+name+'.png'}};
@@ -66,8 +66,25 @@ for(const name of ['示例甲','示例乙'])for(const showAiIcon of [true,false]
  const direct=renderToString(React.createElement(BrandLogo,{brand,dark:true}));assert.ok(direct.includes('/dark-'+name+'.png'));assert.ok(!direct.includes('/light-'));
 }
 assert.ok(render(null).includes('品牌 Logo 未配置'));assert.ok(!render(null).includes('Kysion'));
+import {create,act} from 'react-test-renderer';
+globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+const fourBrand={name:'四态品牌',icon:{url:'/icon.png'},iconDark:{url:'/icon.png'},wordmark:{url:'/light.png'},wordmarkDark:{url:'/dark.png'},showAiIcon:true};
+const four=renderToString(React.createElement(BrandNavigationPreview,{themeId:'business-blue',actions:(dark,collapsed)=>React.createElement('button',{'data-upload':(dark?'dark':'light')+(collapsed?'-icon':'-wordmark')},'上传 LOGO'),renderLogo:(dark,collapsed)=>collapsed?React.createElement(BrandIcon,{brand:fourBrand,dark}):React.createElement(BrandLogo,{brand:fourBrand,dark})}));
+assert.equal((four.match(/src="\\/icon.png"/g)||[]).length,2);
+assert.equal((four.match(/aria-label="AI"/g)||[]).length,2);
+assert.equal((four.match(/class="agency-brand-preview-header/g)||[]).length,4);
+assert.equal((four.match(/data-upload=/g)||[]).length,4);
+const defaults=renderToString(React.createElement(BrandLogo,{brand:{...fourBrand,wordmarkGenerated:true},dark:false}));assert.ok(!defaults.includes('<img'));assert.ok(defaults.includes('四态品牌'));
+const defaultIcon=renderToString(React.createElement(BrandIcon,{brand:{...fourBrand,iconGenerated:true}}));assert.ok(!defaultIcon.includes('<img'));
+assert.ok(four.includes('--admin-sidebar-width:177px'));assert.ok(four.includes('--admin-sidebar-width:80px'));
+assert.ok(four.includes('--admin-accent:#2563c4'));assert.ok(four.includes('--admin-accent:#8bb8ff'));
+assert.ok(!renderToString(React.createElement(BrandIcon,{brand:fourBrand})).includes('aria-label="AI"'));
+let iconView;await act(async()=>{iconView=create(React.createElement(BrandIcon,{brand:{name:'失败降级',iconText:'回退',icon:{url:'/broken.png'}}}))});
+await act(async()=>iconView.root.findByType('img').props.onError());
+assert.equal(iconView.root.findAllByType('img').length,0);assert.ok(JSON.stringify(iconView.toJSON()).includes('回退'));
+await act(async()=>iconView.unmount());
 console.log('Dynamic formal brand, light/dark artwork, optional vector AI, and missing-context checks passed');`;
-  await build({stdin:{contents:code,loader:'tsx',resolveDir:host},bundle:true,platform:'node',format:'esm',loader:{'.css':'empty'},external:['react','react-dom/server','antd','@ant-design/icons','react-router-dom','node:*'],alias:{'@ky/admin-core':resolve(root,'packages/ky-admin-core/src/index.ts')},outfile:join(folder,'render.mjs')});
+  await build({stdin:{contents:code,loader:'tsx',resolveDir:host},bundle:true,platform:'node',format:'esm',loader:{'.css':'empty'},external:['react','react-dom/server','react-test-renderer','antd','@ant-design/icons','react-router-dom','node:*'],alias:{'@ky/admin-core':resolve(root,'packages/ky-admin-core/src/index.ts')},outfile:join(folder,'render.mjs')});
   execFileSync(process.execPath,[join(folder,'render.mjs')],{cwd:host,stdio:'pipe'});
  }finally{rmSync(folder,{recursive:true,force:true})}
 });
