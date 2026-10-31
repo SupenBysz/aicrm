@@ -18,6 +18,10 @@ type BrandAsset struct {
 	Format string `json:"format"`
 }
 type Brand struct {
+	NavIcon               BrandAsset `json:"navIcon"`
+	NavIconGenerated      bool       `json:"navIconGenerated,omitempty"`
+	IconDark              BrandAsset `json:"iconDark"`
+	IconDarkGenerated     bool       `json:"iconDarkGenerated,omitempty"`
 	WordmarkDark          BrandAsset `json:"wordmarkDark"`
 	WordmarkDarkGenerated bool       `json:"wordmarkDarkGenerated,omitempty"`
 	ShowAIIcon            bool       `json:"showAiIcon"`

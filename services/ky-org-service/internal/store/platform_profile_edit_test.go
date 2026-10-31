@@ -115,14 +115,20 @@ func TestProfileConditionalDatabase(t *testing.T) {
 	if _, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "bad-dark", map[string]json.RawMessage{"brand": json.RawMessage(`{"wordmarkDarkId":"missing"}`)}); !errors.Is(e, ErrValidation) {
 		t.Fatal("missing dark asset accepted", e)
 	}
-	brand := BrandDraft{WordmarkDarkID: darkID, Name: "Platform", ApplicationName: "Platform App", IconText: "PL", ShowAIIcon: true, WordmarkID: assetID, CopyrightHolder: "Brand Owner"}
+	if _, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "bad-dark-icon", map[string]json.RawMessage{"brand": json.RawMessage(`{"iconDarkId":"missing"}`)}); !errors.Is(e, ErrValidation) {
+		t.Fatal("missing dark icon accepted", e)
+	}
+	if _, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "bad-nav-icon", map[string]json.RawMessage{"brand": json.RawMessage(`{"navIconId":"missing"}`)}); !errors.Is(e, ErrValidation) {
+		t.Fatal("missing navigation icon accepted", e)
+	}
+	brand := BrandDraft{NavIconID: darkID, IconDarkID: darkID, WordmarkDarkID: darkID, Name: "Platform", ApplicationName: "Platform App", IconText: "PL", ShowAIIcon: true, WordmarkID: assetID, CopyrightHolder: "Brand Owner"}
 	rawBrand, _ := json.Marshal(brand)
 	after, e = s.EditPlatformProfile(ctx, after.Revision, "actor", "brand-save", map[string]json.RawMessage{"brand": rawBrand})
 	if e != nil || !after.Brand.ShowAIIcon || after.Brand.WordmarkID != assetID {
 		t.Fatal(after, e)
 	}
 	effective := resolveBrand(nil, after)
-	if !strings.HasSuffix(effective.WordmarkDark.URL, darkID) || effective.Name != "Platform" || !effective.ShowAIIcon || effective.CopyrightHolder != "Brand Owner" || !strings.HasSuffix(effective.Wordmark.URL, assetID) {
+	if !strings.HasSuffix(effective.IconDark.URL, darkID) || !strings.HasSuffix(effective.WordmarkDark.URL, darkID) || effective.Name != "Platform" || !effective.ShowAIIcon || effective.CopyrightHolder != "Brand Owner" || !strings.HasSuffix(effective.Wordmark.URL, assetID) {
 		t.Fatal(effective)
 	}
 	if raw, e := s.PlatformBrandAsset(ctx, assetID, true); e != nil || string(raw) != "platform-png-fixture" {
