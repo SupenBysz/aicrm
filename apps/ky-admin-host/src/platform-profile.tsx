@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { BrandIdentityProvider, type CopyrightStyle } from "@ky/admin-core";
 
 export interface PlatformProfile {
- brand?: { name?: string; applicationName?: string; iconText?: string; iconId?: string; wordmarkId?: string; wordmarkDarkId?: string; showAiIcon?: boolean; wordmarkGenerated?: boolean; wordmarkDarkGenerated?: boolean; copyrightHolder?: string };
+ brand?: { name?: string; applicationName?: string; iconText?: string; iconId?: string; navIconId?:string; navIconGenerated?:boolean; iconDarkId?: string; iconGenerated?: boolean; iconDarkGenerated?: boolean; wordmarkId?: string; wordmarkDarkId?: string; showAiIcon?: boolean; wordmarkGenerated?: boolean; wordmarkDarkGenerated?: boolean; copyrightHolder?: string };
   companyName: string;
   copyrightStyle: CopyrightStyle;
   brandLogoTextLong: string;
@@ -154,7 +154,8 @@ export function PlatformProfileProvider({ children }: PropsWithChildren) {
 
   return (
     <PlatformProfileContext.Provider value={{ ...profile, ...resolved, ready,error,refresh }}>
-      {ready?<BrandIdentityProvider brand={{name:resolved.logoTextLong, applicationName:profile.brand?.applicationName, iconText:profile.brand?.iconText, showAiIcon:profile.brand?.showAiIcon,
+      {ready?<BrandIdentityProvider brand={{name:resolved.logoTextLong, applicationName:profile.brand?.applicationName, iconText:resolved.logoTextShort, icon:profile.brand?.navIconId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.navIconId)}:undefined, showAiIcon:profile.brand?.showAiIcon, iconGenerated:profile.brand?.navIconGenerated, iconDarkGenerated:profile.brand?.iconDarkGenerated, wordmarkGenerated:profile.brand?.wordmarkGenerated, wordmarkDarkGenerated:profile.brand?.wordmarkDarkGenerated,
+        iconDark:profile.brand?.iconDarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.iconDarkId)}:undefined,
         wordmark:profile.brand?.wordmarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkId)}:undefined,
         wordmarkDark:profile.brand?.wordmarkDarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkDarkId)}:undefined}}>{children}</BrandIdentityProvider>:<div role="status" style={{padding:24}}>{error?<button onClick={refresh}>品牌加载失败，重试</button>:"正在加载…"}</div>}
     </PlatformProfileContext.Provider>

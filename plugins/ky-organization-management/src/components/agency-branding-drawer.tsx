@@ -1,6 +1,6 @@
 import "./organization-drawers.css";
 import "./agency-branding-drawer.css";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -17,9 +17,10 @@ import {
 } from "antd";
 import {
   BrandLogoLockup,
-  themeVariables,
-  useAppearance,
+  BrandIcon,
   generatedBrandImage,
+  BrandNavigationPreview,
+  useAppearance,
   copyrightStyleOptions,
   formatCopyright,
   type CopyrightStyle,
@@ -29,6 +30,9 @@ import {
 } from "@ky/admin-core";
 // Interaction structure and image generation ported from the source product.
 interface Draft {
+ navIconId?:string;navIconGenerated?:boolean;
+ iconDarkId?:string;
+ iconDarkGenerated?:boolean;
   showAiIcon?: boolean;
   iconGeneratorVersion?: number;
   wordmarkGeneratorVersion?: number;
@@ -123,6 +127,10 @@ export function AgencyBrandingDrawer({
   const client = useRequestClient(),
     permissions = usePermissions(),
     [form] = Form.useForm<Draft>();
+  Form.useWatch("navIconId",form);
+  Form.useWatch("navIconGenerated",form);
+  Form.useWatch("iconDarkId",form);
+  Form.useWatch("iconDarkGenerated",form);
   const [data, setData] = useState<Branding | null>(null),
     [busy, setBusy] = useState(false),
     [dirty, setDirty] = useState(false),
@@ -172,39 +180,10 @@ export function AgencyBrandingDrawer({
     try {
       if (kind === "save") {
         const draft = await form.validateFields();
-        for (const kind of ["icon", "wordmark", "wordmarkDark"] as const) {
-          const field = `${kind}Id` as const,
-            generated = `${kind}Generated` as const;
-          if (
-            !draft[field] ||
-            (draft[generated] &&
-              ((kind === "icon"
-                ? draft.iconGeneratorVersion
-                : kind === "wordmarkDark" ? draft.wordmarkDarkGeneratorVersion : draft.wordmarkGeneratorVersion) !== 1 ||
-                (kind === "icon"
-                  ? (draft.iconText?.trim() || draft.name) !==
-                    (data.draft.iconText?.trim() || data.draft.name)
-                  : draft.name !== data.draft.name)))
-          ) {
-            const image = generatedBrandImage(
-              kind === "icon"
-                ? draft.iconText?.trim() || draft.name
-                : draft.name,
-              kind === "icon" ? "icon" : "wordmark",
-              kind === "wordmarkDark",
-            );
-            const asset = await client.request<{ id: string }>(
-              path + "/assets",
-              {
-                method: "POST",
-                body: { kind: kind === "icon" ? "icon" : "wordmark", pngBase64: image.split(",")[1] },
-              },
-            );
-            draft[field] = asset.id;
-            draft[generated] = true;
-            if (kind === "icon") draft.iconGeneratorVersion = 1;
-            else if(kind === "wordmarkDark") draft.wordmarkDarkGeneratorVersion = 1; else draft.wordmarkGeneratorVersion = 1;
-          }
+        if(!draft.iconId || (draft.iconGenerated && (draft.iconText||draft.name)!==(data.draft.iconText||data.draft.name))) {
+         const png=generatedBrandImage(draft.iconText||draft.name,"icon");
+         const asset=await client.request<{id:string}>(path+"/assets",{method:"POST",body:{kind:"icon",pngBase64:png.split(",")[1]}});
+         draft.iconId=asset.id;draft.iconGenerated=true;draft.iconGeneratorVersion=1;
         }
         if (!current()) return;
         await client.request(path + "/draft", {
@@ -245,7 +224,7 @@ export function AgencyBrandingDrawer({
       if (current()) setBusy(false);
     }
   }
-  async function upload(file: File | undefined, kind: "icon" | "wordmark" | "wordmarkDark") {
+  async function upload(file: File | undefined, kind: "icon" | "navIcon" | "iconDark" | "wordmark" | "wordmarkDark") {
     if (!file || !data || busy) return;
     if (file.type !== "image/png" || file.size > 4 * 1024 * 1024) {
       void message.error("请选择4MB以内的PNG图片");
@@ -261,7 +240,7 @@ export function AgencyBrandingDrawer({
       for (const b of new Uint8Array(bytes)) binary += String.fromCharCode(b);
       const asset = await client.request<{ id: string }>(path + "/assets", {
         method: "POST",
-        body: { kind: kind === "icon" ? "icon" : "wordmark", pngBase64: btoa(binary) },
+        body: { kind: (kind==="navIcon"||kind.startsWith("icon")) ? "icon" : "wordmark", pngBase64: btoa(binary) },
       });
       if (!current()) return;
       form.setFieldValue(`${kind}Id` as const, asset.id);
@@ -315,17 +294,6 @@ export function AgencyBrandingDrawer({
     wordmarkDarkGenerated = Form.useWatch("wordmarkDarkGenerated", form),
     iconGenerated = Form.useWatch("iconGenerated", form),
     wordmarkGenerated = Form.useWatch("wordmarkGenerated", form);
-  const generated = useMemo(
-    () => ({
-      icon: generatedBrandImage(
-        iconText?.trim() || name || official.name,
-        "icon",
-      ),
-      wordmark: generatedBrandImage(name || official.name, "wordmark"),
-      wordmarkDark: generatedBrandImage(name || official.name, "wordmark", true),
-    }),
-    [name, iconText, official.name],
-  );
   return (
     <Drawer
       rootClassName="organization-contribution-drawer"
@@ -404,7 +372,7 @@ export function AgencyBrandingDrawer({
         <Form.Item name="iconId" hidden>
           <Input />
         </Form.Item>
-        {["wordmarkDarkId","wordmarkDarkGenerated","wordmarkDarkGeneratorVersion"].map(field=><Form.Item key={field} name={field} hidden><Input/></Form.Item>)}
+        {["navIconId","navIconGenerated","iconDarkId","iconDarkGenerated","wordmarkDarkId","wordmarkDarkGenerated","wordmarkDarkGeneratorVersion"].map(field=><Form.Item key={field} name={field} hidden><Input/></Form.Item>)}
         <Form.Item name="wordmarkId" hidden>
           <Input />
         </Form.Item>
@@ -423,7 +391,7 @@ export function AgencyBrandingDrawer({
         <Form.Item
           name="iconText"
           label="图标文字（可选）"
-          extra="仅用于自动生成应用图标，建议1–4个字符；留空使用品牌名称。上传图片优先，删除图片后恢复自动生成。"
+          extra="未上传收起 LOGO 时显示，建议1–4个字符；留空使用品牌名称前两个字。上传图片优先，恢复默认后显示文字。"
           rules={[
             {
               validator: (_, v) =>
@@ -438,107 +406,12 @@ export function AgencyBrandingDrawer({
         <Typography.Paragraph type="secondary">
           图片为可选项；应用图标按图标文字生成，文字LOGO按品牌名称生成。
         </Typography.Paragraph>
-        <div className="agency-brand-uploads">
-          {(
-            [
-              {
-                kind: "icon",
-                title: "应用图标",
-                hint: "应用品牌图标素材，建议使用带背景的正方形 PNG",
-                id:
-                  iconGenerated &&
-                  (iconText?.trim() || name) !==
-                    (data?.draft.iconText?.trim() || data?.draft.name)
-                    ? ""
-                    : iconId,
-              },
-              {
-                kind: "wordmark",
-                title: "文字 LOGO（亮色）",
-                hint: "用于软件左上角，上传透明 PNG，仅含品牌文字",
-                id:
-                  wordmarkGenerated && name !== data?.draft.name
-                    ? ""
-                    : wordmarkId,
-              },
-              {kind:"wordmarkDark",title:"文字 LOGO（暗色）",hint:"用于暗色模式，上传透明 PNG，仅含品牌文字",id:wordmarkDarkGenerated && name !== data?.draft.name ? "" : wordmarkDarkId},
-            ] as const
-          ).map((asset) => (
-            <section className="agency-brand-upload" key={asset.kind}>
-              <div className={`agency-brand-upload-image ${asset.kind}`}>
-                {asset.id ? (
-                  <BrandAssetPreview
-                    path={path}
-                    assetId={asset.id}
-                    className=""
-                    alt={`${asset.title}预览`}
-                  />
-                ) : (
-                  <img
-                    className="agency-brand-generated-thumbnail"
-                    src={generated[asset.kind]}
-                    alt={`${asset.title}自动预览`}
-                  />
-                )}
-              </div>
-              <div className="agency-brand-upload-info">
-                <Typography.Text strong>{asset.title}</Typography.Text>
-                <Typography.Text type="secondary">
-                  {asset.hint} · 不超过 4MB
-                </Typography.Text>
-                <Space wrap>
-                  <Upload
-                    accept="image/png"
-                    showUploadList={false}
-                    disabled={!data || !canEdit || busy}
-                    beforeUpload={(file) => {
-                      void upload(file, asset.kind);
-                      return false;
-                    }}
-                  >
-                    <Button
-                      className="agency-brand-upload-button"
-                      type="text"
-                      loading={busy}
-                      disabled={!data || !canEdit || busy}
-                    >
-                      {asset.id ? "更换图片" : "上传图片"}
-                    </Button>
-                  </Upload>
-                  {asset.id && (
-                    <Button
-                      type="text"
-                      danger
-                      className="agency-brand-upload-button"
-                      disabled={!data || !canEdit || busy}
-                      onClick={() => {
-                        form.setFieldValue(
-                          `${asset.kind}Id`,
-                          "",
-                        );
-                        form.setFieldValue(
-                          `${asset.kind}Generated`,
-                          true,
-                        );
-                        setDirty(true);
-                      }}
-                    >
-                      删除
-                    </Button>
-                  )}
-                </Space>
-                {asset.kind !== "icon" && (
-                  <Typography.Text
-                    type="secondary"
-                    className="agency-brand-preview-note"
-                  >
-                    左侧底色和圆角边框仅用于预览，不会加入文字 LOGO 图片。
-                  </Typography.Text>
-                )}
-              </div>
-            </section>
-          ))}
-        </div>
+        <section className="agency-brand-upload" style={{marginBottom:24}}>
+         <div className="agency-brand-upload-image icon">{iconId&&!iconGenerated?<BrandAssetPreview path={path} assetId={iconId} className="" alt="客户端桌面 LOGO"/>:<img src={generatedBrandImage(iconText||name||"品牌","icon")} alt="默认客户端桌面 LOGO"/>}</div>
+         <div className="agency-brand-upload-info"><Typography.Text strong>客户端桌面 LOGO</Typography.Text><Typography.Text type="secondary">供客户端打包时选用，用于桌面快捷方式、应用启动器及 Dock／任务栏。正方形 PNG，不超过4MB；不会直接修改已安装客户端图标。</Typography.Text>
+         <Upload accept="image/png" showUploadList={false} disabled={!data||!canEdit||busy} beforeUpload={file=>{void upload(file,"icon");return false}}><Button disabled={!data||!canEdit||busy}>{iconId?"更换桌面 LOGO":"上传桌面 LOGO"}</Button></Upload>
+         {iconId&&<Button disabled={!data||!canEdit||busy} onClick={()=>{form.setFieldValue("iconId","");form.setFieldValue("iconGenerated",true);setDirty(true)}}>恢复默认桌面图标</Button>}</div>
+        </section>
         <Form.Item name="showAiIcon" label="显示 AI 图标" valuePropName="checked" initialValue={false} extra="在品牌文字右侧显示 AI 图标；保存草稿并发布后生效。">
           <Switch checkedChildren="显示" unCheckedChildren="隐藏" />
         </Form.Item>
@@ -585,52 +458,20 @@ export function AgencyBrandingDrawer({
           )}
         </Typography.Paragraph>
       </Form>
-      <section className="agency-brand-previews">
-        <Typography.Text strong>应用 LOGO 预览</Typography.Text>
-        <Typography.Paragraph type="secondary">
-          按后台顶部实际尺寸展示，LOGO
-          应位于左侧品牌区；窄屏可横向查看完整效果。
-        </Typography.Paragraph>
-        {[false, true].map((dark) => (
-          <div
-            key={String(dark)}
-            className={`agency-brand-preview ${dark ? "dark" : "light"}`}
-            style={themeVariables(themeId, dark) as CSSProperties}
-          >
-            <span className="agency-brand-preview-label">
-              {dark ? "深色背景" : "浅色背景"}
-            </span>
-            <div className="agency-brand-preview-scroll">
-              <div className="agency-brand-preview-header">
-                <BrandLogoLockup compactInset={6} className="agency-brand-lockup" showAIIcon={showAiIcon === true}>
-                  {(dark ? wordmarkDarkId : wordmarkId) &&
-                  (!(dark ? wordmarkDarkGenerated : wordmarkGenerated) || name === data?.draft.name) ? (
-                    <BrandAssetPreview
-                      path={path}
-                      assetId={(dark ? wordmarkDarkId : wordmarkId) || ""}
-                      className="agency-brand-wordmark"
-                      alt="品牌文字"
-                    />
-                  ) : (
-                    <img
-                      className="agency-brand-wordmark"
-                      src={dark ? generated.wordmarkDark : generated.wordmark}
-                      alt="自动生成的品牌文字"
-                    />
-                  )}
-                </BrandLogoLockup>
-                <div
-                  className="agency-brand-preview-modes"
-                  aria-label="顶部导航位置参考"
-                >
-                  <span>工作台</span>
-                  <span>管理中心</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </section>
+      <Typography.Text strong>应用 LOGO 预览</Typography.Text>
+      <Typography.Paragraph type="secondary">展开使用横向文字 LOGO，收起使用独立图标或文字；窄屏可横向查看实际导航尺寸。展开素材为横向透明 PNG，收起素材建议正方形 PNG，均不超过4MB。</Typography.Paragraph>
+      <BrandNavigationPreview themeId={themeId} actions={(dark,collapsed)=>{
+        const kind=collapsed?(dark?"iconDark":"navIcon"):(dark?"wordmarkDark":"wordmark"),id=form.getFieldValue(`${kind}Id`),custom=id&&!form.getFieldValue(`${kind}Generated`);
+        return <><Upload accept="image/png" showUploadList={false} disabled={!data||!canEdit||busy} beforeUpload={file=>{void upload(file,kind);return false}}><Button disabled={!data||!canEdit||busy} loading={busy}>{custom?"更换 LOGO":"上传 LOGO"}</Button></Upload>
+        {custom&&<Button disabled={!data||!canEdit||busy} onClick={()=>{form.setFieldValue(`${kind}Id`,"");form.setFieldValue(`${kind}Generated`,true);setDirty(true)}}>恢复默认</Button>}</>;
+      }} renderLogo={(dark,collapsed)=>{
+        const kind=collapsed?(dark?"iconDark":"navIcon"):(dark?"wordmarkDark":"wordmark"),id=form.getFieldValue(`${kind}Id`),auto=form.getFieldValue(`${kind}Generated`);
+        const text=collapsed?(iconText||Array.from(name||"品牌").slice(0,2).join("")):(name||"品牌");
+        if(collapsed)return id&&!auto?<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:48,height:48}}><BrandAssetPreview path={path} assetId={id} className="brand-preview-app-icon" alt="应用图标"/></span>:<BrandIcon brand={{name:name||"品牌",iconText:text}} dark={dark}/>;
+        return <BrandLogoLockup fitText maxHeight={40} className="agency-brand-lockup" showAIIcon={showAiIcon===true}>
+          {id&&!auto?<BrandAssetPreview path={path} assetId={id} className={collapsed?"brand-preview-app-icon":"agency-brand-wordmark"} alt={collapsed?"应用图标":"品牌文字"}/>:<span>{text}</span>}
+        </BrandLogoLockup>;
+      }}/>
       {canPublish && (
         <Space style={{ marginTop: 24 }}>
           <InputNumber

@@ -1498,7 +1498,7 @@ export const catalog = [
     "id": "brand-logo",
     "title": "完整品牌 BrandLogo",
     "aliases": [
-      "BrandLogo", "BrandIdentityProvider", "BrandLogoLockup"
+      "BrandLogo", "BrandIcon", "BrandNavigationPreview", "BrandIdentityProvider", "BrandLogoLockup"
     ],
     "category": "brand",
     "kind": "component",
@@ -1512,7 +1512,9 @@ export const catalog = [
     "owner": "@ky/admin-core / 组件中心组合",
     "sourcePaths": [
       "packages/ky-admin-core/src/brand-ai-suffix.tsx",
-      "packages/ky-admin-core/src/brand-identity.tsx"
+      "packages/ky-admin-core/src/brand-identity.tsx",
+      "packages/ky-admin-core/src/brand-navigation-preview.tsx",
+      "packages/ky-admin-core/src/brand-form.css"
     ],
     "dependencies": [
       "react",

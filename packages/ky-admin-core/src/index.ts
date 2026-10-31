@@ -147,3 +147,6 @@ export * from "./theme/antd-theme";
 export * from "./list-overview";
 
 export * from "./brand-identity";
+
+export {BrandIcon} from "./brand-identity";
+export {BrandNavigationPreview} from "./brand-navigation-preview";
