@@ -43,3 +43,7 @@ description: KyCRM 模块创建指南。Use when Codex needs to create a new KyC
 - 项目初始化使用 `kycrm-initialize-project`。
 - 架构边界、权限数据范围和 API 契约仍遵循 `aicrm-solution`。
 - 列表页布局遵循后台列表页规范：标题在卡片外、toolbar 在卡片 header、批量操作在新增按钮左侧。
+
+## 产品交互设计与适配必读
+
+涉及页面、菜单、表单、详情、查询、主题或用户流程时，先读 [设计与适配规范入口](../../../docs/design/README.md)，按任务选取设计总则和验收矩阵。实现说明应包含组件复用来源、保存/发布语义及异常恢复，不以截图相似或构建成功代替用户任务验收。
