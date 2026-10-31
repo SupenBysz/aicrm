@@ -18,6 +18,8 @@ export interface AppearanceContextValue {
     followPlatform: () => void;
     retry: () => void;
     refresh: () => Promise<void>;
+    /** Temporary page preview; null restores the actual account/platform appearance. */
+    previewPlatform?: (value: AppearanceValue | null) => void;
     reloadPlatform: (saved?: AppearanceValue) => Promise<void>;
 }
 export const AppearanceContext = createContext<AppearanceContextValue | null>(null);

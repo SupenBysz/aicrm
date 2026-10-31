@@ -1654,7 +1654,7 @@ export const catalog = [
     ],
     "category": "brand",
     "kind": "component",
-    "summary": "四主题与亮暗/系统选项，本例选择不保存真实偏好。",
+    "summary": "四主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
     "keywords": [
       "brand",
       "外观选择 AppearanceControls"
@@ -1663,7 +1663,8 @@ export const catalog = [
     "environment": "web_and_client",
     "owner": "@ky/admin-core / 组件中心组合",
     "sourcePaths": [
-      "packages/ky-admin-core/src/theme/controls.tsx"
+      "packages/ky-admin-core/src/theme/controls.tsx",
+      "packages/ky-admin-core/src/theme/controls.css"
     ],
     "dependencies": [
       "react",
