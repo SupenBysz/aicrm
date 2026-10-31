@@ -1,7 +1,7 @@
 import { PublicDocumentLinks } from "../public-document-links";
 import {useQuery} from "@tanstack/react-query";
 import {requestClient} from "../remote-api";
-import { BrandLogoLockup, useAppearance, type CopyrightStyle } from "@ky/admin-core";
+import { BrandLogo, useAppearance, type CopyrightStyle } from "@ky/admin-core";
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from "antd";
 import { useState,useLayoutEffect } from "react";
@@ -28,8 +28,6 @@ export function LoginPage() {
  }:undefined;
  const {icpRecord,refresh}=profile;const logoTextLong=brand?.name??profile.logoTextLong,companyName=brand?.copyrightHolder??profile.name,copyrightStyle=brand?.copyrightStyle??profile.copyrightStyle,ready=profile.ready&&entry.isSuccess&&(!entry.data.institution||!!brand),error=profile.error||entry.isError;
   const [submitting, setSubmitting] = useState(false);
- const [imageBroken,setImageBroken]=useState("");
- const wordmarkUrl=dark?brand?.wordmarkDark?.url:brand?.wordmark?.url;
  useLayoutEffect(()=>{document.title=ready?`${logoTextLong} 后台`:"管理后台";return()=>{document.title="管理后台"}},[ready,logoTextLong]);
  if(!ready)return <div role="status" className="auth-page">{error?<Button onClick={()=>{refresh();void entry.refetch()}}>品牌加载失败，重试</Button>:"正在加载…"}</div>;
 
@@ -70,7 +68,7 @@ export function LoginPage() {
               <div className="login-hero">
                 <div>
                   <Typography.Text className="login-eyebrow" type="secondary">
-                    <BrandLogoLockup showAIIcon={brand?.showAiIcon === true} maxHeight={48}>{wordmarkUrl&&imageBroken!==wordmarkUrl?<img src={wordmarkUrl} alt={logoTextLong} style={{maxWidth:240,maxHeight:48}} onError={()=>setImageBroken(wordmarkUrl)}/>:`${logoTextLong} Console`}</BrandLogoLockup>
+                    <BrandLogo brand={brand || {name:logoTextLong}} dark={dark} maxHeight={48}/>
                   </Typography.Text>
                   <Typography.Title className="login-title" level={1}>
                     后台登录

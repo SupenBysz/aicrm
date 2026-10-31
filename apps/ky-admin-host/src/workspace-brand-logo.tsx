@@ -1,124 +1,41 @@
-import { BrandLogoLockup, useAppearance } from "@ky/admin-core";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { BrandIdentityProvider, BrandLogo, useAppearance, useBrandIdentity, type BrandIdentity } from "@ky/admin-core";
+import { createContext, useContext, useEffect, useLayoutEffect, useState, type PropsWithChildren } from "react";
 import { requestClient } from "./remote-api";
 import { usePlatformProfile } from "./platform-profile";
-interface Brand {
-  showAiIcon?: boolean;
-  iconText?: string;
-  name: string;
-  applicationName: string;
-  wordmarkDark?: {url:string};
-  wordmarkGenerated?: boolean;
-  wordmark?: {
-    url: string;
-  };
-  effectiveFingerprint: string;
+type Workspace = {id:string;type:string;membershipId:string};
+const BrandStatus = createContext<{error:boolean;retry:()=>void}>({error:false,retry:()=>{}});
+/** One effective identity supplies both the real header and all theme previews. */
+export function WorkspaceBrandProvider({workspace,children}:PropsWithChildren<{workspace:Workspace}>) {
+  const platform=useBrandIdentity();
+  const key=`${workspace.type}:${workspace.id}:${workspace.membershipId}`;
+  const [resolved,setResolved]=useState<{key:string;brand?:BrandIdentity;error?:boolean}>();
+  const [retry,setRetry]=useState(0);
+  useEffect(()=>{
+    const refresh=()=>setRetry(x=>x+1);
+    window.addEventListener("ky:agency-branding-updated",refresh);
+    window.addEventListener("ky:platform-profile-updated",refresh);
+    return()=>{window.removeEventListener("ky:agency-branding-updated",refresh);window.removeEventListener("ky:platform-profile-updated",refresh)};
+  },[]);
+  useEffect(()=>{
+    if(workspace.type==="platform")return;
+    let active=true;
+    void requestClient.request<{brand:BrandIdentity}>("/api/v1/organizations/current/branding")
+      .then(v=>{if(active)setResolved({key,brand:v.brand})})
+      .catch(()=>{if(active)setResolved({key,error:true})});
+    return()=>{active=false};
+  },[key,retry,workspace.type]);
+  const brand=workspace.type==="platform"?platform:resolved?.key===key?resolved.brand??null:null;
+  return <BrandStatus.Provider value={{error:resolved?.key===key&&resolved.error===true,retry:()=>setRetry(x=>x+1)}}>
+    <BrandIdentityProvider brand={brand}>{children}</BrandIdentityProvider>
+  </BrandStatus.Provider>;
 }
-export function WorkspaceBrandLogo({
-  workspace,
-  collapsed,
-}: {
-  workspace: {
-    id: string;
-    type: string;
-    membershipId: string;
-  };
-  collapsed: boolean;
-}) {
-  const {dark} = useAppearance();
-  const p = usePlatformProfile(),
-    key = `${workspace.type}:${workspace.id}:${workspace.membershipId}`;
-  const [resolved, setResolved] = useState<{
-      key: string;
-      brand?: Brand;
-      error?: boolean;
-    }>(),
-    [retry, setRetry] = useState(0),
-    [broken, setBroken] = useState("");
-  useEffect(() => {
-    const refresh = () => setRetry((x) => x + 1);
-    window.addEventListener("ky:agency-branding-updated", refresh);
-    window.addEventListener("ky:platform-profile-updated", refresh);
-    return () => {
-      window.removeEventListener("ky:agency-branding-updated", refresh);
-      window.removeEventListener("ky:platform-profile-updated", refresh);
-    };
-  }, []);
-  useEffect(() => {
-    let active = true;
-    if (workspace.type === "platform") return;
-    void requestClient
-      .request<{
-        brand: Brand;
-      }>("/api/v1/organizations/current/branding")
-      .then((v) => {
-        if (active) setResolved({ key, brand: v.brand });
-      })
-      .catch(() => {
-        if (active) setResolved({ key, error: true });
-      });
-    return () => {
-      active = false;
-    };
-  }, [key, retry, workspace.type]);
-  const brand = workspace.type === "platform" ? {
- name: p.logoTextLong, applicationName:p.brand?.applicationName || p.logoTextLong,
- iconText:p.brand?.iconText, showAiIcon:p.brand?.showAiIcon,
- wordmarkGenerated:p.brand?.wordmarkGenerated,
- wordmark:p.brand?.wordmarkId ? {url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(p.brand.wordmarkId)} : undefined,
- wordmarkDark:p.brand?.wordmarkDarkId ? {url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(p.brand.wordmarkDarkId)} : undefined,
- effectiveFingerprint:"platform"
- } : resolved?.key === key ? resolved.brand : undefined;
-  const name =
-    workspace.type === "platform"
-      ? p.ready
-        ? p.logoTextLong
-        : ""
-      : brand?.name;
-  useLayoutEffect(() => {
-    document.title = name
-      ? `${brand?.applicationName || name} 后台`
-      : "管理后台";
-    return () => {
-      document.title = "管理后台";
-    };
-  }, [name, brand?.applicationName, key]);
-  if (!name)
-    return (
-      <span role="status">
-        {workspace.type === "platform" && p.error ? (
-          <button onClick={p.refresh}>重试加载品牌</button>
-        ) : resolved?.key === key && resolved.error ? (
-          <button onClick={() => setRetry((x) => x + 1)}>重试加载品牌</button>
-        ) : (
-          "加载中"
-        )}
-      </span>
-    );
-  const url = dark ? brand?.wordmarkDark?.url : brand?.wordmark?.url;
-  return (
-    <BrandLogoLockup fitText compactInset={collapsed ? 0 : 6} showAIIcon={!collapsed && brand?.showAiIcon === true} maxHeight={40}>
-      {url && broken !== url && !collapsed ? (
-        <img
-          src={url}
-          alt={name}
-          style={{
-            maxHeight: 40,
-            maxWidth: brand?.showAiIcon ? "calc(100% - 37px)" : "100%",
-            objectFit: "contain",
-
-          }}
-          onError={() => setBroken(url)}
-        />
-      ) : collapsed ? (
-        workspace.type === "platform" ? (
-          p.logoTextShort
-        ) : (
-          brand?.iconText || Array.from(name).slice(0, 2).join("")
-        )
-      ) : (
-        name
-      )}
-    </BrandLogoLockup>
-  );
+export function WorkspaceBrandLogo({workspace,collapsed}:{workspace:Workspace;collapsed:boolean}) {
+  const brand=useBrandIdentity(),p=usePlatformProfile(),{dark}=useAppearance(),status=useContext(BrandStatus);
+  useLayoutEffect(()=>{
+    document.title=brand?`${brand.applicationName||brand.name} 后台`:"管理后台";
+    return()=>{document.title="管理后台"};
+  },[brand?.name,brand?.applicationName,workspace.id]);
+  if(!brand)return <span role="status">{status.error?<button onClick={status.retry}>重试加载品牌</button>:"加载中"}</span>;
+  if(collapsed)return <>{workspace.type==="platform"?p.logoTextShort:brand.iconText||Array.from(brand.name).slice(0,2).join("")}</>;
+  return <BrandLogo brand={brand} dark={dark} maxHeight={40} compactInset={6}/>;
 }

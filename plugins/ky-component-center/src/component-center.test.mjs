@@ -52,3 +52,22 @@ test('every business overview and list composition uses the page-level slot',()=
  for(const file of files){const ast=ts.createSourceFile(file,readFileSync(resolve(root,file),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let found=0;
  function visit(node){if(ts.isJsxSelfClosingElement(node)&&node.tagName.getText(ast)==='ListOverview'){found++;let parent=node.parent;while(parent&&!ts.isJsxAttribute(parent))parent=parent.parent;assert.ok(parent&&parent.name.getText(ast)==='overview',file+' summary is nested inside list body');}ts.forEachChild(node,visit)}visit(ast);assert.equal(found,1,file);}
 });
+
+
+test('formal logo and theme previews share the injected brand, mode-specific art, and AI switch',async()=>{
+ const require=createRequire(resolve(root,'apps/aicrm-desktop/package.json'));const {build}=require('esbuild');
+ const host=resolve(root,'apps/ky-admin-host'),fixture=join(host,'tmp');const {mkdirSync}=await import('node:fs');mkdirSync(fixture,{recursive:true});const folder=mkdtempSync(join(fixture,'brand-render-'));
+ try {
+  const code=`import React from 'react';import {renderToString} from 'react-dom/server';import assert from 'node:assert/strict';import {BrandLogo,BrandIdentityProvider,AppearanceControls} from '@ky/admin-core';
+const render=(brand)=>renderToString(React.createElement(BrandIdentityProvider,{brand},React.createElement(AppearanceControls,{themeId:'classic-gold',mode:'light',onChange:()=>{}})));
+for(const name of ['示例甲','示例乙'])for(const showAiIcon of [true,false]){
+ const brand={name,showAiIcon,wordmark:{url:'/light-'+name+'.png'},wordmarkDark:{url:'/dark-'+name+'.png'}};
+ const html=render(brand);assert.equal((html.match(/aria-label="AI"/g)||[]).length,showAiIcon?8:0);assert.equal((html.match(/src="\\/light-/g)||[]).length,4);assert.equal((html.match(/src="\\/dark-/g)||[]).length,4);assert.ok(!html.includes('Kysion'));assert.ok(html.includes(name));
+ const direct=renderToString(React.createElement(BrandLogo,{brand,dark:true}));assert.ok(direct.includes('/dark-'+name+'.png'));assert.ok(!direct.includes('/light-'));
+}
+assert.ok(render(null).includes('品牌 Logo 未配置'));assert.ok(!render(null).includes('Kysion'));
+console.log('Dynamic formal brand, light/dark artwork, optional vector AI, and missing-context checks passed');`;
+  await build({stdin:{contents:code,loader:'tsx',resolveDir:host},bundle:true,platform:'node',format:'esm',loader:{'.css':'empty'},external:['react','react-dom/server','antd','@ant-design/icons','react-router-dom','node:*'],alias:{'@ky/admin-core':resolve(root,'packages/ky-admin-core/src/index.ts')},outfile:join(folder,'render.mjs')});
+  execFileSync(process.execPath,[join(folder,'render.mjs')],{cwd:host,stdio:'pipe'});
+ }finally{rmSync(folder,{recursive:true,force:true})}
+});

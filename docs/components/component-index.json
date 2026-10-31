@@ -1,15 +1,16 @@
 {
   "schemaVersion": 1,
-  "contentHash": "8127f3b652b0a73442a524d8d39812020b21daf68c0cb257973a1504ea192bd3",
+  "contentHash": "51b1473daea3b074edb5409a08b81d0808fa3c887a87e41ec15d1b840db2bed1",
   "sourceHashes": {
-    "apps/ky-admin-host/src/app.tsx": "ea37ab77433d4249acc610becdb2c5951d23c129bf5ff6d8143cc2fe5f742f6a",
+    "apps/ky-admin-host/src/app.tsx": "a7a992041d2be006b763d1c32026698d475991ae8afabc266416f0bb4ccfedc1",
     "apps/ky-admin-host/src/styles.css": "f65e5c997be928fcabe2f921a393f69d828051f97cdbcbb2e98a5e7dd0cdfb20",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
     "packages/ky-admin-core/src/brand-ai-suffix.tsx": "1bfb96de7be23945dc9645ea55bddd34a9961e07bece7dc3fc3ab43561c5e376",
+    "packages/ky-admin-core/src/brand-identity.tsx": "88a12628c0d124c653bb5f903531a65ca5ac7f60f884695cc58b505619c309ca",
     "packages/ky-admin-core/src/list-overview.tsx": "fa96300489709e0e8285e6f985b501f2538a7667cf93cfe317459de23fbc4fd0",
     "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
     "packages/ky-admin-core/src/theme/controls.css": "adb872bb534662c2bec8c46cea7ba34742e3f0aae49fe11ec3570b712b23b82e",
-    "packages/ky-admin-core/src/theme/controls.tsx": "753c8f3417158b8ac4fb74e83d35a513f107b8455c659bd111cbf5bf6a33cae9",
+    "packages/ky-admin-core/src/theme/controls.tsx": "590e82304b19dfe0fb41dc648d93ce91bcdab8311b97b93b0a08caeb1580eb24",
     "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379",
     "packages/ky-markdown/src/editor.tsx": "3cbee8b79fa6027f12f7d9432e62270f4bfe1dae230f890aef16403640814feb",
     "packages/ky-markdown/src/index.tsx": "9ac9f6204a823029247ee129977a1ce298a9671bf6e0813396c0a3254a6635c9",
@@ -1522,13 +1523,15 @@
     },
     {
       "id": "brand-logo",
-      "title": "品牌组合 BrandLogoLockup",
+      "title": "完整品牌 BrandLogo",
       "aliases": [
+        "BrandLogo",
+        "BrandIdentityProvider",
         "BrandLogoLockup"
       ],
       "category": "brand",
       "kind": "component",
-      "summary": "图形与AI后缀按宽度缩放；16px为容器规范。",
+      "summary": "按实际品牌亮暗素材组合 Logo 与可选 AI 图标；统一限制宽高，容器保留16px。",
       "keywords": [
         "brand",
         "品牌组合 BrandLogoLockup"
@@ -1537,7 +1540,8 @@
       "environment": "web_and_client",
       "owner": "@ky/admin-core / 组件中心组合",
       "sourcePaths": [
-        "packages/ky-admin-core/src/brand-ai-suffix.tsx"
+        "packages/ky-admin-core/src/brand-ai-suffix.tsx",
+        "packages/ky-admin-core/src/brand-identity.tsx"
       ],
       "dependencies": [
         "react",
@@ -1567,20 +1571,20 @@
       ],
       "replacementId": null,
       "package": "@ky/admin-core",
-      "exportName": "BrandLogoLockup",
+      "exportName": "BrandLogo",
       "importPath": "@ky/admin-core",
       "api": [
         {
-          "name": "children",
-          "type": "ReactNode",
+          "name": "brand",
+          "type": "BrandIdentity",
           "default": "必填",
-          "description": "品牌文字或图片"
+          "description": "当前品牌文字、亮暗图片与AI开关"
         },
         {
-          "name": "showAIIcon",
+          "name": "dark",
           "type": "boolean",
           "default": "必填",
-          "description": "是否附加独立AI后缀"
+          "description": "选择对应亮暗文字素材"
         },
         {
           "name": "maxHeight",
@@ -1623,7 +1627,8 @@
       "environment": "web_and_client",
       "owner": "@ky/admin-core / 组件中心组合",
       "sourcePaths": [
-        "packages/ky-admin-core/src/brand-ai-suffix.tsx"
+        "packages/ky-admin-core/src/brand-ai-suffix.tsx",
+        "packages/ky-admin-core/src/brand-identity.tsx"
       ],
       "dependencies": [
         "react",
@@ -1690,7 +1695,8 @@
       "owner": "@ky/admin-core / 组件中心组合",
       "sourcePaths": [
         "packages/ky-admin-core/src/theme/controls.tsx",
-        "packages/ky-admin-core/src/theme/controls.css"
+        "packages/ky-admin-core/src/theme/controls.css",
+        "packages/ky-admin-core/src/brand-identity.tsx"
       ],
       "dependencies": [
         "react",

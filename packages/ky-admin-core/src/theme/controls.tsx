@@ -1,15 +1,18 @@
 import "./controls.css";
 import { Button, Radio, Space, Typography } from "antd";
-import { BrandLogoLockup } from "../brand-ai-suffix";
+import { BrandLogo, useBrandIdentity, type BrandIdentity } from "../brand-identity";
 import type { CSSProperties } from "react";
 import { THEMES, themeColors, themeVariables, type AppearanceMode, type ThemeId } from "./tokens";
-export function AppearanceControls({ themeId, mode, onChange, disabled = false, label = "个人外观" }: {
+export function AppearanceControls({ themeId, mode, onChange, disabled = false, label = "个人外观", brand: suppliedBrand }: {
     label?: string;
+    brand?: BrandIdentity;
     themeId: ThemeId;
     mode: AppearanceMode;
     onChange: (themeId: ThemeId, mode: AppearanceMode) => void;
     disabled?: boolean;
 }) {
+    const inheritedBrand = useBrandIdentity();
+    const brand = suppliedBrand ?? inheritedBrand;
     return <Space orientation="vertical" size={16} style={{ width: "100%" }}>
   <div><Typography.Text strong>外观模式</Typography.Text><div style={{ marginTop: 8 }}><Radio.Group aria-label={`${label}模式`} disabled={disabled} value={mode} onChange={event => onChange(themeId, event.target.value)} options={[{ label: "亮色", value: "light" }, { label: "暗色", value: "dark" }, { label: "跟随系统", value: "system" }]} optionType="button"/></div></div>
   <div><Typography.Text strong>配色主题</Typography.Text>
@@ -18,7 +21,7 @@ export function AppearanceControls({ themeId, mode, onChange, disabled = false, 
         <span style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span>{t.name}</span><span aria-hidden="true">{themeId === t.id ? "✓" : ""}</span></span>
         <span style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
           {[false, true].map(dark => { const colors = themeColors(t.id, dark); return <span key={String(dark)} aria-label={`${t.name}${dark ? "暗色" : "亮色"}预览`} style={{ ...themeVariables(t.id, dark), display: "block", minWidth: 0, background: colors.surface, color: colors.text, padding: 8, borderRadius: 8, overflow: "hidden" } as CSSProperties}>
-            <span style={{display:"block",fontFamily:"system-ui,sans-serif",fontSize:20,fontStyle:"italic",fontWeight:700,lineHeight:1}}><BrandLogoLockup showAIIcon fitText maxHeight={20}>Kysion</BrandLogoLockup></span>
+            <span style={{display:"flex",alignItems:"center",width:"100%",minWidth:0,height:40}}>{brand ? <BrandLogo brand={brand} dark={dark} maxHeight={40}/> : <Typography.Text type="secondary">品牌 Logo 未配置</Typography.Text>}</span>
           </span>; })}
         </span>
       </Button>)}
