@@ -1,14 +1,15 @@
 {
   "schemaVersion": 1,
-  "contentHash": "b39f37ca40d8d23ffae2eff16383ff464ca12da8b7d7eb6f294298fd20ef92db",
+  "contentHash": "8127f3b652b0a73442a524d8d39812020b21daf68c0cb257973a1504ea192bd3",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "ea37ab77433d4249acc610becdb2c5951d23c129bf5ff6d8143cc2fe5f742f6a",
     "apps/ky-admin-host/src/styles.css": "f65e5c997be928fcabe2f921a393f69d828051f97cdbcbb2e98a5e7dd0cdfb20",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
-    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "6bc948f955b417d431ba19a8edb8466a91ca1219318120d1cfc00bdfa7c44863",
+    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "1bfb96de7be23945dc9645ea55bddd34a9961e07bece7dc3fc3ab43561c5e376",
     "packages/ky-admin-core/src/list-overview.tsx": "fa96300489709e0e8285e6f985b501f2538a7667cf93cfe317459de23fbc4fd0",
     "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
-    "packages/ky-admin-core/src/theme/controls.tsx": "d10cf381a90aa31820352c9cc31aa9f2ea08e22ae9272b708e976f885f4f7bc6",
+    "packages/ky-admin-core/src/theme/controls.css": "adb872bb534662c2bec8c46cea7ba34742e3f0aae49fe11ec3570b712b23b82e",
+    "packages/ky-admin-core/src/theme/controls.tsx": "753c8f3417158b8ac4fb74e83d35a513f107b8455c659bd111cbf5bf6a33cae9",
     "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379",
     "packages/ky-markdown/src/editor.tsx": "3cbee8b79fa6027f12f7d9432e62270f4bfe1dae230f890aef16403640814feb",
     "packages/ky-markdown/src/index.tsx": "9ac9f6204a823029247ee129977a1ce298a9671bf6e0813396c0a3254a6635c9",
@@ -1679,7 +1680,7 @@
       ],
       "category": "brand",
       "kind": "component",
-      "summary": "四主题与亮暗/系统选项，本例选择不保存真实偏好。",
+      "summary": "四主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
       "keywords": [
         "brand",
         "外观选择 AppearanceControls"
@@ -1688,7 +1689,8 @@
       "environment": "web_and_client",
       "owner": "@ky/admin-core / 组件中心组合",
       "sourcePaths": [
-        "packages/ky-admin-core/src/theme/controls.tsx"
+        "packages/ky-admin-core/src/theme/controls.tsx",
+        "packages/ky-admin-core/src/theme/controls.css"
       ],
       "dependencies": [
         "react",

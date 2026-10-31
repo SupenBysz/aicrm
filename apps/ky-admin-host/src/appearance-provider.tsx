@@ -21,6 +21,7 @@ catch {
 function identity() { try { return loadSession() ? loadBootstrap()?.user.id ?? "anonymous" : "anonymous"; } catch { return "anonymous"; } }
 export function AppearanceProvider({ children }: PropsWithChildren) {
     const [account, setAccount] = useState(identity);
+    const [platformPreview, setPlatformPreview] = useState<AppearanceValue | null>(null);
     const [preference, setPreference] = useState<AppearanceValue>(() => {
         const cached=read(KEY+account) as {value?:unknown}|null;
         const value=normalizeAppearance(cached?.value,true);
@@ -156,6 +157,7 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
     }, []);
     useEffect(() => {
         controller.current?.abort();
+        setPlatformPreview(null);
         readEpoch.current++;reading.current=false;
         controller.current = new AbortController();
         if (timer.current)
@@ -226,18 +228,20 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
             clearTimeout(timer.current); };
     }, []);
     const enabled = import.meta.env.VITE_APPEARANCE_DISABLED !== "1";
-    const effective = !enabled ? DEFAULT_APPEARANCE : preference.source === "personal" ? preference : platform;
+    const effective = !enabled ? DEFAULT_APPEARANCE : platformPreview ?? (preference.source === "personal" ? preference : platform);
     const themeId = (effective.themeId || "classic-gold") as ThemeId;
     const mode = (effective.mode || "system") as AppearanceMode;
     const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
     useLayoutEffect(() => {
         applyAppearance(themeId, mode);
+        // Editing is transient: do not persist snapshots or notify the native shell.
+        if (platformPreview) return;
         write(APPEARANCE_SNAPSHOT_KEY, { themeId, mode });
         // Projection for an older frontend during rollback, never used as new account state.
         if(!loading){try{localStorage.setItem("ky.admin.appearance.migrated.v1","1");localStorage.setItem("ky.admin.colorScheme.v1",dark?"dark":"light")}catch{}}
         window.dispatchEvent(new CustomEvent("ky:appearance-applied", { detail: { themeId, dark } }));
         void getDesktopBridge()?.window?.setAppearance?.({ themeId, dark }).catch(() => { });
-    }, [themeId, mode, dark, loading, preference.source]);
+    }, [themeId, mode, dark, loading, preference.source, platformPreview]);
     function select(p: AppearanceValue) {
         if(reading.current||loading||identity()!==current.current.account)return;
         current.current.legacy = false;setOriginLegacy(false);setSyncState("pending");
@@ -321,6 +325,6 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
         origin:originLegacy?"legacy":preference.source,
         syncState, canReload:!loading&&syncState!=="saving"&&syncState!=="reading"&&!uncertain&&running.current?.owner!==account,
         choose: (id,m) => select({schemaVersion:1,source:"personal",themeId:id,mode:m,revision:current.current.revision}),
-        followPlatform, reloadPlatform, refresh:reloadPersonal, retry:()=>void retry()
+        previewPlatform: setPlatformPreview, followPlatform, reloadPlatform, refresh:reloadPersonal, retry:()=>void retry()
     }}>{children}</AppearanceContext.Provider>;
 }
