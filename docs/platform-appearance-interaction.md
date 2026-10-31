@@ -43,3 +43,10 @@ Core 的可选 `previewPlatform(value|null)` 只承载临时渲染状态，Host 
 ## 回退
 
 本轮只有前端与文档，无数据库或业务配置变更。可整体回退本 PR；不要只回退 Host 或 Core 一侧而保留插件临时预览调用。既有个人偏好和平台设置格式不变。
+
+## PR #31 审查修复：Core 样式产物（2026-10-31）
+
+- 发现：Core 入口声明为 `dist/index.js`，但新增的 `dist/theme/controls.js` 引用 `./controls.css`，原构建仅运行 tsc，未复制 CSS。Host 源码别名及原测试会掩盖正式包入口的资源缺失。
+- 修复：Core 声明构建后递归复制 `src` 中 CSS，保留相对路径；没有修改依赖版本、公共导出或主题行为。
+- 回归：`corepack pnpm test:admin-core-package` 先构建真实 Core，再从标准包入口打包 AppearanceControls，显式禁用 Host tsconfig paths 和源码别名，校验输入来自 dist 且消费者输出包含真实 CSS。修复前复现缺少 controls.css，修复后通过。
+- 验证范围：此回归保证共享包资源输出，不替代 PR 尚未完成的真实浏览器和安装客户端验收；未部署。

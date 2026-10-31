@@ -15,7 +15,8 @@
     "verify:codex-appserver-protocol": "bash scripts/verify_codex_appserver_protocol.sh",
     "components:generate": "node scripts/generate_component_catalog.mjs",
     "components:check": "node scripts/generate_component_catalog.mjs --check",
-    "components:test": "node --test plugins/ky-component-center/src/component-center.test.mjs"
+    "components:test": "node --test plugins/ky-component-center/src/component-center.test.mjs",
+    "test:admin-core-package": "corepack pnpm --filter @ky/admin-core build && node --test scripts/test_admin_core_package.mjs"
   },
   "devDependencies": {
     "turbo": "^2.10.4",
