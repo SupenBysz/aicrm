@@ -19,7 +19,7 @@
     {
       "name": "ghcr.io/supenbysz/kycrm-org",
       "newName": "ghcr.io/supenbysz/kycrm-org",
-      "digest": "sha256:527ae8590ac751bd3e7b1a4735d78eef916652862fa5169dbcbd6023934129c9"
+      "digest": "sha256:6c19c42a8e64741d84e8bda3aee2a2a5b53f4aeeebbfcd78042207d2235623a2"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-membership",
