@@ -1,6 +1,6 @@
 import "./organization-drawers.css";
 import "./agency-branding-drawer.css";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Alert,
   Button,
@@ -17,6 +17,8 @@ import {
 } from "antd";
 import {
   BrandLogoLockup,
+  themeVariables,
+  useAppearance,
   generatedBrandImage,
   copyrightStyleOptions,
   formatCopyright,
@@ -117,6 +119,7 @@ export function AgencyBrandingDrawer({
   agency: { id: string; name: string } | null;
   onClose: () => void;
 }) {
+  const { themeId } = useAppearance();
   const client = useRequestClient(),
     permissions = usePermissions(),
     [form] = Form.useForm<Draft>();
@@ -592,6 +595,7 @@ export function AgencyBrandingDrawer({
           <div
             key={String(dark)}
             className={`agency-brand-preview ${dark ? "dark" : "light"}`}
+            style={themeVariables(themeId, dark) as CSSProperties}
           >
             <span className="agency-brand-preview-label">
               {dark ? "深色背景" : "浅色背景"}

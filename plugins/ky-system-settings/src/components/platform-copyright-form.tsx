@@ -7,18 +7,19 @@ export function PlatformCopyrightForm({ form }: {
 }) {
   const brand = Form.useWatch("brand", form);
   const company = Form.useWatch("companyName", form);
+  const defaultHolder = company || brand?.name || "KyCRM";
   const style = Form.useWatch("copyrightStyle", form);
   return <>
     <Typography.Title level={5}>版权信息</Typography.Title>
     <Form.Item name={["brand", "copyrightHolder"]} label="版权署名（可选）"
-      extra="留空使用公司 / 平台主体名称。" rules={[{ max: 120 }]}>
+      extra={`留空使用默认版权署名：${defaultHolder}。`} rules={[{ max: 120 }]}>
       <Input placeholder="填写主体名称，不含©或年份" />
     </Form.Item>
     <Form.Item name="copyrightStyle" label="版权显示风格">
       <Select options={copyrightStyleOptions} />
     </Form.Item>
     <Typography.Paragraph type="secondary">
-      预览：{formatCopyright(brand?.copyrightHolder || company || brand?.name || "KyCRM", style || "standard")}
+      预览：{formatCopyright(brand?.copyrightHolder || defaultHolder, style || "standard")}
     </Typography.Paragraph>
   </>;
 }

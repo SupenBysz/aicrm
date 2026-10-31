@@ -3,7 +3,7 @@ import builtinMenuCatalog from "../../../shared/menucatalog/builtin.json";
 import { AppearanceProvider } from "./appearance-provider";
 import { PersonalPreferencesDrawer } from "./personal-preferences-drawer";
 import { useAppearance, appearanceAntdTheme } from "@ky/admin-core";
-import {WorkspaceBrandLogo} from "./workspace-brand-logo";
+import {WorkspaceBrandLogo, WorkspaceBrandProvider} from "./workspace-brand-logo";
 import {Presence} from "./presence";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
@@ -1123,6 +1123,7 @@ function WorkspaceLayout() {
     return (
       <CurrentUserContextProvider user={user}>
         <WorkspaceContextProvider workspace={currentWorkspace}>
+          <WorkspaceBrandProvider workspace={currentWorkspace}>
           <PluginInventoryProvider port={inventoryPort}>
           <PermissionContextProvider
             value={{
@@ -1136,6 +1137,7 @@ function WorkspaceLayout() {
             </Layout>
           </PermissionContextProvider>
           </PluginInventoryProvider>
+        </WorkspaceBrandProvider>
         </WorkspaceContextProvider>
       </CurrentUserContextProvider>
     );
@@ -1144,6 +1146,7 @@ function WorkspaceLayout() {
   return (
     <CurrentUserContextProvider user={user}>
       <WorkspaceContextProvider workspace={currentWorkspace}>
+          <WorkspaceBrandProvider workspace={currentWorkspace}>
         <PluginInventoryProvider port={inventoryPort}>
         <PermissionContextProvider
           value={{
@@ -1676,7 +1679,8 @@ function WorkspaceLayout() {
           </Layout>
         </PermissionContextProvider>
         </PluginInventoryProvider>
-      </WorkspaceContextProvider>
+      </WorkspaceBrandProvider>
+        </WorkspaceContextProvider>
     </CurrentUserContextProvider>
   );
 }

@@ -97,7 +97,7 @@ export function BasicInfoPage() {
             void message.error(`${fieldLabels[fieldName] ?? fieldName}：${reason}`);
           }}
         >
-          {["longLogoFontSize","longLogoFontFamily","longLogoFontWeight","shortLogoFontSize","shortLogoFontFamily","shortLogoFontWeight","brandLogoTextLong","brandLogoTextShort"].map(field=><Form.Item name={field} key={field} hidden><Input/></Form.Item>)}
+          {["companyName","longLogoFontSize","longLogoFontFamily","longLogoFontWeight","shortLogoFontSize","shortLogoFontFamily","shortLogoFontWeight","brandLogoTextLong","brandLogoTextShort"].map(field=><Form.Item name={field} key={field} hidden><Input/></Form.Item>)}
           <Tabs
             className="system-settings-tabs"
             activeKey={activeInfoTab}
@@ -135,9 +135,6 @@ export function BasicInfoPage() {
                 forceRender: true,
                 children: (
                   <div style={{ width: "100%", maxWidth: 720, padding: "0 16px" }}>
-                    <Form.Item label="公司 / 平台主体名称" name="companyName" rules={[{ max: 120, message: "最多120个字符" }]}>
-                      <Input placeholder="如 凯翼科技" />
-                    </Form.Item>
                     <Form.Item label="ICP 备案号" name="icpRecord">
                       <Input placeholder="如 京ICP备2026000001号" />
                     </Form.Item>

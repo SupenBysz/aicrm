@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
-import type { CopyrightStyle } from "@ky/admin-core";
+import { BrandIdentityProvider, type CopyrightStyle } from "@ky/admin-core";
 
 export interface PlatformProfile {
  brand?: { name?: string; applicationName?: string; iconText?: string; iconId?: string; wordmarkId?: string; wordmarkDarkId?: string; showAiIcon?: boolean; wordmarkGenerated?: boolean; wordmarkDarkGenerated?: boolean; copyrightHolder?: string };
@@ -154,7 +154,9 @@ export function PlatformProfileProvider({ children }: PropsWithChildren) {
 
   return (
     <PlatformProfileContext.Provider value={{ ...profile, ...resolved, ready,error,refresh }}>
-      {ready?children:<div role="status" style={{padding:24}}>{error?<button onClick={refresh}>品牌加载失败，重试</button>:"正在加载…"}</div>}
+      {ready?<BrandIdentityProvider brand={{name:resolved.logoTextLong, applicationName:profile.brand?.applicationName, iconText:profile.brand?.iconText, showAiIcon:profile.brand?.showAiIcon,
+        wordmark:profile.brand?.wordmarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkId)}:undefined,
+        wordmarkDark:profile.brand?.wordmarkDarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkDarkId)}:undefined}}>{children}</BrandIdentityProvider>:<div role="status" style={{padding:24}}>{error?<button onClick={refresh}>品牌加载失败，重试</button>:"正在加载…"}</div>}
     </PlatformProfileContext.Provider>
   );
 }

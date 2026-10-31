@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Button, Form, Input, Switch, Typography, Upload, message } from "antd";
-import { BrandLogoLockup, generatedBrandImage, useRequestClient, type RequestClient } from "@ky/admin-core";
+import { BrandLogoLockup, generatedBrandImage, themeVariables, useAppearance, useRequestClient, type RequestClient } from "@ky/admin-core";
 import type { PlatformProfile } from "../api";
 import "../../../../packages/ky-admin-core/src/brand-form.css";
 const assetPath = "/api/v1/platform/platform-profile/assets";
@@ -33,6 +33,7 @@ export function platformBrandFormValues(p:PlatformProfile):PlatformProfile {
 }
 export function PlatformBrandForm({form,disabled,onBusyChange,onDirty}:{form:ReturnType<typeof Form.useForm<PlatformProfile>>[0];disabled:boolean;onBusyChange:(busy:boolean)=>void;onDirty:()=>void}) {
  const client=useRequestClient();
+ const {themeId}=useAppearance();
  const brand=Form.useWatch("brand",form);
  const [previews,setPreviews]=useState<Record<string,string>>({});
  const name=brand?.name || "KyCRM", iconText=brand?.iconText || name;
@@ -74,7 +75,7 @@ export function PlatformBrandForm({form,disabled,onBusyChange,onDirty}:{form:Ret
   <Form.Item name={["brand","showAiIcon"]} label="显示 AI 图标" valuePropName="checked"><Switch checkedChildren="显示" unCheckedChildren="隐藏"/></Form.Item>
   <section className="agency-brand-previews"><Typography.Text strong>应用 LOGO 预览</Typography.Text>
    <Typography.Paragraph type="secondary">按后台顶部实际尺寸展示；窄屏可横向查看完整效果。</Typography.Paragraph>
-   {[false,true].map(dark=><div key={String(dark)} className={`agency-brand-preview ${dark?"dark":"light"}`}><span className="agency-brand-preview-label">{dark?"深色背景":"浅色背景"}</span><div className="agency-brand-preview-scroll"><div className="agency-brand-preview-header">
+   {[false,true].map(dark=><div key={String(dark)} className={`agency-brand-preview ${dark?"dark":"light"}`} style={themeVariables(themeId,dark) as CSSProperties}><span className="agency-brand-preview-label">{dark?"深色背景":"浅色背景"}</span><div className="agency-brand-preview-scroll"><div className="agency-brand-preview-header">
     <BrandLogoLockup compactInset={6} className="agency-brand-lockup" showAIIcon={brand?.showAiIcon===true}><img className="agency-brand-wordmark" src={image(dark?"wordmarkDark":"wordmark")} alt="品牌文字"/></BrandLogoLockup>
     <div className="agency-brand-preview-modes" aria-label="顶部导航位置参考"><span>工作台</span><span>管理中心</span></div>
    </div></div></div>)}

@@ -53,6 +53,8 @@ template/   从本工程梳理出的衍生模板资产和解决方案级 skill�
 
 ## 规范文档
 
+- 产品交互设计与项目适配：[规范入口](docs/design/README.md)，包含设计总则、状态验收矩阵及设计评审/适配交付清单；新增和修改 UI 时与品牌、抽屉、组件复用专题共同执行。
+
 当前阶段基线以 `docs/` 下的文档为准，重点文档包括：
 
 - 组件中心：[完整迭代方案](docs/component-center/组件中心完整迭代方案.md)，覆盖真实组件展示、首期清单、模拟预览隔离、AI复用索引、项目Skill规则及分批验收；首期已部署准生产，见[实施记录](docs/component-center/实施与验证记录.md)与[发布记录](docs/deployment/2026-10-30-component-center-release.md)；入口为管理中心→系统设置→组件中心。

@@ -181,3 +181,11 @@ scripts/create_project_from_template.sh \
 - `references/template-extraction.md`。
 
 任一 docs 规范发生变化时，检查是否需要同步对应 reference。
+
+## 品牌与 AI 图标适配（强制）
+
+派生项目适配品牌、导航、登录或主题预览前，必须读取并随模板保留 [品牌 LOGO 与 AI 图标适配规范](../../../../docs/branding/品牌LOGO与AI图标适配规范.md)。复用 `BrandLogo` 与 `BrandIdentityProvider`，禁止普通字体 AI 替代图标、写死 Kysion 主题预览、忽略 AI 显示开关或把应用显示名称重复拼入 Logo；完成该规范中的适配及验收清单。
+
+## 产品交互适配
+
+派生项目必须保留 `docs/design/` 并按[设计与适配规范入口](../../../../docs/design/README.md)检查信息架构、作用域、页面骨架、保存/发布语义、主题/响应式、可访问性与异常恢复。使用该目录的状态矩阵及交付清单记录新项目实际结果；仅替换品牌、编译成功或基座已部署不代表新项目已完成交互适配。

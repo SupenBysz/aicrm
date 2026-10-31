@@ -1496,13 +1496,13 @@ export const catalog = [
   },
   {
     "id": "brand-logo",
-    "title": "品牌组合 BrandLogoLockup",
+    "title": "完整品牌 BrandLogo",
     "aliases": [
-      "BrandLogoLockup"
+      "BrandLogo", "BrandIdentityProvider", "BrandLogoLockup"
     ],
     "category": "brand",
     "kind": "component",
-    "summary": "图形与AI后缀按宽度缩放；16px为容器规范。",
+    "summary": "按实际品牌亮暗素材组合 Logo 与可选 AI 图标；统一限制宽高，容器保留16px。",
     "keywords": [
       "brand",
       "品牌组合 BrandLogoLockup"
@@ -1511,7 +1511,8 @@ export const catalog = [
     "environment": "web_and_client",
     "owner": "@ky/admin-core / 组件中心组合",
     "sourcePaths": [
-      "packages/ky-admin-core/src/brand-ai-suffix.tsx"
+      "packages/ky-admin-core/src/brand-ai-suffix.tsx",
+      "packages/ky-admin-core/src/brand-identity.tsx"
     ],
     "dependencies": [
       "react",
@@ -1541,20 +1542,20 @@ export const catalog = [
     ],
     "replacementId": null,
     "package": "@ky/admin-core",
-    "exportName": "BrandLogoLockup",
+    "exportName": "BrandLogo",
     "importPath": "@ky/admin-core",
     "api": [
       {
-        "name": "children",
-        "type": "ReactNode",
+        "name": "brand",
+        "type": "BrandIdentity",
         "default": "必填",
-        "description": "品牌文字或图片"
+        "description": "当前品牌文字、亮暗图片与AI开关"
       },
       {
-        "name": "showAIIcon",
+        "name": "dark",
         "type": "boolean",
         "default": "必填",
-        "description": "是否附加独立AI后缀"
+        "description": "选择对应亮暗文字素材"
       },
       {
         "name": "maxHeight",
@@ -1597,7 +1598,8 @@ export const catalog = [
     "environment": "web_and_client",
     "owner": "@ky/admin-core / 组件中心组合",
     "sourcePaths": [
-      "packages/ky-admin-core/src/brand-ai-suffix.tsx"
+      "packages/ky-admin-core/src/brand-ai-suffix.tsx",
+      "packages/ky-admin-core/src/brand-identity.tsx"
     ],
     "dependencies": [
       "react",
@@ -1664,7 +1666,8 @@ export const catalog = [
     "owner": "@ky/admin-core / 组件中心组合",
     "sourcePaths": [
       "packages/ky-admin-core/src/theme/controls.tsx",
-      "packages/ky-admin-core/src/theme/controls.css"
+      "packages/ky-admin-core/src/theme/controls.css",
+      "packages/ky-admin-core/src/brand-identity.tsx"
     ],
     "dependencies": [
       "react",

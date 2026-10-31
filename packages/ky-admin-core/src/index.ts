@@ -145,3 +145,5 @@ export * from "./theme/controls";
 export * from "./theme/antd-theme";
 
 export * from "./list-overview";
+
+export * from "./brand-identity";
