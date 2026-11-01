@@ -115,7 +115,7 @@ export function BrandLogoLockup({ children, showAIIcon, maxHeight = 32, compactI
     resize();
     return () => { active = false; observer.disconnect(); el.removeEventListener("load", resize, true); document.fonts?.removeEventListener("loadingdone", fontResize); };
   }, [children, showAIIcon, maxHeight, compactInset, fitText]);
-  return <span ref={ref} className={className} style={{display:"inline-flex",alignItems:"center",width:"100%",minWidth:0,lineHeight:1,transform:`translateX(${compactInset}px)`}}>
+  return <span ref={ref} className={className} style={{display:"inline-flex",alignItems:"center",width:"100%",minWidth:0,lineHeight:1,whiteSpace:"nowrap",transform:`translateX(${compactInset}px)`}}>
     {children}<BrandAISuffix visible={showAIIcon} height="calc(var(--brand-lockup-height,1em) * .92)" />
   </span>;
 }

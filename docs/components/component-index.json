@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "contentHash": "436bffd3a65ecf26b76b525b513f9cf95c2eee60ed620798f74d833c3050ad4e",
+  "contentHash": "46458c350b05b1d48eec88fe191260bb37b02c4447b2fd384aa0a969ae0c6824",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "a7a992041d2be006b763d1c32026698d475991ae8afabc266416f0bb4ccfedc1",
-    "apps/ky-admin-host/src/styles.css": "f8410daa8f68c31b38203c310950598218573a110b20a88b11e4c779ea464ecb",
+    "apps/ky-admin-host/src/styles.css": "2b75e82ccde1bd9b09b824bc735128f0524d16cacf2dd05df5f3669e95a9e631",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
-    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "1bfb96de7be23945dc9645ea55bddd34a9961e07bece7dc3fc3ab43561c5e376",
+    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "8269f535ec857492cc74df95607e7b3d95c44fc4deacf37884aa737cbb209ba3",
     "packages/ky-admin-core/src/brand-form.css": "19537e4aa0a8cf248b2e850af5f34d79c6a39fa3144e88b1ab1dd2ca152a48e6",
     "packages/ky-admin-core/src/brand-identity.tsx": "0ab7a6792f3a00231abd07011ae91fefa26b65ced29a2cbcfaf3445b1055316e",
     "packages/ky-admin-core/src/brand-navigation-preview.tsx": "2afddd8ccfdcdf18d50e1016b17a6112c11bc71b325b23144bf9110efe413104",
