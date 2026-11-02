@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "contentHash": "436bffd3a65ecf26b76b525b513f9cf95c2eee60ed620798f74d833c3050ad4e",
+  "contentHash": "1e95a3deabd4f13e2434cd5aa364be81c46c0cd82d015974ac1de3f8ee0bec8c",
   "sourceHashes": {
-    "apps/ky-admin-host/src/app.tsx": "a7a992041d2be006b763d1c32026698d475991ae8afabc266416f0bb4ccfedc1",
-    "apps/ky-admin-host/src/styles.css": "f8410daa8f68c31b38203c310950598218573a110b20a88b11e4c779ea464ecb",
+    "apps/ky-admin-host/src/app.tsx": "8fe506fdbe48d77eabbd0570d2a04d425c976d716746c883c2d9b1a0c9d13ed3",
+    "apps/ky-admin-host/src/styles.css": "9817cfee6c79e3a6760059d13564fd188bff18371772bfddfd24523d1b3fa387",
     "packages/ky-admin-core/src/batch-actions.ts": "3df3c8efa89f1e1a15848db4537a812cf1e77b10514731d8d815caf6023053de",
-    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "1bfb96de7be23945dc9645ea55bddd34a9961e07bece7dc3fc3ab43561c5e376",
+    "packages/ky-admin-core/src/brand-ai-suffix.tsx": "8269f535ec857492cc74df95607e7b3d95c44fc4deacf37884aa737cbb209ba3",
     "packages/ky-admin-core/src/brand-form.css": "19537e4aa0a8cf248b2e850af5f34d79c6a39fa3144e88b1ab1dd2ca152a48e6",
     "packages/ky-admin-core/src/brand-identity.tsx": "0ab7a6792f3a00231abd07011ae91fefa26b65ced29a2cbcfaf3445b1055316e",
     "packages/ky-admin-core/src/brand-navigation-preview.tsx": "2afddd8ccfdcdf18d50e1016b17a6112c11bc71b325b23144bf9110efe413104",
@@ -13,7 +13,7 @@
     "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
     "packages/ky-admin-core/src/theme/controls.css": "adb872bb534662c2bec8c46cea7ba34742e3f0aae49fe11ec3570b712b23b82e",
     "packages/ky-admin-core/src/theme/controls.tsx": "590e82304b19dfe0fb41dc648d93ce91bcdab8311b97b93b0a08caeb1580eb24",
-    "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379",
+    "packages/ky-admin-core/src/theme/tokens.ts": "3f464879bc87271461a12770c56e437b432f9fb80959ce9d5f00938792193c7a",
     "packages/ky-markdown/src/editor.tsx": "3cbee8b79fa6027f12f7d9432e62270f4bfe1dae230f890aef16403640814feb",
     "packages/ky-markdown/src/index.tsx": "9ac9f6204a823029247ee129977a1ce298a9671bf6e0813396c0a3254a6635c9",
     "packages/ky-markdown/src/style.css": "67320cf0742f2f1062dde4d656042ffdbad5a42a39a68a48f84c87629266c9cb",
@@ -1691,7 +1691,7 @@
       ],
       "category": "brand",
       "kind": "component",
-      "summary": "四主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
+      "summary": "十套主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
       "keywords": [
         "brand",
         "外观选择 AppearanceControls"

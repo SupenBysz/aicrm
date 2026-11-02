@@ -1658,7 +1658,7 @@ export const catalog = [
     ],
     "category": "brand",
     "kind": "component",
-    "summary": "四主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
+    "summary": "十套主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
     "keywords": [
       "brand",
       "外观选择 AppearanceControls"
