@@ -1,10 +1,12 @@
 import { useLayoutEffect, useState } from "react";
 import { Alert, App, Button, Drawer, Space, Spin, Switch, Tooltip, Typography } from "antd";
 import { AppearanceControls, drawerWidths, useAppearance } from "@ky/admin-core";
+import { useWorkspacePreferences } from "./workspace-preferences";
 
 /** Account settings live in the root provider; this view owns visibility only. */
 export function PersonalPreferencesDrawer({open,onClose}:{open:boolean;onClose:()=>void}) {
   const appearance=useAppearance();
+  const workspacePreferences=useWorkspacePreferences();
   const {modal}=App.useApp();
   const [bounds,setBounds]=useState({top:0,bottom:0});
   useLayoutEffect(()=>{
@@ -32,8 +34,8 @@ export function PersonalPreferencesDrawer({open,onClose}:{open:boolean;onClose:(
   return <Drawer title="个人偏好" open={open} onClose={onClose} width={drawerWidths.standardForm}
     rootClassName="personal-preferences-drawer" rootStyle={{top:bounds.top,bottom:bounds.bottom,height:"auto"}}
     styles={{section:{height:"100%",display:"flex",flexDirection:"column",minHeight:0},header:{flexShrink:0},body:{flex:1,minHeight:0,overflowY:"auto"}}}>
-    {!appearance.enabled?<Alert type="info" showIcon title="外观主题已临时停用" description="当前使用经典金并跟随系统，已保存的个人偏好会保留。"/>:
     <Space orientation="vertical" size={24} style={{width:"100%"}}>
+      {!appearance.enabled?<Alert type="info" showIcon title="外观主题已临时停用" description="当前使用经典金并跟随系统，已保存的个人偏好会保留。"/>:<>
       <div><Typography.Title level={5} style={{marginTop:0}}>外观</Typography.Title><Typography.Paragraph type="secondary">只影响当前账号。选择后立即生效并自动保存，关闭窗口不会撤销修改。</Typography.Paragraph></div>
       {appearance.loading&&<Space role="status"><Spin size="small"/><Typography.Text>正在读取个人偏好…</Typography.Text></Space>}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16}}>
@@ -47,6 +49,14 @@ export function PersonalPreferencesDrawer({open,onClose}:{open:boolean;onClose:(
         {appearance.dirty&&<Button disabled={busy||appearance.syncState==="saving"} onClick={appearance.retry}>重试同步</Button>}
         <Tooltip title={!appearance.canReload?"请等待同步完成，或先重试确认上次保存结果":undefined}><Button disabled={!appearance.canReload} onClick={reload}>重新读取服务器设置</Button></Tooltip>
       </Space>
-    </Space>}
+      </>}
+      <div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:16}}>
+          <Typography.Text strong>显示面包屑</Typography.Text>
+          <Switch aria-label="显示面包屑" checked={workspacePreferences.showBreadcrumb} onChange={workspacePreferences.setShowBreadcrumb}/>
+        </div>
+        <Typography.Text type="secondary">关闭后隐藏页面路径，并在导航栏边缘显示圆形菜单按钮。</Typography.Text>
+      </div>
+    </Space>
   </Drawer>;
 }
