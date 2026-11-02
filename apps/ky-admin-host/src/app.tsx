@@ -2,6 +2,7 @@ import {syncDesktopSession} from "./desktop-session-sync";
 import builtinMenuCatalog from "../../../shared/menucatalog/builtin.json";
 import { AppearanceProvider } from "./appearance-provider";
 import { PersonalPreferencesDrawer } from "./personal-preferences-drawer";
+import { useWorkspacePreferences } from "./workspace-preferences";
 import { useAppearance, appearanceAntdTheme } from "@ky/admin-core";
 import {WorkspaceBrandLogo, WorkspaceBrandProvider} from "./workspace-brand-logo";
 import {Presence} from "./presence";
@@ -520,6 +521,7 @@ function WorkspaceLayout() {
   // Use the cached bootstrap for the first paint, then refresh it once on entry
   // so newly granted permissions/menus appear without forcing a re-login.
   const [bootstrapState, setBootstrapState] = useState(() => loadBootstrap());
+  const workspacePreferences = useWorkspacePreferences(bootstrapState?.user.id);
   useEffect(() => {
     let active = true;
     refreshBootstrap()
@@ -1406,21 +1408,34 @@ function WorkspaceLayout() {
                 ref={appContentRef}
                 style={{ marginLeft: isDesktop ? sidebarWidth : 0 }}
               >
-                <div className="workspace-breadcrumb">
-                  {isDesktop ? (
-                    <Tooltip title={effectiveSidebarCollapsed ? "展开导航" : "收起导航"} placement="bottom">
-                      <button
-                        aria-label={effectiveSidebarCollapsed ? "展开导航" : "收起导航"}
-                        className="workspace-breadcrumb-toggle"
-                        onClick={handleToggleSidebarCollapsed}
-                        type="button"
-                      >
-                        {effectiveSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-                      </button>
-                    </Tooltip>
-                  ) : null}
-                  <Breadcrumb className="workspace-breadcrumb-trail" items={breadcrumbItems} />
-                </div>
+                {workspacePreferences.showBreadcrumb ? (
+                  <div className="workspace-breadcrumb">
+                    {isDesktop ? (
+                      <Tooltip title={effectiveSidebarCollapsed ? "展开导航" : "收起导航"} placement="bottom">
+                        <button
+                          aria-label={effectiveSidebarCollapsed ? "展开导航" : "收起导航"}
+                          className="workspace-breadcrumb-toggle"
+                          onClick={handleToggleSidebarCollapsed}
+                          type="button"
+                        >
+                          {effectiveSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                        </button>
+                      </Tooltip>
+                    ) : null}
+                    <Breadcrumb className="workspace-breadcrumb-trail" items={breadcrumbItems} />
+                  </div>
+                ) : (
+                  <Tooltip title={isDesktop ? (effectiveSidebarCollapsed ? "展开导航" : "收起导航") : "打开导航"} placement="right">
+                    <button
+                      aria-label={isDesktop ? (effectiveSidebarCollapsed ? "展开导航" : "收起导航") : "打开导航"}
+                      className={`workspace-menu-float${isDesktop ? " workspace-menu-float--desktop" : " workspace-menu-float--mobile"}`}
+                      onClick={isDesktop ? handleToggleSidebarCollapsed : () => setMobileMenuOpen(true)}
+                      type="button"
+                    >
+                      {isDesktop ? (effectiveSidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />) : <MenuOutlined />}
+                    </button>
+                  </Tooltip>
+                )}
                 {terminalWindowMode ? nestedOutlet : <>
                   <WorkspaceAreaRoutePane
                     key={`${areaScopeKey}:workbench`}
