@@ -1,7 +1,7 @@
 import { PublicDocumentLinks } from "../public-document-links";
 import {useQuery} from "@tanstack/react-query";
 import {requestClient} from "../remote-api";
-import { BrandLogo, useAppearance, type CopyrightStyle } from "@ky/admin-core";
+import { BrandLogo, useAppearance, useBrandIdentity, type CopyrightStyle } from "@ky/admin-core";
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from "antd";
 import { useState,useLayoutEffect } from "react";
@@ -16,17 +16,16 @@ const PASSWORD_MIN_LENGTH = 6;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const {dark}=useAppearance();
+  const {dark,loading:appearanceLoading}=useAppearance();
+  const platformBrand=useBrandIdentity();
   const profile=usePlatformProfile();
  const entry=useQuery({queryKey:["public-entry",window.location.host],retry:false,queryFn:()=>requestClient.request<{institution:boolean;brand?:{name:string;applicationName:string;copyrightHolder:string;copyrightStyle:CopyrightStyle;showAiIcon?:boolean;wordmarkGenerated?:boolean;wordmarkDark?:{url:string};wordmark?:{url:string}}}>("/api/v1/public/entry",{skipAuthRedirect:true})});
- const brand=entry.data?.institution?entry.data.brand:profile.brand?.name ? {
- name:profile.brand.name, applicationName:profile.brand.applicationName || profile.logoTextLong,
- copyrightHolder:profile.brand.copyrightHolder || profile.name, copyrightStyle:profile.copyrightStyle,
- showAiIcon:profile.brand.showAiIcon, wordmarkGenerated:profile.brand.wordmarkGenerated,
- wordmarkDark:profile.brand.wordmarkDarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkDarkId)}:undefined,
- wordmark:profile.brand.wordmarkId?{url:"/api/v1/public/platform-brand-assets/"+encodeURIComponent(profile.brand.wordmarkId)}:undefined
+ const brand=entry.data?.institution?entry.data.brand:platformBrand?{
+   ...platformBrand,
+   copyrightHolder:profile.brand?.copyrightHolder||profile.name,
+   copyrightStyle:profile.copyrightStyle
  }:undefined;
- const {icpRecord,refresh}=profile;const logoTextLong=brand?.name??profile.logoTextLong,companyName=brand?.copyrightHolder??profile.name,copyrightStyle=brand?.copyrightStyle??profile.copyrightStyle,ready=profile.ready&&entry.isSuccess&&(!entry.data.institution||!!brand),error=profile.error||entry.isError;
+ const {icpRecord,refresh}=profile;const logoTextLong=brand?.name??profile.logoTextLong,companyName=brand?.copyrightHolder??profile.name,copyrightStyle=brand?.copyrightStyle??profile.copyrightStyle,ready=profile.ready&&entry.isSuccess&&!appearanceLoading&&(!entry.data.institution||!!brand),error=profile.error||entry.isError;
   const [submitting, setSubmitting] = useState(false);
  useLayoutEffect(()=>{document.title=ready?`${logoTextLong} 后台`:"管理后台";return()=>{document.title="管理后台"}},[ready,logoTextLong]);
  if(!ready)return <div role="status" className="auth-page">{error?<Button onClick={()=>{refresh();void entry.refetch()}}>品牌加载失败，重试</Button>:"正在加载…"}</div>;
@@ -67,9 +66,9 @@ export function LoginPage() {
             <Col md={10} xs={24}>
               <div className="login-hero">
                 <div>
-                  <Typography.Text className="login-eyebrow" type="secondary">
-                    <BrandLogo brand={brand || {name:logoTextLong}} dark={dark} maxHeight={48}/>
-                  </Typography.Text>
+                  <div className="login-brand-lockup" aria-label={`${logoTextLong} 品牌标识`}>
+                    <BrandLogo className="login-brand-logo" brand={brand || {name:logoTextLong}} dark={dark} maxHeight={48}/>
+                  </div>
                   <Typography.Title className="login-title" level={1}>
                     后台登录
                   </Typography.Title>

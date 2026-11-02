@@ -4,6 +4,7 @@ import { AppearanceContext, APPEARANCE_SNAPSHOT_KEY, DEFAULT_APPEARANCE, applyAp
 import { loadBootstrap, loadSession } from "./app-store";
 import { requestClient } from "./remote-api";
 const KEY = "ky.admin.appearance.v1:";
+const LAST_PERSONAL_KEY = "ky.admin.appearance.last-personal.v1";
 const inherited = (): AppearanceValue => ({ schemaVersion: 1, source: "platform", themeId: "", mode: "", revision: 0 });
 function read(key: string): unknown { try {
     return JSON.parse(localStorage.getItem(key) ?? "null");
@@ -19,12 +20,29 @@ catch {
     return false;
 } }
 function identity() { try { return loadSession() ? loadBootstrap()?.user.id ?? "anonymous" : "anonymous"; } catch { return "anonymous"; } }
+function readLastPersonal(): AppearanceValue | null {
+    const remembered=normalizeAppearance(read(LAST_PERSONAL_KEY),true);
+    if(remembered?.source==="personal")return remembered;
+    const matches:AppearanceValue[]=[];
+    try {
+        for(let index=0;index<localStorage.length;index++){
+            const key=localStorage.key(index);
+            if(!key?.startsWith(KEY)||key===KEY+"platform"||key===KEY+"anonymous")continue;
+            const cached=read(key) as {value?:unknown}|null;
+            const value=normalizeAppearance(cached?.value,true);
+            if(value?.source==="personal")matches.push(value);
+        }
+    } catch { return null; }
+    if(matches.length!==1)return null;
+    write(LAST_PERSONAL_KEY,matches[0]);
+    return matches[0];
+}
 export function AppearanceProvider({ children }: PropsWithChildren) {
     const [account, setAccount] = useState(identity);
     const [platformPreview, setPlatformPreview] = useState<AppearanceValue | null>(null);
     const [preference, setPreference] = useState<AppearanceValue>(() => {
         const cached=read(KEY+account) as {value?:unknown}|null;
-        const value=normalizeAppearance(cached?.value,true);
+        const value=normalizeAppearance(cached?.value,true) ?? (account==="anonymous"?readLastPersonal():null);
         if(value)return value;
         try{const old=localStorage.getItem("ky.admin.colorScheme.v1");if(!localStorage.getItem("ky.admin.appearance.migrated.v1")&&(old==="light"||old==="dark"))return {...inherited(),source:"personal",themeId:"classic-gold",mode:old};}catch{}
         return inherited();
@@ -54,7 +72,11 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
     const running = useRef<{
         owner: string;
     } | null>(null);
-    function cache(p: AppearanceValue, isDirty: boolean) { write(KEY + current.current.account, { value: p, dirty: isDirty }); }
+    function cache(p: AppearanceValue, isDirty: boolean) {
+        write(KEY + current.current.account, { value: p, dirty: isDirty });
+        if(p.source==="personal")write(LAST_PERSONAL_KEY,p);
+        else try{localStorage.removeItem(LAST_PERSONAL_KEY)}catch{}
+    }
     async function flush() {
         const state = current.current;
         if (identity() !== state.account || running.current?.owner === state.account || reading.current || !state.dirty || !state.ready || state.blocked || state.account === "anonymous")
@@ -167,11 +189,12 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
             dirty?: boolean;
             legacy?: boolean;
         } | null;
-        let p = normalizeAppearance(cached?.value, true) ?? inherited();
+        const remembered=account==="anonymous"?readLastPersonal():null;
+        let p = normalizeAppearance(cached?.value, true) ?? remembered ?? inherited();
         let pending = !!cached?.dirty;
         let legacy = !!cached?.legacy;
         // Legacy device choice is never uploaded as an account preference.
-        if (!cached) {
+        if (!cached && !remembered) {
             try {
                 const old = localStorage.getItem("ky.admin.colorScheme.v1");
                 if (!localStorage.getItem("ky.admin.appearance.migrated.v1") && (old === "light" || old === "dark")) {
@@ -228,7 +251,7 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
             clearTimeout(timer.current); };
     }, []);
     const enabled = import.meta.env.VITE_APPEARANCE_DISABLED !== "1";
-    const effective = !enabled ? DEFAULT_APPEARANCE : platformPreview ?? (preference.source === "personal" ? preference : platform);
+    const effective = !enabled ? DEFAULT_APPEARANCE : platformPreview ?? (preference.source === "personal" ? preference : account === "anonymous" ? DEFAULT_APPEARANCE : platform);
     const themeId = (effective.themeId || "classic-gold") as ThemeId;
     const mode = (effective.mode || "system") as AppearanceMode;
     const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
@@ -250,6 +273,8 @@ export function AppearanceProvider({ children }: PropsWithChildren) {
         setPreference(p);
         setDirty(current.current.dirty);
         const persisted = write(KEY + current.current.account, { value: p, dirty: current.current.dirty });
+        if(p.source==="personal")write(LAST_PERSONAL_KEY,p);
+        else try{localStorage.removeItem(LAST_PERSONAL_KEY)}catch{}
         setStatus(persisted ? (current.current.account === "anonymous" ? "已在本机保存" : "等待同步…") : "无法本地保存，当前仅在内存生效");
         if (timer.current)
             clearTimeout(timer.current);

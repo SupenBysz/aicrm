@@ -1257,11 +1257,11 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 }
 
 .login-shell {
-  --login-accent-rgb: 212, 154, 61;
+  --login-accent-rgb: var(--admin-accent-rgb);
   background:
-    radial-gradient(ellipse 58% 76% at 4% 2%, rgba(255, 252, 247, 0.94) 0%, rgba(255, 252, 247, 0) 72%),
-    radial-gradient(ellipse 52% 70% at 98% 96%, rgba(var(--login-accent-rgb), 0.17) 0%, rgba(var(--login-accent-rgb), 0) 76%),
-    linear-gradient(145deg, #fbf7ef 0%, #f1e6d8 48%, #efe1cf 100%);
+    radial-gradient(ellipse 58% 76% at 4% 2%, var(--admin-surface) 0%, transparent 72%),
+    radial-gradient(ellipse 52% 70% at 98% 96%, var(--admin-accent-soft) 0%, transparent 76%),
+    var(--admin-content-bg);
   display: grid;
   isolation: isolate;
   overflow: hidden;
@@ -1284,7 +1284,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .login-shell::before {
   animation: aicrm-login-drift-primary 24s ease-in-out infinite alternate;
-  background: rgba(var(--login-accent-rgb), 0.2);
+  background: var(--admin-accent-soft);
   height: min(52vw, 560px);
   left: -14vw;
   top: -20vw;
@@ -1294,7 +1294,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 
 .login-shell::after {
   animation: aicrm-login-drift-secondary 30s ease-in-out infinite alternate;
-  background: rgba(255, 252, 247, 0.76);
+  background: var(--admin-surface);
   bottom: -26vw;
   height: min(58vw, 620px);
   right: -14vw;
@@ -1316,13 +1316,13 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   background: var(--admin-surface-solid);
   border-color: var(--admin-stroke);
   border-radius: 16px;
-  box-shadow: 0 24px 64px rgba(151, 115, 62, 0.16);
+  box-shadow: var(--admin-shadow-soft);
   overflow: hidden;
   width: 100%;
 }
 
 .login-hero {
-  background: linear-gradient(145deg, var(--admin-shell-light-nav), rgba(241, 230, 216, 0.96));
+  background: linear-gradient(145deg, var(--admin-surface), var(--admin-surface-soft));
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1336,6 +1336,22 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.login-brand-lockup {
+  align-items: center;
+  display: flex;
+  height: 56px;
+  margin-bottom: 20px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.login-brand-logo {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .login-title.ant-typography {
@@ -1442,7 +1458,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
   border-radius: 6px;
   box-shadow: none;
   font-size: 14px;
-  color: #34281a;
+  color: var(--admin-on-primary);
   font-weight: 600;
   height: 40px;
 }
@@ -1450,23 +1466,7 @@ body.aicrm-desktop-window-chrome-enabled .desktop-lock-card * {
 .login-submit.ant-btn:hover,
 .login-submit.ant-btn:focus {
   background: color-mix(in srgb, var(--admin-accent) 86%, #ffffff);
-  color: #34281a;
-}
-
-:root[data-admin-theme="dark"] .login-shell {
-  --login-accent-rgb: 255, 212, 125;
-  background:
-    radial-gradient(ellipse 58% 76% at 4% 2%, rgba(255, 212, 125, 0.14) 0%, rgba(255, 212, 125, 0) 72%),
-    radial-gradient(ellipse 52% 70% at 98% 96%, rgba(255, 212, 125, 0.12) 0%, rgba(255, 212, 125, 0) 76%),
-    linear-gradient(145deg, #15130f 0%, #090909 48%, #050505 100%);
-}
-
-:root[data-admin-theme="dark"] .login-hero {
-  background: linear-gradient(145deg, rgba(28, 27, 23, 0.98), rgba(15, 14, 12, 0.96));
-}
-
-:root[data-admin-theme="dark"] .login-shell::after {
-  background: rgba(255, 212, 125, 0.1);
+  color: var(--admin-on-primary);
 }
 
 :root[data-admin-theme="dark"] .workspace-selection-shell {
