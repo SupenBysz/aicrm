@@ -7,7 +7,7 @@ import { defaultsFor, filterCatalog, findComponent, normalizeQuery, resolvePrevi
 import "./component-center.css";
 import { PreviewFrame } from "../preview/frame";
 const modeNames={current:"跟随当前模式",light:"亮色",dark:"暗色",system:"模拟系统"};
-const themeOptions=[{value:"current",label:"跟随当前配色"},{value:"classic-gold",label:"经典金"},{value:"business-blue",label:"商务蓝"},{value:"jade-green",label:"翡翠绿"},{value:"graphite-cyan",label:"石墨青"}];
+const themeOptions=[{value:"current",label:"跟随当前配色"},{value:"classic-gold",label:"经典金"},{value:"business-blue",label:"商务蓝"},{value:"jade-green",label:"翡翠绿"},{value:"graphite-cyan",label:"石墨青"},{value:"violet-dusk",label:"暮云紫"},{value:"terracotta",label:"赤陶橙"},{value:"sky-mist",label:"天青蓝"},{value:"pine-forest",label:"松柏绿"},{value:"camellia-red",label:"山茶红"},{value:"slate-fog",label:"雾凇灰"}];
 function Source({id}:{id:string}) {
  const [source,setSource]=useState(""),[error,setError]=useState(false),[copied,setCopied]=useState(false),[retry,setRetry]=useState(0);
  useEffect(()=>{const controller=new AbortController();setSource("");setError(false);setCopied(false);void fetch(`/component-examples/${id}/usage.txt`,{credentials:"omit",signal:controller.signal}).then(async r=>{if(!r.ok||!r.headers.get("content-type")?.includes("text/plain"))throw new Error("source_unavailable");const text=await r.text();if(text.length>65536)throw new Error("source_oversize");if(!controller.signal.aborted)setSource(text)},()=>{if(!controller.signal.aborted)setError(true)}).catch(()=>{if(!controller.signal.aborted)setError(true)});return ()=>controller.abort()},[id,retry]);

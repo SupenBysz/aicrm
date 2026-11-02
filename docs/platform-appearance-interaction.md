@@ -9,7 +9,7 @@
 ## 设计与复用依据
 
 - 页面复用 `ListPageCard`，标题与主要保存操作同层；范围说明放在帮助提示中，避免常驻说明框挤占任务空间。
-- 复用 `AppearanceControls`、Ant Design 的 Radio、Button、Segmented、Modal、App message。四套主题采用两列选择卡，640 CSS px 以下变为单列；页面最大宽度1200px，正文保留内边距。
+- 复用 `AppearanceControls`、Ant Design 的 Radio、Button、Segmented、Modal、App message。支持的配色采用两列选择卡，640 CSS px 以下变为单列；页面最大宽度1200px，正文保留内边距。
 - 亮暗效果用现有 `themeVariables` 及系统语义 Token；代表性界面为无业务请求的静态色彩预览，不能产生真实设置操作。
 - 继续复用 `BrandLogoLockup` 与原 AI SVG；修复嵌套文字降级不能按高度/宽度缩放、直接文字过度放大的问题。圆点与文字的距离0.44em、圆点尺寸0.32em、圆点与 AI 间距0.16em，AI 几何与92%有效高度比例不变。
 - 品牌身份上下文、正式素材加载、品牌名称与图标开关的上游既有/并行改造不在此重复实现；本 PR 不更改品牌数据或自动剥离名称。主题卡中的品牌来源后续由该独立改造统一。

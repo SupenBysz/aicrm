@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contentHash": "53fbdcbb84fd2470c0afc97a98b92bed54ce9fafeced5ad1935ab163de102ccf",
+  "contentHash": "83d06e6bb964a0edda4547fc76e3673f482d5e315bcbed0fa6a47a3de4b72906",
   "sourceHashes": {
     "apps/ky-admin-host/src/app.tsx": "8fe506fdbe48d77eabbd0570d2a04d425c976d716746c883c2d9b1a0c9d13ed3",
     "apps/ky-admin-host/src/styles.css": "27a874f188aa94f841655058362f998bcb4184f53c46baa4c243df4184eee495",
@@ -13,7 +13,7 @@
     "packages/ky-admin-core/src/page-shell.tsx": "a15f8e64df45751f9bce72fbdad4730df2e3c2fc99ef81d56b2e9aa1802ca48c",
     "packages/ky-admin-core/src/theme/controls.css": "adb872bb534662c2bec8c46cea7ba34742e3f0aae49fe11ec3570b712b23b82e",
     "packages/ky-admin-core/src/theme/controls.tsx": "590e82304b19dfe0fb41dc648d93ce91bcdab8311b97b93b0a08caeb1580eb24",
-    "packages/ky-admin-core/src/theme/tokens.ts": "0bb262b0871aa1bda82104a4c8b6c90d45466b710c05180b71dad67e89d07379",
+    "packages/ky-admin-core/src/theme/tokens.ts": "3f464879bc87271461a12770c56e437b432f9fb80959ce9d5f00938792193c7a",
     "packages/ky-markdown/src/editor.tsx": "3cbee8b79fa6027f12f7d9432e62270f4bfe1dae230f890aef16403640814feb",
     "packages/ky-markdown/src/index.tsx": "9ac9f6204a823029247ee129977a1ce298a9671bf6e0813396c0a3254a6635c9",
     "packages/ky-markdown/src/style.css": "67320cf0742f2f1062dde4d656042ffdbad5a42a39a68a48f84c87629266c9cb",
@@ -1691,7 +1691,7 @@
       ],
       "category": "brand",
       "kind": "component",
-      "summary": "四主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
+      "summary": "十套主题与亮暗/系统选项，宽屏两列、窄屏单列；本例选择不保存真实偏好。",
       "keywords": [
         "brand",
         "外观选择 AppearanceControls"
