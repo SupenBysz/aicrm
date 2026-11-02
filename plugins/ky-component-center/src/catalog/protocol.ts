@@ -1,5 +1,5 @@
 import { catalog, categories } from "./metadata";
-export const themes = ["classic-gold", "business-blue", "jade-green", "graphite-cyan"] as const;
+export const themes = ["classic-gold", "business-blue", "jade-green", "graphite-cyan", "violet-dusk", "terracotta", "sky-mist", "pine-forest", "camellia-red", "slate-fog"] as const;
 export type DemoArgs = { label: string; count: number; disabled: boolean; showAI: boolean; state: string };
 export interface PreviewConfig { version: 1; kind: "config"; generation: string; componentId: string; exampleId: string; themeId: typeof themes[number]; mode: "light"|"dark"|"system"; systemDark: boolean; reset: number; args: DemoArgs }
 export const findComponent = (id: string) => catalog.find(item => item.id === id);
