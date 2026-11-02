@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { App, Button, Empty, Segmented, Space, Tooltip, Typography } from "antd";
 import { QuestionCircleOutlined } from "@ant-design/icons";
-import { AppearanceControls, DEFAULT_APPEARANCE, ListPageCard, themeVariables, useAppearance, useCurrentUser, validAppearance, usePermissions, useRequestClient, type AppearanceValue } from "@ky/admin-core";
+import { AppearanceControls, BrandLogo, DEFAULT_APPEARANCE, ListPageCard, themeVariables, useAppearance, useBrandIdentity, useCurrentUser, validAppearance, usePermissions, useRequestClient, type AppearanceValue } from "@ky/admin-core";
 import "./appearance-page.css";
 /** Draft selection changes only the preview; platform settings change on save. */
 export function AppearancePage() {
-    const appearance = useAppearance(), client = useRequestClient(), permission = usePermissions();
+    const appearance = useAppearance(), client = useRequestClient(), permission = usePermissions(), brand = useBrandIdentity();
     const { message, modal } = App.useApp(), user = useCurrentUser();
     const key = "ky.appearance.platform-draft.v1:" + (user?.id ?? "anonymous");
     const [initial] = useState(() => { try {
@@ -97,7 +97,10 @@ export function AppearancePage() {
   <section className="platform-appearance-preview">
    <div className="platform-appearance-preview-title"><Typography.Text strong>界面预览</Typography.Text><Segmented aria-label="预览明暗" value={previewDark ? "dark" : "light"} options={[{ label: "亮色", value: "light" }, { label: "暗色", value: "dark" }]} onChange={v => setPreviewDark(v === "dark")}/></div>
    <div className="appearance-window" style={{ ...themeVariables(draft.themeId, previewDark), color: "var(--admin-text)", colorScheme: previewDark ? "dark" : "light" } as CSSProperties} role="img" aria-label={`${previewDark ? "暗色" : "亮色"}界面效果`}>
-    <div className="appearance-window-header"><span style={{ color: "var(--admin-accent)", fontWeight: 600 }}>管理中心</span></div>
+    <div className="appearance-window-header">
+     <div className="appearance-window-brand">{brand ? <BrandLogo brand={brand} dark={previewDark} maxHeight={36} compactInset={4}/> : <span>管理后台</span>}</div>
+     <div className="appearance-window-modes" aria-label="工作区切换预览"><span>工作台</span><span className="is-active">管理中心</span></div>
+    </div>
     <div className="appearance-window-content"><div className="appearance-window-nav"><span>系统设置</span><span>通知中心</span><span>身份管理</span></div><div className="appearance-window-body">
      <div className="appearance-window-toolbar"><strong>通知设置</strong><span style={{ background: "var(--admin-accent)", color: "var(--admin-on-primary)", padding: "7px 14px", borderRadius: 6 }}>保存设置</span></div>
      <span className="appearance-window-field">系统通知</span>
