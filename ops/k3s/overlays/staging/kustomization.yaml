@@ -9,7 +9,7 @@
     {
       "name": "ghcr.io/supenbysz/kycrm-web",
       "newName": "ghcr.io/supenbysz/kycrm-web",
-      "digest": "sha256:ff267bc24ce35d4fad2e86f296407c4bddad8a10e731f65c9599370817d75182"
+      "digest": "sha256:16b781975b1351193df267f944fe0207d607d036b0a029ed6ab33278eec18ce7"
     },
     {
       "name": "ghcr.io/supenbysz/kycrm-auth",
